@@ -55,6 +55,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import sklearn
+from lightgbm import LGBMClassifier
 from packaging.version import Version
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
@@ -400,18 +401,24 @@ def predict_proba(model: Any, matrix: FeatureMatrix) -> np.ndarray:
     """Return a (n, 3) array of class probabilities in `CLASSES` order.
 
     For the sklearn baseline, the pipeline already returns a (n, 3)
-    array in CLASSES order (we set the LabelEncoder via the column
-    order; sklearn's `LogisticRegression.classes_` aligns with this).
+    array in CLASSES order (the column order is pinned by
+    `FEATURE_COLUMNS` and `LogisticRegression.classes_` is sorted
+    alphabetically — L < R < C, but the coefficients are fit on the
+    column order we set, so the output is in CLASSES order by
+    construction).
 
-    For LightGBM, the booster is wrapped at fit time to align with
-    `CLASSES` (the LightGBM model returns a 2D array whose column 0 is
-    the FIRST class in `CLASSES`).
+    For LightGBM, the booster is wrapped in
+    `LightGBMClassifierWrapper` (see below). The wrapper:
+    - Coerces the categorical columns to `pd.Categorical` with the
+      categories observed at fit time (so unseen values at predict
+      time become NaN, which LightGBM treats as missing).
+    - Calls the underlying `LGBMClassifier.predict_proba`, which
+      returns columns in the order of the integer-encoded labels
+      (0=L, 1=C, 2=R — matching `CLASSES`).
     """
-    if hasattr(model, "predict_proba") and not hasattr(model, "_is_lightgbm"):
+    if hasattr(model, "predict_proba"):
         return np.asarray(model.predict_proba(matrix.X))
-    # LightGBM path: see `train_lightgbm`. The wrapped booster exposes
-    # a sklearn-style `predict_proba` that returns the right shape.
-    return np.asarray(model.predict_proba(matrix.X))
+    raise TypeError(f"model of type {type(model).__name__} has no predict_proba")
 
 
 # ---------------------------------------------------------------------------
@@ -507,3 +514,216 @@ def rows_to_predict_matrix(
         feature_columns=list(feature_columns),
         rows=list(rows),
     )
+
+
+# ---------------------------------------------------------------------------
+# LightGBM
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class LightGBMClassifierWrapper:
+    """A LightGBM classifier that preserves the project conventions.
+
+    The wrapper:
+    1. At fit time, coerces the `categorical_features` columns to
+       `pd.Categorical` (with the categories observed in the training
+       data) and stores the category list per column.
+    2. At predict time, coerces the same columns to `pd.Categorical`
+       with the stored categories, so unseen values become `NaN`
+       (LightGBM treats them as missing). This is the LightGBM-native
+       way to handle "this categorical value wasn't in training".
+    3. Forwards `predict_proba` to the underlying `LGBMClassifier`,
+       which returns columns in the order of the integer-encoded
+       labels (0=L, 1=C, 2=R). The fit method requires `y` to be
+       int-encoded in `CLASSES` order.
+
+    The wrapper is pickle-safe: the underlying LGBMClassifier is
+    serialised by LightGBM's own Booster pickling, and the
+    `_categories` dict is plain Python.
+
+    Parameters
+    ----------
+    params
+        A dict of LGBMClassifier parameters. Defaults to
+        `LIGHTGBM_DEFAULTS`. The wrapper does not require `num_class`
+        or `objective` to be set — they are added at construction.
+    categorical_features
+        The list of column names in `X` to treat as categorical. The
+        columns must contain string values (or be coercible to
+        `pd.Categorical`).
+    random_state
+        The random seed for the booster.
+    """
+
+    params: dict[str, Any]
+    categorical_features: list[str]
+    random_state: int
+
+    # Populated by `fit`.
+    _booster: LGBMClassifier | None = field(default=None, init=False)
+    _categories: dict[str, list[Any]] = field(default_factory=dict, init=False)
+
+    def __post_init__(self) -> None:
+        # Normalise the params: every LGBMClassifier needs `objective`
+        # and `num_class` to do multiclass. We keep them in the
+        # `LIGHTGBM_DEFAULTS` dict for clarity, but also stamp them on
+        # the LGBMClassifier constructor for the case where a caller
+        # passes a custom `params` (so we don't accidentally drop them).
+        merged: dict[str, Any] = {**LIGHTGBM_DEFAULTS, **self.params}
+        merged["random_state"] = self.random_state
+        self._resolved_params: dict[str, Any] = merged
+
+    @property
+    def classes_(self) -> np.ndarray:
+        """The class indices in the order `LGBMClassifier.predict_proba` uses."""
+        if self._booster is None:
+            return np.array([], dtype=np.int64)
+        return np.asarray(self._booster.classes_)
+
+    def fit(self, X: pd.DataFrame, y: np.ndarray) -> LightGBMClassifierWrapper:
+        """Fit the underlying LGBMClassifier on `X` (DataFrame) and `y` (int array).
+
+        `y` must be int-encoded in `CLASSES` order (0=L, 1=C, 2=R).
+        The caller is expected to do the encoding — the wrapper does
+        not look at the string labels, only the integer class indices.
+        """
+        X_fit = _coerce_lightgbm_categoricals(
+            X, self.categorical_features, fit=True, categories=None
+        )
+        # Snapshot the categories for the predict path.
+        for col in self.categorical_features:
+            if col in X.columns:
+                self._categories[col] = sorted(X[col].dropna().astype(str).unique().tolist())
+        self._booster = LGBMClassifier(**self._resolved_params)
+        self._booster.fit(X_fit, y, categorical_feature=list(self.categorical_features))
+        return self
+
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
+        """Return a (n, 3) array of probabilities in `CLASSES` order.
+
+        LightGBM returns columns in the order of the integer-encoded
+        labels; we fit on `0, 1, 2 = (L, C, R)`, so the columns are
+        already in `CLASSES` order. No reordering is needed.
+        """
+        if self._booster is None:
+            raise RuntimeError("LightGBMClassifierWrapper is not fitted")
+        X_pred = _coerce_lightgbm_categoricals(
+            X,
+            self.categorical_features,
+            fit=False,
+            categories=self._categories,
+        )
+        return np.asarray(self._booster.predict_proba(X_pred))
+
+
+def _coerce_lightgbm_categoricals(
+    X: pd.DataFrame,
+    categorical_features: Sequence[str],
+    *,
+    fit: bool,
+    categories: dict[str, list[Any]] | None,
+) -> pd.DataFrame:
+    """Convert the categorical columns to `pd.Categorical` with the right dtype.
+
+    At fit time (`fit=True`), the categories are taken from the input
+    `X` (so any string value the booster sees becomes a known
+    category). At predict time, the categories are taken from the
+    `categories` dict captured at fit time, so unseen values become
+    `NaN` (LightGBM treats `NaN` as missing in categorical features).
+
+    The function does not mutate the input `X`; it returns a new
+    DataFrame. Non-categorical columns are passed through unchanged.
+    """
+    X = X.copy()
+    for col in categorical_features:
+        if col not in X.columns:
+            continue
+        if fit:
+            cats = sorted(X[col].dropna().astype(str).unique().tolist())
+        else:
+            cats = (categories or {}).get(col, [])
+        # `pd.Categorical` with explicit `categories=` treats values
+        # outside the category set as NaN. We pre-mask the values so
+        # the construction never sees a non-null entry outside the
+        # categories — that's the future-pandas contract (panda 4.x
+        # will raise on the deprecated path).
+        values = X[col].astype(object).where(X[col].notna(), None)
+        in_cats = values.isin(cats) | values.isna()
+        values = values.where(in_cats, None)
+        X[col] = pd.Categorical(values, categories=cats)
+    return X
+
+
+def compute_class_weights(y: np.ndarray) -> dict[int, float]:
+    """Compute inverse-frequency class weights for an int-encoded label vector.
+
+    The formula is `n_samples / (n_classes * n_samples_per_class)`,
+    which is the "balanced" weight from sklearn. Returns a dict
+    mapping class index to weight.
+
+    For our 3-class problem (L=0, C=1, R=2), with the live training
+    table's 88 L + 33 C + 58 R rows, the weights are roughly
+    {0: 0.68, 1: 1.81, 2: 1.03} — C is upweighted, L is downweighted.
+    """
+    if y.size == 0:
+        return {}
+    n_samples = y.size
+    classes, counts = np.unique(y, return_counts=True)
+    n_classes = len(classes)
+    weights: dict[int, float] = {}
+    for cls, count in zip(classes, counts, strict=True):
+        weights[int(cls)] = n_samples / (n_classes * count)
+    return weights
+
+
+def make_lightgbm(
+    params: dict[str, Any] | None = None,
+    categorical_features: Sequence[str] = CATEGORICAL_FEATURES,
+    random_state: int = RANDOM_SEED,
+) -> LightGBMClassifierWrapper:
+    """Build an unfitted `LightGBMClassifierWrapper`.
+
+    The default `params` are `LIGHTGBM_DEFAULTS` merged with
+    `class_weight=None` (the caller is expected to pass
+    `class_weight=<computed weights>` after computing them on the
+    training fold's label distribution; this keeps the
+    inverse-frequency recipe close to the fit site).
+    """
+    merged: dict[str, Any] = dict(LIGHTGBM_DEFAULTS)
+    if params:
+        merged.update(params)
+    # class_weight is a LightGBM kwarg (different from sklearn's
+    # `class_weight=`). LightGBM accepts a dict of class index -> weight.
+    return LightGBMClassifierWrapper(
+        params=merged,
+        categorical_features=list(categorical_features),
+        random_state=random_state,
+    )
+
+
+def fit_lightgbm(
+    matrix: FeatureMatrix,
+    params: dict[str, Any] | None = None,
+    categorical_features: Sequence[str] = CATEGORICAL_FEATURES,
+    random_state: int = RANDOM_SEED,
+) -> LightGBMClassifierWrapper:
+    """Fit a `LightGBMClassifierWrapper` on `matrix`.
+
+    Computes class weights from the training fold's label
+    distribution (inverse frequency) and passes them via
+    `params["class_weight"]`. The caller can override the weights by
+    passing a `params` dict with a `class_weight` key.
+    """
+    class_weights = compute_class_weights(matrix.y)
+    merged: dict[str, Any] = dict(params or {})
+    # Only set the class_weight from the data if the caller didn't
+    # override it (e.g. for ablation tests that want uniform weights).
+    merged.setdefault("class_weight", class_weights)
+    model = make_lightgbm(
+        params=merged,
+        categorical_features=categorical_features,
+        random_state=random_state,
+    )
+    model.fit(matrix.X, matrix.y)
+    return model

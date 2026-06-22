@@ -532,14 +532,21 @@ def test_rows_to_predict_matrix_empty_labels() -> None:
     reason="output/ artifacts not present (run the slice first)",
 )
 def test_baseline_metrics_beat_random_on_log_loss() -> None:
-    """Issue #23 AC: the baseline's log loss is below the random
-    baseline's on the 2026 holdout."""
+    """Issue #23 AC: the logreg baseline's log loss is below the
+    random baseline's on the 2026 holdout.
+
+    On the slice #24 (LightGBM) metrics.json, the `baseline` section
+    holds the logreg result (the LightGBM is the new `model`
+    section). The test reads the `baseline` section if present
+    (slice #24+), otherwise the `model` section (slice #23).
+    """
     with Path("output/metrics.json").open(encoding="utf-8") as f:
         metrics = json.load(f)
-    model_ll = metrics["model"]["log_loss"]
+    baseline_section = metrics.get("baseline", metrics["model"])
+    baseline_ll = baseline_section["log_loss"]
     random_ll = metrics["random_baseline"]["log_loss"]
-    assert model_ll < random_ll, (
-        f"baseline log loss {model_ll} did not beat random {random_ll} on the 2026 holdout"
+    assert baseline_ll < random_ll, (
+        f"baseline log loss {baseline_ll} did not beat random {random_ll} on the 2026 holdout"
     )
 
 

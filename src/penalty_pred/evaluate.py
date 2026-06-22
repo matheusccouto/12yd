@@ -244,10 +244,14 @@ class BaselineMetrics:
 class MetricsReport:
     """A full evaluation report on one holdout fold.
 
-    `model` is the classifier's metrics. The three `*_baseline` fields
-    are the fixed-strategy baselines for context. `n_train` and
-    `n_holdout` are the row counts in each fold. `holdout_cutoff_date`
-    is the ISO 8601 cutoff the split used.
+    `model` is the classifier's metrics (the LightGBM in slice #8;
+    the logreg baseline in slice #7). `baseline` is an optional
+    comparison classifier — the logreg in slice #8 (so the LightGBM
+    is compared apples-to-apples against the previous slice on the
+    same holdout fold). The three `*_baseline` fields are the
+    fixed-strategy baselines for context. `n_train` and `n_holdout`
+    are the row counts in each fold. `holdout_cutoff_date` is the ISO
+    8601 cutoff the split used.
     """
 
     model: BaselineMetrics
@@ -257,6 +261,7 @@ class MetricsReport:
     n_train: int
     n_holdout: int
     holdout_cutoff_date: str
+    baseline: BaselineMetrics | None = None
     extras: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -264,9 +269,10 @@ class MetricsReport:
 
         `None` save rates and log losses are preserved as `null` so the
         report honestly reflects the absence of a metric (rather than
-        silently substituting 0.0).
+        silently substituting 0.0). The optional `baseline` field
+        (the logreg comparison classifier) is serialised when set.
         """
-        payload = {
+        payload: dict[str, Any] = {
             "model": asdict(self.model),
             "random_baseline": asdict(self.random_baseline),
             "kicker_most_frequent_baseline": asdict(self.kicker_most_frequent_baseline),
@@ -275,6 +281,8 @@ class MetricsReport:
             "n_holdout": self.n_holdout,
             "holdout_cutoff_date": self.holdout_cutoff_date,
         }
+        if self.baseline is not None:
+            payload["baseline"] = asdict(self.baseline)
         payload.update(self.extras)
         return payload
 
@@ -282,12 +290,19 @@ class MetricsReport:
 def evaluate_predictions(
     probs: np.ndarray,
     holdout_rows: Sequence[TrainingRow],
+    baseline_probs: np.ndarray | None = None,
 ) -> MetricsReport:
     """Compute the full metrics report for a model on a holdout fold.
 
     The `probs` array is the model's predicted probabilities for the
     `holdout_rows` in `CLASSES` order. The function derives the
     `labels` and `on_target` arrays from the rows.
+
+    If `baseline_probs` is provided, the report includes a `baseline`
+    section (the logreg comparison classifier) so the model's metric
+    can be diffed apples-to-apples against the previous slice on the
+    same holdout fold. The baseline's log loss / accuracy / save
+    rate are computed the same way as the model's.
     """
     n = len(holdout_rows)
     if n == 0:
@@ -337,8 +352,19 @@ def evaluate_predictions(
         save_rate=ak_save,
         n_kicks=ak_n,
     )
+    baseline_metrics: BaselineMetrics | None = None
+    if baseline_probs is not None:
+        b_save, b_n = counterfactual_save_rate(baseline_probs, labels, on_target)
+        baseline_metrics = BaselineMetrics(
+            name="baseline",
+            log_loss=log_loss(baseline_probs, labels),
+            accuracy=accuracy(baseline_probs, labels),
+            save_rate=b_save,
+            n_kicks=b_n,
+        )
     return MetricsReport(
         model=model_metrics,
+        baseline=baseline_metrics,
         random_baseline=random_metrics,
         kicker_most_frequent_baseline=kmf_metrics,
         actual_keeper_baseline=ak_metrics,
