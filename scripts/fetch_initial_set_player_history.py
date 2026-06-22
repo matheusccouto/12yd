@@ -37,7 +37,7 @@ from datetime import date
 from pathlib import Path
 
 from penalty_pred.client import FotMobClient
-from penalty_pred.config import DEFAULT_CACHE_DIR, today_utc
+from penalty_pred.config import DEFAULT_CACHE_DIR, HISTORY_FLOOR, LOOKBACK_WINDOW_YEARS, today_utc
 from penalty_pred.player_history import (
     MissingKicker,
     fetch_all_initial_set_penalty_history,
@@ -92,6 +92,17 @@ def main() -> int:
         "Default: today's date in UTC (per-kicker fetcher's lookback "
         "extends to the present).",
     )
+    parser.add_argument(
+        "--lookback-years",
+        type=int,
+        default=LOOKBACK_WINDOW_YEARS,
+        help=f"Years of history to look back per kicker (default: {LOOKBACK_WINDOW_YEARS}).",
+    )
+    parser.add_argument(
+        "--history-floor",
+        default=HISTORY_FLOOR.isoformat(),
+        help=f"Hard lower bound on history dates, ISO 8601 (default: {HISTORY_FLOOR.isoformat()}).",
+    )
     args = parser.parse_args()
 
     if not args.shootout_kicks.exists():
@@ -104,6 +115,7 @@ def main() -> int:
     args.missing.parent.mkdir(parents=True, exist_ok=True)
 
     target = date.fromisoformat(args.target_date) if args.target_date else today_utc()
+    history_floor = date.fromisoformat(args.history_floor)
     client = FotMobClient(cache_dir=args.cache_dir)
 
     initial_set = list(iter_initial_set_kickers(args.shootout_kicks, args.roster))
@@ -122,7 +134,13 @@ def main() -> int:
     t0 = time.monotonic()
     with args.output.open("w", encoding="utf-8") as out_f:
         for i, result in enumerate(
-            fetch_all_initial_set_penalty_history(client, initial_set, target_date=target),
+            fetch_all_initial_set_penalty_history(
+                client,
+                initial_set,
+                target_date=target,
+                lookback_years=args.lookback_years,
+                history_floor=history_floor,
+            ),
             start=1,
         ):
             results.append(result)
