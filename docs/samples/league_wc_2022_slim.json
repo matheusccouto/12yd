@@ -1,0 +1,347 @@
+{
+  "pageProps": {
+    "fixtures": {
+      "firstUnplayedMatch": null,
+      "allMatches": [
+        {
+          "round": "1/8",
+          "roundName": "Round of 16",
+          "pageUrl": "/matches/japan-vs-croatia/2cq9vk#3370555",
+          "id": "3370555",
+          "home": {
+            "name": "Japan",
+            "shortName": "Japan",
+            "id": "6715"
+          },
+          "away": {
+            "name": "Croatia",
+            "shortName": "Croatia",
+            "id": "10155"
+          },
+          "status": {
+            "utcTime": "2022-12-05T15:00:00Z",
+            "timezone": "UTC",
+            "finished": true,
+            "started": true,
+            "cancelled": false,
+            "awarded": false,
+            "scoreStr": "1 - 1",
+            "reason": {
+              "short": "Pen",
+              "shortKey": "penalties_short",
+              "long": "After penalties",
+              "longKey": "afterpenalties"
+            }
+          }
+        },
+        {
+          "round": "1/8",
+          "roundName": "Round of 16",
+          "pageUrl": "/matches/morocco-vs-spain/1e6edp#3370556",
+          "id": "3370556",
+          "home": {
+            "name": "Morocco",
+            "shortName": "Morocco",
+            "id": "6262"
+          },
+          "away": {
+            "name": "Spain",
+            "shortName": "Spain",
+            "id": "6720"
+          },
+          "status": {
+            "utcTime": "2022-12-06T15:00:00Z",
+            "timezone": "UTC",
+            "finished": true,
+            "started": true,
+            "cancelled": false,
+            "awarded": false,
+            "scoreStr": "0 - 0",
+            "reason": {
+              "short": "Pen",
+              "shortKey": "penalties_short",
+              "long": "After penalties",
+              "longKey": "afterpenalties"
+            }
+          }
+        },
+        {
+          "round": "1/4",
+          "roundName": "Quarter-Finals",
+          "pageUrl": "/matches/brazil-vs-croatia/2swyz6#3370565",
+          "id": "3370565",
+          "home": {
+            "name": "Croatia",
+            "shortName": "Croatia",
+            "id": "10155"
+          },
+          "away": {
+            "name": "Brazil",
+            "shortName": "Brazil",
+            "id": "8256"
+          },
+          "status": {
+            "utcTime": "2022-12-09T15:00:00Z",
+            "timezone": "UTC",
+            "finished": true,
+            "started": true,
+            "cancelled": false,
+            "awarded": false,
+            "scoreStr": "1 - 1",
+            "reason": {
+              "short": "Pen",
+              "shortKey": "penalties_short",
+              "long": "After penalties",
+              "longKey": "afterpenalties"
+            }
+          }
+        },
+        {
+          "round": "1",
+          "roundName": 1,
+          "pageUrl": "/matches/qatar-vs-ecuador/1bc3kk#3370549",
+          "id": "3370549",
+          "home": {
+            "name": "Qatar",
+            "shortName": "Qatar",
+            "id": "5902"
+          },
+          "away": {
+            "name": "Ecuador",
+            "shortName": "Ecuador",
+            "id": "6707"
+          },
+          "group": "A",
+          "status": {
+            "utcTime": "2022-11-20T16:00:00Z",
+            "timezone": "UTC",
+            "finished": true,
+            "started": true,
+            "cancelled": false,
+            "awarded": false,
+            "scoreStr": "0 - 2",
+            "reason": {
+              "short": "FT",
+              "shortKey": "fulltime_short",
+              "long": "Full-Time",
+              "longKey": "finished"
+            }
+          }
+        },
+        {
+          "round": "1",
+          "roundName": 1,
+          "pageUrl": "/matches/iran-vs-england/1wszoe#3854559",
+          "id": "3854559",
+          "home": {
+            "name": "England",
+            "shortName": "England",
+            "id": "8491"
+          },
+          "away": {
+            "name": "Iran",
+            "shortName": "Iran",
+            "id": "6711"
+          },
+          "group": "B",
+          "status": {
+            "utcTime": "2022-11-21T13:00:00Z",
+            "timezone": "UTC",
+            "finished": true,
+            "started": true,
+            "cancelled": false,
+            "awarded": false,
+            "scoreStr": "6 - 2",
+            "reason": {
+              "short": "FT",
+              "shortKey": "fulltime_short",
+              "long": "Full-Time",
+              "longKey": "finished"
+            }
+          }
+        }
+      ],
+      "hasOngoingMatch": false,
+      "fixtureInfo": {
+        "activeRound": {
+          "roundId": "final",
+          "localizedKey": "finalTournament"
+        },
+        "rounds": [
+          {
+            "roundId": "1",
+            "localizedKey": "round_fmt"
+          },
+          {
+            "roundId": "2",
+            "localizedKey": "round_fmt"
+          },
+          {
+            "roundId": "3",
+            "localizedKey": "round_fmt"
+          },
+          {
+            "roundId": "1/8",
+            "localizedKey": "roundof16"
+          },
+          {
+            "roundId": "1/4",
+            "localizedKey": "quarterfinal"
+          },
+          {
+            "roundId": "1/2",
+            "localizedKey": "semifinal"
+          },
+          {
+            "roundId": "bronze",
+            "localizedKey": "bronzeFinal"
+          },
+          {
+            "roundId": "final",
+            "localizedKey": "finalTournament"
+          }
+        ],
+        "teams": [
+          {
+            "id": 6706,
+            "name": "Argentina"
+          },
+          {
+            "id": 6716,
+            "name": "Australia"
+          },
+          {
+            "id": 8263,
+            "name": "Belgium"
+          },
+          {
+            "id": 8256,
+            "name": "Brazil"
+          },
+          {
+            "id": 6629,
+            "name": "Cameroon"
+          },
+          {
+            "id": 5810,
+            "name": "Canada"
+          },
+          {
+            "id": 6705,
+            "name": "Costa Rica"
+          },
+          {
+            "id": 10155,
+            "name": "Croatia"
+          },
+          {
+            "id": 8238,
+            "name": "Denmark"
+          },
+          {
+            "id": 6707,
+            "name": "Ecuador"
+          },
+          {
+            "id": 8491,
+            "name": "England"
+          },
+          {
+            "id": 6723,
+            "name": "France"
+          },
+          {
+            "id": 8570,
+            "name": "Germany"
+          },
+          {
+            "id": 6714,
+            "name": "Ghana"
+          },
+          {
+            "id": 6711,
+            "name": "Iran"
+          },
+          {
+            "id": 6715,
+            "name": "Japan"
+          },
+          {
+            "id": 6710,
+            "name": "Mexico"
+          },
+          {
+            "id": 6262,
+            "name": "Morocco"
+          },
+          {
+            "id": 6708,
+            "name": "Netherlands"
+          },
+          {
+            "id": 8568,
+            "name": "Poland"
+          },
+          {
+            "id": 8361,
+            "name": "Portugal"
+          },
+          {
+            "id": 5902,
+            "name": "Qatar"
+          },
+          {
+            "id": 7795,
+            "name": "Saudi Arabia"
+          },
+          {
+            "id": 6395,
+            "name": "Senegal"
+          },
+          {
+            "id": 8205,
+            "name": "Serbia"
+          },
+          {
+            "id": 7804,
+            "name": "South Korea"
+          },
+          {
+            "id": 6720,
+            "name": "Spain"
+          },
+          {
+            "id": 6717,
+            "name": "Switzerland"
+          },
+          {
+            "id": 6719,
+            "name": "Tunisia"
+          },
+          {
+            "id": 5796,
+            "name": "Uruguay"
+          },
+          {
+            "id": 6713,
+            "name": "USA"
+          },
+          {
+            "id": 5790,
+            "name": "Wales"
+          }
+        ],
+        "groups": [
+          "A",
+          "B",
+          "C",
+          "D",
+          "E",
+          "F",
+          "G",
+          "H"
+        ]
+      }
+    }
+  }
+}

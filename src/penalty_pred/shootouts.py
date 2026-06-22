@@ -5,12 +5,18 @@ filtered to `period == "PenaltyShootout"`, NOT from `penaltyShootoutEvents[*].sh
 (the latter is missing for missed/saved kicks). Kicker identity is available on both
 paths; we use shotmap as the source of truth and join with `penaltyShootoutEvents`
 for the running shootout score.
+
+Slice #2 (Issue #19) adds the league-fixture → shootout-match driver on top of the
+per-match extractor. The driver fans out across (league, season) pairs, filters the
+season fixture list to shootouts via `status.reason.shortKey == "penalties_short"`,
+and reuses `extract_shootout_kicks` for each match.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping
+import re
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -18,7 +24,12 @@ from pathlib import Path
 from typing import Any
 
 from .client import FotMobClient
+from .config import PREDICT_WINDOW_START, today_utc
 from .coordinates import side
+from .leagues import LEAGUE_BY_ID, League
+
+# Short key that marks a match as decided by a penalty shootout (docs/fotmob.md).
+SHOOTOUT_SHORT_KEY: str = "penalties_short"
 
 
 @dataclass(frozen=True)
@@ -90,20 +101,30 @@ def extract_shootout_kicks(match: Mapping[str, Any]) -> list[ShootoutKick]:
         "penaltyShootoutEvents"
     ) or []
     # penaltyShootoutEvents is already in shootout order (away, home, away, home, ...).
-    pre_scores, post_scores, _ = _running_scores(events)
-    pre_by_player = _flatten_by_player(pre_scores)
-    post_by_player = _flatten_by_player(post_scores)
+    pre_by_index, post_by_index = _indexed_scores(events)
 
     # The shotmap's `isHome` field is unset on every shot; we derive it from
     # the shot's `teamId` vs the match's home/away team ids.
+    #
+    # The two arrays are 1:1 by INDEX, not by playerId. We pair them by
+    # position because FotMob's shotmap and penaltyShootoutEvents occasionally
+    # disagree on the kicker's id (e.g. a substitute with a different FotMob
+    # record vs the player they replaced). The shotmap is the source of truth
+    # for placement (`onGoalShot.x`); the events are the source of truth for
+    # the running shootout score. We take playerId/playerName from the
+    # shotmap (the actual kicker) and the score from the event at the same
+    # index.
     kicks: list[ShootoutKick] = []
+    n_shots = len(shootout_shots)
+    n_events = len(events)
+    if n_shots != n_events:
+        msg = f"shootout shotmap has {n_shots} shots but events has {n_events}"
+        raise ValueError(msg)
+    pre_by_index, post_by_index = _indexed_scores(events)
     for idx, shot in enumerate(shootout_shots, start=1):
         player_id = _int(shot["playerId"])
         team_id = _int(shot.get("teamId"))
         is_home = (team_id == home_team_id) if (team_id and home_team_id) else False
-        if player_id not in post_by_player:
-            msg = f"shotmap shootout player {player_id} has no matching penaltyShootoutEvent"
-            raise ValueError(msg)
         x = float(shot["onGoalShot"]["x"])
         outcome = _SHOTMAP_EVENT_TYPE_TO_OUTCOME.get(
             shot.get("eventType", ""), str(shot.get("eventType", ""))
@@ -124,8 +145,8 @@ def extract_shootout_kicks(match: Mapping[str, Any]) -> list[ShootoutKick]:
                 side=side(x),
                 is_on_target=bool(shot.get("isOnTarget")),
                 outcome=outcome,
-                pen_score_before=list(pre_by_player[player_id]),
-                pen_score_after=list(post_by_player[player_id]),
+                pen_score_before=list(pre_by_index[idx - 1]),
+                pen_score_after=list(post_by_index[idx - 1]),
                 match_score_home=match_score_home,
                 match_score_away=match_score_away,
             )
@@ -133,55 +154,39 @@ def extract_shootout_kicks(match: Mapping[str, Any]) -> list[ShootoutKick]:
     return kicks
 
 
-def _running_scores(
+def _indexed_scores(
     events: list[Mapping[str, Any]],
-) -> tuple[
-    dict[tuple[int, bool], list[int]],
-    dict[tuple[int, bool], list[int]],
-    dict[tuple[int, bool], str],
-]:
+) -> tuple[list[list[int]], list[list[int]]]:
     """Walk `penaltyShootoutEvents` in order and emit pre/post scores per kick.
 
-    Returns three dicts keyed by `(playerId, isHome)`:
-    - pre_scores: the running shootout score BEFORE the kick
-    - post_scores: the running shootout score AFTER the kick
-    - event_type_by_key: the raw event type ("Goal" / "MissedPenalty" / "SavedPenalty")
+    Returns two parallel lists (one entry per kick, in shootout order):
+    - pre_scores[i]: the running shootout score BEFORE kick i
+    - post_scores[i]: the running shootout score AFTER kick i
+
+    `pre_scores[i]` is the score after applying event i-1; `post_scores[i]`
+    is the score after applying event i.
+
+    We use the event's `penShootoutScore` as the authoritative post value
+    when present (it matches the walked score for Goals; we fall back to
+    the walked score when absent).
     """
-    pre_scores: dict[tuple[int, bool], list[int]] = {}
-    post_scores: dict[tuple[int, bool], list[int]] = {}
-    event_type_by_key: dict[tuple[int, bool], str] = {}
+    pre: list[list[int]] = []
+    post: list[list[int]] = []
     score = [0, 0]
     for ev in events:
-        player = ev.get("player") or {}
-        player_id = _int(player.get("id"))
-        is_home = bool(ev.get("isHome"))
-        key = (player_id, is_home)
-        pre_scores[key] = list(score)
         ev_type = str(ev.get("type", ""))
-        event_type_by_key[key] = ev_type
+        is_home = bool(ev.get("isHome"))
+        pre.append(list(score))
         if ev_type == "Goal":
             if is_home:
                 score[0] += 1
             else:
                 score[1] += 1
-        # For Goals, penShootoutScore is the post-kick running score; use it as the
-        # authoritative post value when present (matches the walked score).
-        if ev_type == "Goal" and ev.get("penShootoutScore"):
-            post_scores[key] = list(ev["penShootoutScore"])
+        if ev.get("penShootoutScore"):
+            post.append(list(ev["penShootoutScore"]))
         else:
-            post_scores[key] = list(score)
-    return pre_scores, post_scores, event_type_by_key
-
-
-def _flatten_by_player(scores: dict[tuple[int, bool], list[int]]) -> dict[int, list[int]]:
-    """Drop the (playerId, isHome) key's isHome component — we join by playerId alone.
-
-    penaltyShootoutEvents has exactly one event per player, so isHome adds no information.
-    """
-    out: dict[int, list[int]] = {}
-    for (player_id, _is_home), value in scores.items():
-        out[player_id] = list(value)
-    return out
+            post.append(list(score))
+    return pre, post
 
 
 def write_jsonl(path: Path, rows: Iterable[ShootoutKick]) -> int:
@@ -233,3 +238,234 @@ def _parse_match_date(value: Any) -> str:
         return datetime.fromisoformat(text).astimezone(UTC).isoformat()
     except ValueError:
         return text
+
+
+# ---------------------------------------------------------------------------
+# Slice #2: league-fixture → shootout-match driver (Issue #19)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ShootoutMatchRef:
+    """Minimal reference to a shootout match, parsed from a season fixture list.
+
+    Carrying the (seo, h2h) pair alongside the match_id means the per-match
+    fetcher does not need to re-resolve the pageUrl — which is what makes the
+    scraper idempotent (re-runs are all 304 hits, no new work).
+    """
+
+    match_id: int
+    seo: str
+    h2h: str
+    round_name: str
+    home_name: str
+    away_name: str
+    match_date: str  # ISO 8601 (UTC), best-effort parsed from `status.utcTime`.
+    score_str: str  # e.g. "1 - 1" — match score at full time, before the shootout.
+
+    @classmethod
+    def from_fixture(cls, fixture: Mapping[str, Any]) -> ShootoutMatchRef:
+        """Build a ShootoutMatchRef from a season fixture entry.
+
+        The fixture's `id` and `pageUrl` are the source of truth for the match
+        identity. The pageUrl format is `/matches/{seo}/{h2h}#{match_id}` —
+        the trailing `#...` is the visible URL anchor, not part of h2h. The
+        league is implicit from the request URL and gets stamped on the kick
+        records downstream by `extract_shootout_kicks`; we do not duplicate
+        it here.
+        """
+        match_id, seo, h2h = parse_page_url(str(fixture["pageUrl"]))
+        status = fixture.get("status") or {}
+        return cls(
+            match_id=match_id,
+            seo=seo,
+            h2h=h2h,
+            round_name=str(fixture.get("roundName") or fixture.get("round") or ""),
+            home_name=str((fixture.get("home") or {}).get("name", "")),
+            away_name=str((fixture.get("away") or {}).get("name", "")),
+            match_date=str(status.get("utcTime") or ""),
+            score_str=str(status.get("scoreStr") or ""),
+        )
+
+
+_PAGE_URL_RE = re.compile(r"^/matches/(?P<seo>[^/]+)/(?P<h2h>[^/#?]+)(?:#\d+)?$")
+
+
+def parse_page_url(page_url: str) -> tuple[int, str, str]:
+    """Parse a FotMob match `pageUrl` into (match_id, seo, h2h).
+
+    Format: `/matches/{seo}/{h2h}#{match_id}`. The `seo` is kebab-case (e.g.
+    `argentina-vs-france`); `h2h` is a 6-char alphanumeric (e.g. `1hox8a`).
+    The match_id is parsed from the URL anchor (after `#`).
+    """
+    anchor_idx = page_url.find("#")
+    if anchor_idx == -1:
+        msg = f"pageUrl missing '#{{match_id}}' anchor: {page_url!r}"
+        raise ValueError(msg)
+    match_id = _int(page_url[anchor_idx + 1 :])
+    if not match_id:
+        msg = f"pageUrl anchor did not yield an int match_id: {page_url!r}"
+        raise ValueError(msg)
+    path = page_url[:anchor_idx]
+    match = _PAGE_URL_RE.match(path)
+    if match is None:
+        msg = f"pageUrl path did not match /matches/{{seo}}/{{h2h}}: {page_url!r}"
+        raise ValueError(msg)
+    return match_id, match.group("seo"), match.group("h2h")
+
+
+def fetch_season_fixtures(
+    client: FotMobClient, league: League, season: int
+) -> list[dict[str, Any]]:
+    """Fetch a league's season fixtures. Returns the `pageProps.fixtures.allMatches` list.
+
+    The `overview` tab is the source of truth for season fixtures; it carries
+    the same `allMatches` list as the dedicated `fixtures` tab. Pass `season`
+    as the year (e.g. 2022 for the 2022 World Cup, 2020 for the Euro 2020 —
+    which was actually held in 2021).
+    """
+    payload = client.get(
+        f"leagues/{league.league_id}/overview/{league.slug}",
+        params={"season": str(season)},
+    )
+    fixtures = (payload.get("pageProps") or {}).get("fixtures") or {}
+    matches = fixtures.get("allMatches") or []
+    return list(matches)
+
+
+def extract_shootout_match_fixtures(
+    fixtures: Iterable[Mapping[str, Any]],
+) -> list[ShootoutMatchRef]:
+    """Filter season fixtures to those that ended in a penalty shootout.
+
+    The filter is `status.reason.shortKey == "penalties_short"` (docs/fotmob.md).
+    Returns one `ShootoutMatchRef` per shootout match, in the order the API
+    listed them.
+    """
+    out: list[ShootoutMatchRef] = []
+    for fixture in fixtures:
+        status = fixture.get("status") or {}
+        reason = status.get("reason") or {}
+        if reason.get("shortKey") != SHOOTOUT_SHORT_KEY:
+            continue
+        out.append(ShootoutMatchRef.from_fixture(fixture))
+    return out
+
+
+# (league_id, season) pairs that fall inside the current Prediction Window
+# (2021-01-01 → today). The seasons are the FotMob `?season=` year values
+# (e.g. Euro 2020 is `season=2020` even though it was held in 2021).
+# Held in a module-level constant so the orchestrator takes a single parameter
+# and the slice is re-parameterisable by editing one line.
+LEAGUE_SEASONS_PREDICT_WINDOW: tuple[tuple[int, int], ...] = (
+    (LEAGUE_BY_ID[77].league_id, 2022),  # World Cup 2022 (Qatar, Dec 2022)
+    (LEAGUE_BY_ID[77].league_id, 2026),  # World Cup 2026 (in progress)
+    (LEAGUE_BY_ID[50].league_id, 2020),  # Euro 2020 (held Jun–Jul 2021)
+    (LEAGUE_BY_ID[50].league_id, 2024),  # Euro 2024 (Germany)
+    (LEAGUE_BY_ID[44].league_id, 2021),  # Copa América 2021
+    (LEAGUE_BY_ID[44].league_id, 2024),  # Copa América 2024
+    (LEAGUE_BY_ID[289].league_id, 2021),  # AFCON 2021 (held Jan–Feb 2022)
+    (LEAGUE_BY_ID[289].league_id, 2023),  # AFCON 2023 (held Jan–Feb 2024)
+    (LEAGUE_BY_ID[289].league_id, 2025),  # AFCON 2025 (held Dec 2025–Jan 2026)
+    (LEAGUE_BY_ID[298].league_id, 2021),  # Gold Cup 2021 (no shootouts)
+    (LEAGUE_BY_ID[298].league_id, 2023),  # Gold Cup 2023
+    (LEAGUE_BY_ID[298].league_id, 2025),  # Gold Cup 2025
+    (LEAGUE_BY_ID[290].league_id, 2021),  # Asian Cup 2021 (held 2023, no shootouts)
+    (LEAGUE_BY_ID[290].league_id, 2023),  # Asian Cup 2023 (held Jan–Feb 2024)
+    (LEAGUE_BY_ID[290].league_id, 2025),  # Asian Cup 2025
+)
+
+
+def fetch_all_shootout_match_refs(
+    client: FotMobClient,
+    league_seasons: Iterable[tuple[int, int]] = LEAGUE_SEASONS_PREDICT_WINDOW,
+) -> list[ShootoutMatchRef]:
+    """Fetch the season fixtures for each (league_id, season) pair, return all
+    shootout match refs. The result is the candidate list of matches to drive
+    `extract_shootout_kicks` over.
+    """
+    refs: list[ShootoutMatchRef] = []
+    for league_id, season in league_seasons:
+        league = LEAGUE_BY_ID[league_id]
+        fixtures = fetch_season_fixtures(client, league, season)
+        refs.extend(extract_shootout_match_fixtures(fixtures))
+    return refs
+
+
+def fetch_all_shootout_kicks(
+    client: FotMobClient,
+    match_refs: Iterable[ShootoutMatchRef],
+) -> Iterator[ShootoutKick]:
+    """Yield every ShootoutKick for the given shootout match references.
+
+    Each ref is fetched via `fetch_match_data` and parsed with
+    `extract_shootout_kicks`. The yielded kicks are in (match_date, match_id,
+    kick_number) order — stable across re-runs because the API lists fixtures
+    in a fixed chronological order.
+
+    If a ref's (seo, h2h) is stale — FotMob reuses hashes across matches, and
+    an old h2h sometimes points to a newer match — the actual matchId in the
+    response will differ from `ref.match_id`. In that case we skip the
+    match silently and let the caller discover the gap from the JSONL.
+    A `FetchResult` (via `fetch_all_shootout_kicks_with_skips`) is the
+    right tool when you need to surface the skipped matches.
+    """
+    for ref in match_refs:
+        data = fetch_match_data(client, ref.match_id, ref.seo, ref.h2h)
+        page_match_id = _int(data.get("pageProps", {}).get("general", {}).get("matchId"))
+        if page_match_id and page_match_id != ref.match_id:
+            # Stale (seo, h2h) hash — skip. See `fetch_all_shootout_kicks_with_skips`.
+            continue
+        yield from extract_shootout_kicks(data)
+
+
+@dataclass(frozen=True)
+class FetchResult:
+    """The outcome of one fetch in `fetch_all_shootout_kicks_with_skips`.
+
+    `kicks` is the list of `ShootoutKick` records extracted from the match.
+    `skipped` is True iff the (seo, h2h) hash was stale and the response was
+    for a different matchId. `no_kicks` is True iff the matchId was correct
+    but `extract_shootout_kicks` returned no kicks (e.g. the shotmap is
+    empty even though the match is listed as a shootout — a known FotMob
+    data quality issue for some AFCON 2021 and Asian Cup 2023 matches).
+    """
+
+    ref: ShootoutMatchRef
+    kicks: list[ShootoutKick]
+    skipped: bool
+    no_kicks: bool = False
+
+
+def fetch_all_shootout_kicks_with_skips(
+    client: FotMobClient,
+    match_refs: Iterable[ShootoutMatchRef],
+) -> list[FetchResult]:
+    """Like `fetch_all_shootout_kicks`, but returns per-match results.
+
+    Use this when the caller needs to surface the matches that were
+    skipped due to a stale (seo, h2h) — the JSONL's RSSSF count assertion
+    will fail without this information. Iterating one match at a time means
+    a single bad ref does not abort the rest of the run.
+    """
+    results: list[FetchResult] = []
+    for ref in match_refs:
+        data = fetch_match_data(client, ref.match_id, ref.seo, ref.h2h)
+        page_match_id = _int(data.get("pageProps", {}).get("general", {}).get("matchId"))
+        if page_match_id and page_match_id != ref.match_id:
+            results.append(FetchResult(ref=ref, kicks=[], skipped=True))
+            continue
+        kicks = extract_shootout_kicks(data)
+        results.append(FetchResult(ref=ref, kicks=kicks, skipped=False, no_kicks=not kicks))
+    return results
+
+
+def predict_window_bounds() -> tuple[datetime, datetime]:
+    """Return the (start, end) datetime bounds of the current Prediction Window.
+
+    `start` is `PREDICT_WINDOW_START` (2021-01-01 today, config-driven).
+    `end` is `today_utc()`. Both are floored to midnight UTC for date arithmetic.
+    """
+    start = datetime.combine(PREDICT_WINDOW_START, datetime.min.time(), tzinfo=UTC)
+    end = datetime.combine(today_utc(), datetime.min.time(), tzinfo=UTC)
+    return start, end
