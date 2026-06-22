@@ -1,6 +1,10 @@
 # Ralph
 progress.txt
 
+# Runtime artifacts
+data/fotmob_cache/
+output/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

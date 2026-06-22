@@ -1,0 +1,39 @@
+[project]
+name = "penalty-pred"
+version = "0.1.0"
+description = "Predict penalty shootout kick side from a kicker's history (FotMob data, LightGBM classifier)."
+requires-python = ">=3.12"
+readme = "README.md"
+dependencies = [
+    "httpx>=0.27",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "ty>=0.0.1a5",
+]
+
+[tool.uv]
+package = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "W"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["E402"]
+
+[tool.ty.environment]
+root = ["./src"]
+python = "./.venv"
+python-version = "3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
