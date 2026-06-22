@@ -8,16 +8,17 @@ fi
 
 for ((i=1; i<=$1; i++)); do
   result=$(opencode run \
-    --dangerously-skip-permissions \
-    --file docs/PRD.md \
-    --file progress.txt \
     "1. Find the highest-priority task and implement it. \
 2. Run your tests and type checks. \
 3. Update the PRD with what was done. \
 4. Append your progress to progress.txt. \
 5. Commit your changes. \
 ONLY WORK ON A SINGLE TASK. \
-If the PRD is complete, output <promise>COMPLETE</promise>.")
+If the PRD is complete, output <promise>COMPLETE</promise>." \
+    --dangerously-skip-permissions \
+    --model opencode-go/minimax-m3 \
+    --file docs/PRD.md \
+    --file progress.txt)
 
   echo "$result"
 
