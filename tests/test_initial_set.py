@@ -525,3 +525,40 @@ def test_initial_set_fetch_result_default_error() -> None:
     kicker = InitialSetKicker(player_id=100, player_name="Alpha", team_id=1, team_name="Argentina")
     r = InitialSetFetchResult(kicker=kicker, rows=[])
     assert r.error is None
+
+
+# ---------------------------------------------------------------------------
+# Script CLI: --lookback-years / --history-floor / --target-date
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_initial_set_script_accepts_reparameterisation_flags() -> None:
+    """The slice script exposes --lookback-years and --history-floor so the
+    Lookback Window can be changed without touching code (issue #21 AC:
+    "re-parameterised for a different lookback_window without code changes").
+    Run the script with `--help` and assert the flags are present and have
+    sensible defaults — this is a static check, no FotMob calls.
+    """
+    import subprocess
+    import sys
+
+    from penalty_pred.config import HISTORY_FLOOR, LOOKBACK_WINDOW_YEARS
+
+    repo_root = Path(__file__).resolve().parent.parent
+    result = subprocess.run(
+        [sys.executable, "scripts/fetch_initial_set_player_history.py", "--help"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0
+    out = result.stdout
+    assert "--lookback-years" in out
+    assert "--history-floor" in out
+    assert "--target-date" in out
+    # Defaults are surfaced in --help so the user can discover them.
+    assert str(LOOKBACK_WINDOW_YEARS) in out
+    assert HISTORY_FLOOR.isoformat() in out
+
