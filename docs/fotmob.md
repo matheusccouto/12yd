@@ -48,12 +48,15 @@ build_id = json.loads(re.search(r'<script id="__NEXT_DATA__"[^>]*>(.+?)</script>
 ### Match
 
 ```http
-GET https://www.fotmob.com/_next/data/{buildId}/matches/{slug}.json
+GET https://www.fotmob.com/_next/data/{buildId}/matches/{seo}/{h2h}.json
 ```
 
-- `slug`: 6-char SEO segment from the match URL. Discover from league fixture list (`pageUrl` field).
-- Data path: `pageProps.content.matchFacts.events.penaltyShootoutEvents`
-- Also: `pageProps.content.shotmap` (in-game shots), `pageProps.content.stats`, `pageProps.content.lineup`, `pageProps.content.momentum`, `pageProps.content.playerStats`.
+- `seo`: SEO slug from the match URL (e.g. `argentina-vs-france`). Discover from the league fixture list (`pageUrl` field).
+- `h2h`: 6-char hash segment after the SEO slug (e.g. `1hox8a`).
+- Example (live, returns 200 against the current buildId): `/_next/data/5JrXFqDcvBep-L0Qv6mBO/matches/argentina-vs-france/1hox8a.json`.
+- The single-segment form `GET /_next/data/{buildId}/matches/{slug}.json` (treating the SEO slug or hash as the entire path) is **stale** — it returns `404` for every known match. Always use the two-segment form.
+- Data path for shootout kick data: `pageProps.content.shotmap.shots` filtered to `period == "PenaltyShootout"` (see [Shootout kick data](#shootout-kick-data) below). This is the source of truth for `onGoalShot.x` across Goals, Saves, and Misses.
+- Also: `pageProps.content.matchFacts.events.penaltyShootoutEvents` (running shootout score, but **missing `shotmapEvent` for missed/saved kicks**), `pageProps.content.stats`, `pageProps.content.lineup`, `pageProps.content.momentum`, `pageProps.content.playerStats`.
 
 ### League season fixture list
 
@@ -102,6 +105,26 @@ shootouts = [m for m in fixtures if m["status"]["reason"]["shortKey"] == "penalt
 | `extratime_short` | After extra time, no shootout |
 | `postponed_short` | Cancelled/postponed |
 
+## Shootout kick data
+
+The single fetch path for shootout kick placement (goal-mouth coordinates, body part, outcome) is:
+
+```python
+shootout_kicks = [
+    s for s in data["pageProps"]["content"]["shotmap"]["shots"]
+    if s.get("period") == "PenaltyShootout"
+]
+```
+
+This returns one entry per Shootout Kick, including Misses and Saves — `onGoalShot.x` is present for all of them. For off-target kicks (`eventType == "Miss"`) the ball did not enter the goal frame, so `onGoalShot.x` is clamped to the post the ball passed (`0` or `2`); this is the most precise placement available. For Saves (`eventType == "AttemptSaved"`) `onGoalShot.x` is the on-target placement the keeper reached.
+
+Why not `pageProps.content.matchFacts.events.penaltyShootoutEvents`? That array carries running scores, kicker ids, and kick timing, but its `shotmapEvent` sub-object is **omitted for missed and saved kicks** (it is populated only for Goals). Use both:
+
+- `pageProps.content.shotmap.shots` filtered to `period == "PenaltyShootout"` for placement (`onGoalShot.x`, `goalCrossedY/Z`, `shotType`, `isOnTarget`, `eventType`).
+- `pageProps.content.matchFacts.events.penaltyShootoutEvents` for kicker identity and the running shootout score (`penShootoutScore`, `newScore`).
+
+They are 1:1 by `(playerId, isHome, time)`.
+
 ## Per-kick data shape
 
 `pageProps.content.matchFacts.events.penaltyShootoutEvents` is an array (length 0 for non-shootout matches). Each entry:
@@ -117,28 +140,30 @@ shootouts = [m for m in fixtures if m["status"]["reason"]["shortKey"] == "penalt
 | `homeScore`, `awayScore` | int | Running regular-time score. |
 | `penShootoutScore` | [int, int] | Running shootout score. |
 | `newScore` | [int, int] | Same as `penShootoutScore` for the post-kick state. |
+| `shotmapEvent` | object \| absent | **Present for Goals only.** For `MissedPenalty` and `SavedPenalty` this field is omitted entirely — do not source `onGoalShot.x` from here. Use `pageProps.content.shotmap.shots` filtered to `period == "PenaltyShootout"` (see [Shootout kick data](#shootout-kick-data)) for placement on all 8 shootout kicks. |
 | `shotmapEvent.expectedGoals` | float | Pre-kick xG. |
 | `shotmapEvent.expectedGoalsOnTarget` | float | Conditional on being on-target. |
 | `shotmapEvent.shotType` | string | `RightFoot` / `LeftFoot`. |
 | `shotmapEvent.goalCrossedY` | float | Goal-mouth Y in meters. |
 | `shotmapEvent.goalCrossedZ` | float | Goal-mouth Z in meters (height). |
-| `shotmapEvent.onGoalShot.x` | float | **[0, 2] — kicker's perspective: 0 = left post, 1 = center, 2 = right post.** |
+| `shotmapEvent.onGoalShot.x` | float | **[0, 2] — kicker's perspective: 0 = left post, 1 = center, 2 = right post.** Populated only for Goals (via this path). |
 | `shotmapEvent.onGoalShot.y` | float | [0, 1] — height within goal frame. |
 | `shotmapEvent.isOnTarget` | bool | |
 
-**Missed kicks have no `shotmapEvent`.** `onGoalShot.x` is `None` (not 0) for misses.
+**Missed and saved kicks have no `shotmapEvent` on `penaltyShootoutEvents`.** Read `onGoalShot.x` from `pageProps.content.shotmap.shots` filtered to `period == "PenaltyShootout"` instead, which has it for all kicks: `eventType` is `Goal` / `Miss` / `AttemptSaved`; `isOnTarget` is `true` for Goals and Saves, `false` for Misses; `onGoalShot.x` is clamped to the post (`0` or `2`) for off-target Misses. See [Shootout kick data](#shootout-kick-data) above.
 
 ## L/C/R bucketing
 
 ```python
 def side(x):
-    if x is None: return None  # miss
     if x < 0.667: return "L"
     if x > 1.333: return "R"
     return "C"
 ```
 
-Verified on Argentina vs France (2022 WC Final, 8 kicks): 4L / 0C / 2C / 0R for the 6 goals (4L, 2C, 0R).
+Reads `onGoalShot.x` from `pageProps.content.shotmap.shots` filtered to `period == "PenaltyShootout"`. The `x is None` guard is unnecessary on this path — the field is always populated (clamped to `0` or `2` for off-target Misses). For on-target Goals and Saves the value is the actual placement in [0, 2].
+
+Verified on Argentina vs France (2022 WC Final, 8 kicks): 4L / 0C / 2C / 0R for the 6 goals (4L, 2C, 0R). The 2 misses (Coman Saved → L, Tchouaméni off-target → clamped to post) have `onGoalShot.x` present in `shotmap.shots` even though `penaltyShootoutEvents[*].shotmapEvent` is missing for both.
 
 ## Caching strategy
 
@@ -172,7 +197,7 @@ Persistent local cache. 304 hits are zero-bandwidth. Disk hits are sub-milliseco
 
 | Pattern | Cost | Replace with |
 |---|---|---|
-| `GET /matches/{slug}/{hash}` (HTML) | 1.27 MB | `GET /_next/data/{buildId}/matches/{slug}.json` (473 KB) |
+| `GET /matches/{seo}/{h2h}` (HTML) | 1.27 MB | `GET /_next/data/{buildId}/matches/{seo}/{h2h}.json` (473 KB) |
 | No `Accept-Encoding: gzip` | 473 KB | With gzip (81 KB) |
 | No `If-None-Match` | Always 473 KB | ETag (304 → 0 bytes) |
 | `?tab=facts` on the URL | Same 1.27 MB (tab is hash-only) | `__next/data` is the same regardless of tab |
@@ -182,8 +207,8 @@ Persistent local cache. 304 hits are zero-bandwidth. Disk hits are sub-milliseco
 ## Quick reference
 
 ```text
-# Match (replace buildId, slug)
-GET /_next/data/{buildId}/matches/{slug}.json
+# Match (replace buildId, seo, h2h) — two-segment form, single-segment is 404
+GET /_next/data/{buildId}/matches/{seo}/{h2h}.json
 
 # League season
 GET /_next/data/{buildId}/leagues/{leagueId}/overview/{slug}.json?season={year}
@@ -202,15 +227,15 @@ If-None-Match: "<etag>"     # optional, for 304
 # Shootout filter
 m["status"]["reason"]["shortKey"] == "penalties_short"
 
-# Per-kick side
-m["shotmapEvent"]["onGoalShot"]["x"]  # 0..2, 1 = center
+# Per-kick side (from shotmap.shots, populated for all 8 shootout kicks)
+[k for k in pageProps.content.shotmap.shots if k["period"] == "PenaltyShootout"][0]["onGoalShot"]["x"]  # 0..2, 1 = center
 ```
 
 ## Sample response (excerpt)
 
-Argentina vs France, 2022 FIFA World Cup Final. matchId `3370572`, slug `1hox8a`, buildId `5JrXFqDcvBep-L0Qv6mBO`. Full 81 KB gzipped JSON saved to `docs/samples/match_3370572.json.gz`.
+Argentina vs France, 2022 FIFA World Cup Final. matchId `3370572`, SEO slug `argentina-vs-france`, h2h `1hox8a`, buildId `5JrXFqDcvBep-L0Qv6mBO`. Full 81 KB gzipped JSON saved to `docs/samples/match_3370572.json.gz`.
 
-Eight kicks, all with full `shotmapEvent` populated:
+Eight kicks, all 8 with `onGoalShot` populated on `pageProps.content.shotmap.shots` filtered to `period == "PenaltyShootout"`. On `pageProps.content.matchFacts.events.penaltyShootoutEvents`, the Goals carry a `shotmapEvent`; the Misses and Saves do not.
 
 ```json
 [
@@ -241,4 +266,4 @@ Eight kicks, all with full `shotmapEvent` populated:
 ]
 ```
 
-Missed kicks (Coman, Tchouaméni) have `type: "MissedPenalty"` and **no `shotmapEvent`** field.
+Missed kicks (Coman, Tchouaméni) have `type: "MissedPenalty"` on `penaltyShootoutEvents` and **no `shotmapEvent`** on that path. Their `onGoalShot` is in `pageProps.content.shotmap.shots`: Coman's saved kick has `x ≈ 0.27` (Saved → L), Tchouaméni's miss is `x = 0` (off-target, clamped to the left post).
