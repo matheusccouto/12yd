@@ -562,3 +562,95 @@ def test_fetch_initial_set_script_accepts_reparameterisation_flags() -> None:
     assert str(LOOKBACK_WINDOW_YEARS) in out
     assert HISTORY_FLOOR.isoformat() in out
 
+
+# ---------------------------------------------------------------------------
+# JSONL schema smoke test (issue #21 AC: rows + missing list)
+# ---------------------------------------------------------------------------
+
+
+REQUIRED_PLAYER_HISTORY_FIELDS = frozenset(
+    {
+        "kicker_id",
+        "match_id",
+        "match_date",
+        "league_id",
+        "league_name",
+        "team_id",
+        "is_home",
+        "x",
+        "side",
+        "is_on_target",
+        "outcome",
+        "shot_type",
+    }
+)
+REQUIRED_MISSING_FIELDS = frozenset({"player_id", "player_name", "team_id"})
+
+
+@pytest.mark.skipif(
+    not (Path("output/player_history.jsonl").exists()
+         and Path("output/missing_history.jsonl").exists()
+         and Path("output/shootout_kicks.jsonl").exists()
+         and Path("output/wc2026_roster.jsonl").exists()),
+    reason="output/ JSONL artifacts not present (run the slice first)",
+)
+def test_player_history_jsonl_schema_smoke() -> None:
+    """Smoke test against the live output: every row in
+    `output/player_history.jsonl` has the 12 PRD-mandated fields, every
+    `x` is in [0, 2], every `side` is in {L, C, R}, every `outcome` is in
+    {Goal, Saved, Missed}, and the missing list has the 3 required fields
+    plus `team_name` (the full schema also carries `team_name` for parity
+    with the roster).
+    """
+    n_rows = 0
+    kickers_with_rows: set[int] = set()
+    with Path("output/player_history.jsonl").open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            row = json.loads(line)
+            assert REQUIRED_PLAYER_HISTORY_FIELDS <= set(row.keys()), (
+                f"row missing fields: {REQUIRED_PLAYER_HISTORY_FIELDS - set(row.keys())}"
+            )
+            assert 0.0 <= float(row["x"]) <= 2.0
+            assert row["side"] in {"L", "C", "R"}
+            assert row["outcome"] in {"Goal", "Saved", "Missed"}
+            n_rows += 1
+            kickers_with_rows.add(int(row["kicker_id"]))
+    assert n_rows > 0
+
+    n_missing = 0
+    missing_ids: set[int] = set()
+    with Path("output/missing_history.jsonl").open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            row = json.loads(line)
+            assert REQUIRED_MISSING_FIELDS <= set(row.keys())
+            missing_ids.add(int(row["player_id"]))
+            n_missing += 1
+    # Sanity: no kicker should appear in both the row list and the missing list.
+    assert kickers_with_rows.isdisjoint(missing_ids)
+
+    # Every Training Kicker (from `shootout_kicks.jsonl`) MUST have at least
+    # one row in `player_history.jsonl` — the model needs the training
+    # kickers' history. This is the issue #21 AC: "every Kicker in the
+    # Initial Set" interpreted strictly for the training subset.
+    training_kicker_ids: set[int] = set()
+    with Path("output/shootout_kicks.jsonl").open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            row = json.loads(line)
+            training_kicker_ids.add(int(row["kicker_id"]))
+    assert training_kicker_ids, "shootout_kicks.jsonl is empty"
+    uncovered_training = training_kicker_ids - kickers_with_rows
+    assert not uncovered_training, (
+        f"{len(uncovered_training)} training kickers have no penalty rows "
+        f"in the lookback window: {sorted(uncovered_training)[:10]}..."
+    )
+
+
