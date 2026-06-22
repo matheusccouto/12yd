@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 
-from penalty_pred.leagues import LEAGUE_BY_ID
 from penalty_pred.shootouts import (
     ShootoutMatchRef,
     extract_shootout_match_fixtures,
@@ -146,7 +145,13 @@ def test_league_seasons_constant_has_all_six_tournaments() -> None:
     from penalty_pred.shootouts import LEAGUE_SEASONS_PREDICT_WINDOW
 
     leagues = {lid for lid, _ in LEAGUE_SEASONS_PREDICT_WINDOW}
-    assert leagues == {league.league_id for league in LEAGUE_BY_ID.values()}
+    # `LEAGUE_BY_ID` is now the union of the 6 in-scope tournaments
+    # and the extended leagues (slice #4). The shootout scraper only
+    # iterates the in-scope tournaments, so we compare against `LEAGUES`
+    # (the in-scope table), not the full `LEAGUE_BY_ID`.
+    from penalty_pred.leagues import LEAGUES
+
+    assert leagues == {league.league_id for league in LEAGUES}
 
 
 def test_league_seasons_constant_covers_predict_window() -> None:
