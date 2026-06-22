@@ -8,6 +8,7 @@ prompt='
 4. Append a structured entry to progress.txt covering the task completed and PRD item reference, key decisions and reasoning, files changed, and blockers or notes for the next iteration.
 5. If the issue has acceptance criteria in docs/PRD.md, mark them done if applicable.
 6. Commit and push the change.
+7. Update the related issue and close it if its acceptance criteria are met.
 
 Work on a single task per iteration. Output <promise>COMPLETE</promise> if all work in the PRD is complete.
 
