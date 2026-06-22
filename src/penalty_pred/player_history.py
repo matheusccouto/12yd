@@ -81,10 +81,14 @@ class PlayerMetadata:
 
 
 # shotmap eventType → canonical outcome label (same map as shootouts.py).
+# `Post` is FotMob's tag for shots that hit the post without going in
+# (a miss in our domain — the keeper did not concede). See shootouts.py
+# for the rationale.
 _SHOTMAP_EVENT_TYPE_TO_OUTCOME: dict[str, str] = {
     "Goal": "Goal",
     "AttemptSaved": "Saved",
     "Miss": "Missed",
+    "Post": "Missed",
 }
 
 

@@ -55,10 +55,17 @@ class ShootoutKick:
 
 
 # shotmap eventType → canonical outcome label.
+# `Post` is FotMob's tag for shots that hit the post without going in
+# (a miss in our domain — the keeper did not concede). Off-target kicks
+# (`isOnTarget=False`) with a non-zero `onGoalShot.x` are also `Post`
+# when the shot clipped the post on its way wide. The PRD's
+# "Shootout Kick" glossary covers Goals, Saves, and Misses; `Post` is
+# a sub-class of Miss, so we map it to `Missed` for the canonical label.
 _SHOTMAP_EVENT_TYPE_TO_OUTCOME: dict[str, str] = {
     "Goal": "Goal",
     "AttemptSaved": "Saved",
     "Miss": "Missed",
+    "Post": "Missed",
 }
 
 
