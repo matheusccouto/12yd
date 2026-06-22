@@ -1,0 +1,33 @@
+name: ralph
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ralph
+  cancel-in-progress: false
+
+jobs:
+  ralph:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Install opencode
+        run: curl -fsSL https://opencode.ai/install | bash
+        env:
+          OPENCODE_INSTALL_DIR: /usr/local/bin
+
+      - name: Run ralph
+        run: bash ralph.sh
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}

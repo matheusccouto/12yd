@@ -1,3 +1,8 @@
+## System environment and global preferences:
+- GitHub CLI (gh) is installed and authenticated as matheusccouto
+- Preferred programming language: Python (use uv for package management, ruff for linting/formatting, and ty for static typing)
+
+
 ## Agent skills
 
 ### Issue tracker
