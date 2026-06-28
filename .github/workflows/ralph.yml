@@ -37,7 +37,7 @@ jobs:
           version: "latest"
 
       - name: Install Python dependencies
-        run: uv sync --extra dev
+        run: uv sync --group dev
 
       - name: Install hf CLI
         run: curl -LsSf https://hf.co/cli/install.sh | bash -s
