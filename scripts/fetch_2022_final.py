@@ -13,7 +13,7 @@ from pathlib import Path
 
 from penalty_pred.client import FotMobClient
 from penalty_pred.config import DEFAULT_CACHE_DIR
-from penalty_pred.shootouts import extract_shootout_kicks, fetch_match_data, write_jsonl
+from penalty_pred.shootouts import extract_shootout_kicks, write_jsonl
 
 # 2022 FIFA World Cup Final: Argentina vs France, matchId 3370572.
 # Slug segments are taken from the match pageUrl; seo/h2h are stable for the lifetime
@@ -44,7 +44,7 @@ def main() -> int:
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     client = FotMobClient(cache_dir=args.cache_dir)
-    data = fetch_match_data(client, args.match_id, args.seo, args.h2h)
+    data = client.get(f"matches/{args.seo}/{args.h2h}")
     kicks = extract_shootout_kicks(data)
     n = write_jsonl(args.output, kicks)
     print(f"Wrote {n} shootout kicks to {args.output}")

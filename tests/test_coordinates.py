@@ -4,29 +4,22 @@ from __future__ import annotations
 
 import pytest
 
-from penalty_pred.coordinates import (
-    LEFT_MAX,
-    RIGHT_MIN,
-    SIDE_CENTER,
-    SIDE_LEFT,
-    SIDE_RIGHT,
-    side,
-)
+from penalty_pred.coordinates import LEFT_MAX, RIGHT_MIN, side
 
 
 @pytest.mark.parametrize(
     ("x", "expected"),
     [
-        (0.0, SIDE_LEFT),
-        (0.1, SIDE_LEFT),
-        (0.5, SIDE_LEFT),
-        (LEFT_MAX - 1e-9, SIDE_LEFT),
-        (LEFT_MAX, SIDE_CENTER),
-        (1.0, SIDE_CENTER),
-        (RIGHT_MIN, SIDE_CENTER),
-        (RIGHT_MIN + 1e-9, SIDE_RIGHT),
-        (1.5, SIDE_RIGHT),
-        (2.0, SIDE_RIGHT),
+        (0.0, "L"),
+        (0.1, "L"),
+        (0.5, "L"),
+        (LEFT_MAX - 1e-9, "L"),
+        (LEFT_MAX, "C"),
+        (1.0, "C"),
+        (RIGHT_MIN, "C"),
+        (RIGHT_MIN + 1e-9, "R"),
+        (1.5, "R"),
+        (2.0, "R"),
     ],
 )
 def test_side_thresholds(x: float, expected: str) -> None:

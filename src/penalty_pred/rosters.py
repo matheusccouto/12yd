@@ -34,15 +34,10 @@ from typing import Any
 
 from .client import FotMobClient
 from .fotmob_parsing import coerce_int
-from .leagues import LEAGUE_BY_ID, League
+from .leagues import League
 from .match_ref import MatchRef
 from .shootouts import fetch_season_fixtures
-
-# FotMob leagueId + slug for the 2026 FIFA World Cup.
-WC_2026_LEAGUE: League = LEAGUE_BY_ID[77]
-
-# The FotMob `?season=` value for the 2026 World Cup (start year of the season).
-WC_2026_SEASON: int = 2026
+from .tournaments import WC_2026_LEAGUE, WC_2026_SEASON
 
 
 @dataclass(frozen=True)

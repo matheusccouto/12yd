@@ -26,11 +26,11 @@ from penalty_pred.client import FotMobClient
 from penalty_pred.config import DEFAULT_CACHE_DIR
 from penalty_pred.rsssf import load_rsssf_html, parse_rsssf_html
 from penalty_pred.shootouts import (
-    LEAGUE_SEASONS_PREDICT_WINDOW,
     fetch_all_shootout_kicks_with_skips,
     fetch_all_shootout_match_refs,
     write_jsonl,
 )
+from penalty_pred.tournaments import LEAGUE_SEASONS_PREDICT_WINDOW
 from penalty_pred.validate import validate_shootout_count
 
 # The RSSSF page is the verification oracle (PRD: "RSSSF is a verification

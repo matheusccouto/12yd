@@ -44,7 +44,6 @@ from penalty_pred.features import (
     filter_history,
     index_kicks_done,
     is_decisive_kick,
-    last_side,
     load_player_history,
     mode_kicking_foot,
     side_distribution,
@@ -111,20 +110,6 @@ def test_side_distribution_handles_only_relevant_values() -> None:
     to have bucketed via `coordinates.side`."""
     p_L, p_C, p_R = side_distribution(["L", "X", "L"], 5)
     assert (p_L, p_C, p_R) == (2 / 3, 0.0, 0.0)
-
-
-# ---------------------------------------------------------------------------
-# last_side
-# ---------------------------------------------------------------------------
-
-
-def test_last_side_empty_returns_empty_string() -> None:
-    assert last_side([]) == ""
-
-
-def test_last_side_returns_last_entry() -> None:
-    assert last_side(["L", "C", "R"]) == "R"
-    assert last_side(["R", "L", "C"]) == "C"
 
 
 # ---------------------------------------------------------------------------

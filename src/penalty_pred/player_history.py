@@ -41,6 +41,7 @@ from .fotmob_parsing import (
     coerce_int,
     parse_match_date,
 )
+from .leagues import LEAGUE_BY_ID
 from .match_ref import parse_page_url
 
 
@@ -265,8 +266,6 @@ def fetch_league_season_fixtures(
     pipeline; we duplicate it here so the player-history module has no
     dependency on the shootouts module's internals beyond the URL parser.
     """
-    from .leagues import LEAGUE_BY_ID  # local import to avoid a cycle
-
     league = LEAGUE_BY_ID.get(league_id)
     if league is None:
         # The player may have played in a league we don't have a slug for
@@ -635,7 +634,7 @@ def iter_initial_set_kickers(
             yield InitialSetKicker(
                 player_id=kicker_id,
                 player_name=str(roster_row.get("player_name") or row.get("kicker_name", "")),
-                team_id=_coalesce_int(roster_row.get("team_id"), row.get("team_id")),
+                team_id=coerce_int(roster_row.get("team_id") or row.get("team_id")),
                 team_name=str(roster_row.get("team_name", "")),
             )
 
@@ -646,29 +645,9 @@ def iter_initial_set_kickers(
         yield InitialSetKicker(
             player_id=player_id,
             player_name=str(row.get("player_name", "")),
-            team_id=_coalesce_int(row.get("team_id")),
+            team_id=coerce_int(row.get("team_id")),
             team_name=str(row.get("team_name", "")),
         )
-
-
-def _coalesce_int(*values: object) -> int:
-    """Return the first truthy int-coercible value, or 0.
-
-    Used to merge a roster row and a shootout-kick row for the same kicker:
-    the roster's `team_id` wins when present, otherwise the kick row's
-    `team_id`. Falls back to 0 when neither is set.
-    """
-    for v in values:
-        if v is None or v == "" or isinstance(v, bool):
-            continue
-        if isinstance(v, int):
-            return v
-        if isinstance(v, (str, bytes, bytearray)):
-            try:
-                return int(v)
-            except ValueError:
-                continue
-    return 0
 
 
 def fetch_all_initial_set_penalty_history(

@@ -6,7 +6,7 @@ Three layers:
    `counterfactual_save_rate`. Verifies the off-target-always-saves
    rule and the on-target-matches-the-dive rule.
 
-2. **Baselines** — `random_save_rate`, `kicker_most_frequent_save_rate`,
+2. **Baselines** — `random_save_rate`, `last_side_save_rate`,
    `actual_keeper_save_rate`. Verifies the closed-form random rate,
    the per-row kicker mode, and the N/A keeper baseline.
 
@@ -37,7 +37,7 @@ from penalty_pred.evaluate import (
     actual_keeper_save_rate,
     counterfactual_save_rate,
     evaluate_predictions,
-    kicker_most_frequent_save_rate,
+    last_side_save_rate,
     log_loss,
     random_save_rate,
     recommended_dive,
@@ -216,13 +216,13 @@ def test_random_save_rate_with_missing_class() -> None:
 
 
 # ---------------------------------------------------------------------------
-# kicker_most_frequent_save_rate
+# last_side_save_rate
 # ---------------------------------------------------------------------------
 
 
-def test_kicker_most_frequent_save_rate_dives_per_kicker_mode() -> None:
-    """For each row, the dive is the mode of the kicker's pre-kick
-    `last_side` field. The prior fallback is L when last_side is "".
+def test_last_side_save_rate_dives_per_row_last_side() -> None:
+    """For each row, the dive is the row's pre-kick `last_side` field.
+    The prior fallback is L when last_side is "".
     """
     rows = [
         _make_row("L", last_side="L", kicker_id=1),
@@ -230,7 +230,7 @@ def test_kicker_most_frequent_save_rate_dives_per_kicker_mode() -> None:
         _make_row("R", last_side="R", kicker_id=2),
         _make_row("L", last_side="", kicker_id=3),
     ]
-    sr, n = kicker_most_frequent_save_rate(rows)
+    sr, n = last_side_save_rate(rows)
     # Row 0: dive L, label L, match → save
     # Row 1: dive L, label L, match → save
     # Row 2: dive R, label R, match → save
@@ -240,9 +240,9 @@ def test_kicker_most_frequent_save_rate_dives_per_kicker_mode() -> None:
     assert n == 4
 
 
-def test_kicker_most_frequent_save_rate_empty() -> None:
+def test_last_side_save_rate_empty() -> None:
     """Empty input returns (None, 0)."""
-    sr, n = kicker_most_frequent_save_rate([])
+    sr, n = last_side_save_rate([])
     assert sr is None
     assert n == 0
 
@@ -341,6 +341,7 @@ def test_evaluate_predictions_returns_full_report() -> None:
     # kicker_most_frequent and actual_keeper have no log_loss / accuracy.
     assert report.kicker_most_frequent_baseline.log_loss is None
     assert report.kicker_most_frequent_baseline.accuracy is None
+    assert report.kicker_most_frequent_baseline.name == "last_side"
     assert report.actual_keeper_baseline.log_loss is None
     assert report.actual_keeper_baseline.save_rate is None
 

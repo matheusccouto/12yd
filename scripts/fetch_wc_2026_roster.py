@@ -30,12 +30,8 @@ from pathlib import Path
 
 from penalty_pred.client import FotMobClient
 from penalty_pred.config import DEFAULT_CACHE_DIR
-from penalty_pred.rosters import (
-    WC_2026_LEAGUE,
-    WC_2026_SEASON,
-    fetch_wc_2026_roster,
-    write_jsonl,
-)
+from penalty_pred.rosters import fetch_wc_2026_roster, write_jsonl
+from penalty_pred.tournaments import WC_2026_LEAGUE, WC_2026_SEASON
 
 
 def main() -> int:

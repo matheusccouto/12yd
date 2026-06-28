@@ -162,13 +162,6 @@ def side_distribution(sides: Sequence[str], n: int) -> tuple[float, float, float
     return (n_l / total, n_c / total, n_r / total)
 
 
-def last_side(sides: Sequence[str]) -> str:
-    """Return the side of the most recent kick, or "" if no history."""
-    if not sides:
-        return ""
-    return sides[-1]
-
-
 def mode_kicking_foot(shot_types: Sequence[str]) -> str:
     """Return the mode of `shot_types`, with "RightFoot" as the tiebreaker.
 
@@ -329,7 +322,8 @@ def filter_history(
     its own kicks.
 
     The result is sorted by `match_date` (ascending) so "last n" in
-    `side_distribution` and `last_side` means the most recent n.
+    `side_distribution` and the model's `last_side` feature means the
+    most recent n.
     """
     out: list[PlayerPenalty] = []
     for row in history:
@@ -386,7 +380,7 @@ def build_features(
         p_L_20=p_L_20,
         p_C_20=p_C_20,
         p_R_20=p_R_20,
-        last_side=last_side(sides),
+        last_side=sides[-1] if sides else "",
         kicking_foot=mode_kicking_foot(shot_types),
         career_penalty_count=len(filtered),
         b1_kick_number=target.kick_number,

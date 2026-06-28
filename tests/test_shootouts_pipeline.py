@@ -141,7 +141,7 @@ def test_from_fixture_team_names() -> None:
 
 
 def test_league_seasons_constant_has_all_six_tournaments() -> None:
-    from penalty_pred.shootouts import LEAGUE_SEASONS_PREDICT_WINDOW
+    from penalty_pred.tournaments import LEAGUE_SEASONS_PREDICT_WINDOW
 
     leagues = {lid for lid, _ in LEAGUE_SEASONS_PREDICT_WINDOW}
     # `LEAGUE_BY_ID` is now the union of the 6 in-scope tournaments
@@ -156,7 +156,7 @@ def test_league_seasons_constant_has_all_six_tournaments() -> None:
 def test_league_seasons_constant_covers_predict_window() -> None:
     """The 15 (league, season) pairs cover all tournaments with shootouts
     between 2021-01-01 and today (2026-06-22)."""
-    from penalty_pred.shootouts import LEAGUE_SEASONS_PREDICT_WINDOW
+    from penalty_pred.tournaments import LEAGUE_SEASONS_PREDICT_WINDOW
 
     expected = {
         (77, 2022),  # World Cup 2022
@@ -248,52 +248,6 @@ def test_processes_match_when_response_id_matches(
     assert len(results) == 1
     assert results[0].skipped is False
     assert len(results[0].kicks) == 8
-
-
-def test_fetch_all_kicks_simple_still_works(
-    tmp_path: Path, sample_2022_final: dict[str, object]
-) -> None:
-    """`fetch_all_shootout_kicks` keeps the simple (kicks-only) API for tests."""
-    from penalty_pred.client import FotMobClient
-    from penalty_pred.match_ref import MatchRef
-    from penalty_pred.shootouts import fetch_all_shootout_kicks
-
-    real_ref = MatchRef(
-        match_id=3370572,
-        seo="argentina-vs-france",
-        h2h="1hox8a",
-        round_name="Final",
-        home_team_name="Argentina",
-        away_team_name="France",
-        match_date="2022-12-18T15:00:00Z",
-        score_str="3 - 3",
-    )
-    client = FotMobClient(cache_dir=tmp_path)
-    kicks = list(fetch_all_shootout_kicks(client, [real_ref]))
-    assert len(kicks) == 8
-
-
-def test_fetch_all_kicks_skips_stale_match_silently(
-    tmp_path: Path, sample_2022_final: dict[str, object]
-) -> None:
-    """`fetch_all_shootout_kicks` silently skips stale-URL matches."""
-    from penalty_pred.client import FotMobClient
-    from penalty_pred.match_ref import MatchRef
-    from penalty_pred.shootouts import fetch_all_shootout_kicks
-
-    fake_ref = MatchRef(
-        match_id=999999,
-        seo="argentina-vs-france",
-        h2h="1hox8a",
-        round_name="Final",
-        home_team_name="Argentina",
-        away_team_name="France",
-        match_date="2022-12-18T15:00:00Z",
-        score_str="3 - 3",
-    )
-    client = FotMobClient(cache_dir=tmp_path)
-    kicks = list(fetch_all_shootout_kicks(client, [fake_ref]))
-    assert kicks == []  # silently skipped
 
 
 def test_marks_match_as_no_kicks_when_shotmap_empty(

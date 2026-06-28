@@ -128,18 +128,16 @@ def random_save_rate(labels: np.ndarray, on_target: np.ndarray) -> tuple[float, 
     return (p_off + p_on * p_match, n)
 
 
-def kicker_most_frequent_save_rate(
+def last_side_save_rate(
     rows: Sequence[TrainingRow],
 ) -> tuple[float | None, int]:
-    """The save rate for a keeper who dives each kicker's most-frequent side.
+    """The save rate for a keeper who dives the kicker's `last_side` feature.
 
-    For each row, the recommended dive is the mode of the kicker's
-    `last_side` feature (the A2 feature: the side of the kicker's most
-    recent penalty in the lookback). The mode is computed per kicker
-    across the row's own history; if the kicker has no history, the
-    dive is the prior's mode (the L side, since `(1/3, 1/3, 1/3)` has
-    no mode — we pick L for determinism). This matches the model's
-    "use the prior when the data is missing" behaviour.
+    For each row, the recommended dive is the A2 `last_side` field
+    (the side of the kicker's most recent penalty in the lookback).
+    If the kicker has no history, the dive falls back to L (the prior's
+    tiebreaker). This matches the model's "use the prior when the data
+    is missing" behaviour.
 
     Rows whose kicker has no historical kicks cannot improve on the
     random baseline in aggregate; the function reports `None` if the
@@ -152,16 +150,6 @@ def kicker_most_frequent_save_rate(
     n = len(rows)
     if n == 0:
         return (None, 0)
-    # Build per-kicker mode from last_side across their full history in
-    # the input. The caller is expected to have provided a sequence
-    # where each row is one shootout kick with its row.features carrying
-    # the kicker's pre-kick history mode in `last_side`. We use a simpler
-    # approach: for each row, look up the kicker's pre-kick side
-    # distribution via a derived mode from the `last_side` field that
-    # is the side of the kicker's most recent kick before this target.
-    # That is exactly what `last_side` stores. So the per-kicker mode
-    # is "L if last_side == 'L' else R if 'R' else C if 'C' else L
-    # (prior fallback)".
     saves = 0
     for row in rows:
         last = row.features.get("last_side", "")
@@ -336,13 +324,13 @@ def evaluate_predictions(
         save_rate=rand_save,
         n_kicks=rand_n,
     )
-    kmf_save, kmf_n = kicker_most_frequent_save_rate(holdout_rows)
-    kmf_metrics = BaselineMetrics(
-        name="kicker_most_frequent",
+    last_save, last_n = last_side_save_rate(holdout_rows)
+    last_metrics = BaselineMetrics(
+        name="last_side",
         log_loss=None,  # not a probabilistic baseline
         accuracy=None,
-        save_rate=kmf_save,
-        n_kicks=kmf_n,
+        save_rate=last_save,
+        n_kicks=last_n,
     )
     ak_save, ak_n = actual_keeper_save_rate(holdout_rows)
     ak_metrics = BaselineMetrics(
@@ -366,7 +354,7 @@ def evaluate_predictions(
         model=model_metrics,
         baseline=baseline_metrics,
         random_baseline=random_metrics,
-        kicker_most_frequent_baseline=kmf_metrics,
+        kicker_most_frequent_baseline=last_metrics,
         actual_keeper_baseline=ak_metrics,
         n_train=0,  # filled in by the caller
         n_holdout=n,

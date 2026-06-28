@@ -22,17 +22,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-# The six section headings on the RSSSF page, mapped to FotMob league names.
-# Used to filter to only the 6 in-scope tournaments (the page also lists the
-# Confederations Cup, which is out of scope for v1).
-RSSSF_TO_LEAGUE_NAME: dict[str, str] = {
-    "World Cup": "World Cup",
-    "European Nations' Cup": "Euro",
-    "Copa América": "Copa América",
-    "African Nations Cup": "Africa Cup of Nations",
-    "Gold Cup": "CONCACAF Gold Cup",
-    "Asian Nations Cup": "AFC Asian Cup",
-}
+from .leagues import LEAGUE_BY_ID
+from .tournaments import RSSSF_TO_LEAGUE_NAME
 
 # The Confederations Cup is on the page but out of scope for v1.
 RSSSF_OUT_OF_SCOPE: frozenset[str] = frozenset({"Confederations Cup"})
@@ -124,8 +115,6 @@ def count_shootouts_by_pairs(
     in 2021. We anchor on the (FotMob league_id, season) pair the scraper
     uses as the source of truth.
     """
-    from .leagues import LEAGUE_BY_ID  # Local import to avoid a cycle.
-
     target: set[tuple[str, int]] = set()
     for league_id, season in league_seasons:
         league = LEAGUE_BY_ID[league_id]

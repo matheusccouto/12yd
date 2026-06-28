@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from penalty_pred.rsssf import load_rsssf_html, parse_rsssf_html
-from penalty_pred.shootouts import LEAGUE_SEASONS_PREDICT_WINDOW
+from penalty_pred.tournaments import LEAGUE_SEASONS_PREDICT_WINDOW
 from penalty_pred.validate import validate_shootout_count
 
 REPO_ROOT = Path(__file__).resolve().parent.parent

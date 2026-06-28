@@ -33,8 +33,6 @@ from penalty_pred.client import FotMobClient
 from penalty_pred.leagues import LEAGUE_BY_ID
 from penalty_pred.match_ref import MatchRef
 from penalty_pred.rosters import (
-    WC_2026_LEAGUE,
-    WC_2026_SEASON,
     RosterPlayer,
     extract_lineup_players,
     fetch_wc_2026_roster,
@@ -42,6 +40,7 @@ from penalty_pred.rosters import (
     read_jsonl,
     write_jsonl,
 )
+from penalty_pred.tournaments import WC_2026_LEAGUE, WC_2026_SEASON
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SAMPLE_LEAGUE_PATH = REPO_ROOT / "docs" / "samples" / "league_wc_2026_slim.json"

@@ -10,16 +10,11 @@ from __future__ import annotations
 LEFT_MAX: float = 0.667
 RIGHT_MIN: float = 1.333
 
-Side = str  # "L" | "C" | "R"
-SIDE_LEFT: Side = "L"
-SIDE_CENTER: Side = "C"
-SIDE_RIGHT: Side = "R"
 
-
-def side(x: float) -> Side:
-    """Bucket a goal-mouth coordinate in [0, 2] to a side string."""
+def side(x: float) -> str:
+    """Bucket a goal-mouth coordinate in [0, 2] to a side string ("L" | "C" | "R")."""
     if x < LEFT_MAX:
-        return SIDE_LEFT
+        return "L"
     if x > RIGHT_MIN:
-        return SIDE_RIGHT
-    return SIDE_CENTER
+        return "R"
+    return "C"
