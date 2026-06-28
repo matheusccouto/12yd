@@ -1,36 +1,33 @@
-"""Per-kicker penalty history fetcher.
+"""Per-kicker penalty history fetcher (FotMob fan-out).
 
-PRD: For every Kicker in the union of Training and Prediction Initial Sets,
-fetch all their penalty kicks (shootout + in-match) over a 5-year Lookback
-Window floored at 2016-01-01. The data graph is two-level: the Initial Set
-(per-player lookup) fans out to the Derived History (per-match penalty
-shots). No further fetches originate from the Derived History — a scraper
-that fans out from there is a bug, not a feature.
+PRD: For a given Kicker (one Initial Set entry), fetch all their penalty
+kicks (shootout + in-match) over a 5-year Lookback Window floored at
+2016-01-01. The data graph is two-level: the Initial Set (per-player
+lookup) fans out to the Derived History (per-match penalty shots). No
+further fetches originate from the Derived History — a scraper that fans
+out from there is a bug, not a feature.
 
-The source of truth for the per-kicker lookup is the player page's
-`pageProps.data.careerHistory`. We iterate `careerItems.senior` and
-`careerItems["national team"]` (skip `careerItems.youth` — out of scope
-for v1), and for each (team, season) overlap with the lookback window we
-fetch the league's season fixtures, filter to the team's matches, and
-extract the player's penalty shots from each match's shotmap.
+The Initial Set assembly (Training ∪ Prediction, dedup) and the
+per-kicker fan-out across the Initial Set live in `initial_set`. This
+module is the per-kicker FotMob fan-out only.
 
-The shootout penalty shots live in the same `pageProps.content.shotmap.shots`
-array as in-match penalties; the discriminator is `situation == "Penalty"`
-(present for both) and the period is implicit (a shootout shot has
-`period == "PenaltyShootout"`, an in-match shot has `period` in the
-`FirstHalf`/`SecondHalf`/... set). We keep both — the per-kicker history
-is over every penalty, not just shootout kicks.
+The per-kicker lookup walks the player page's `careerHistory`: iterate
+`careerItems.senior` and `careerItems["national team"]` (skip
+`careerItems.youth`), and for each (team, season) overlap with the
+lookback window fetch the league's season fixtures, filter to the team's
+matches, and extract the player's penalty shots from each match's
+shotmap. Shootout kicks are filtered by `period == "PenaltyShootout"`;
+in-match penalties by `situation == "Penalty"`. Both are kept — the
+per-kicker history is over every penalty, not just shootout kicks.
 """
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from email.utils import parsedate_to_datetime
-from pathlib import Path
 from typing import Any
 
 from .client import FotMobClient
@@ -86,9 +83,7 @@ class PlayerMetadata:
     birth_date: str  # ISO 8601 date (UTC)
 
 
-# ---------------------------------------------------------------------------
 # Player page helpers
-# ---------------------------------------------------------------------------
 
 
 def fetch_player_data(client: FotMobClient, player_id: int, slug: str = "") -> Mapping[str, Any]:
@@ -98,9 +93,9 @@ def fetch_player_data(client: FotMobClient, player_id: int, slug: str = "") -> M
     is the kebab-case player name (e.g. "lionel-messi"); it is part of
     the URL but FotMob does not use it for routing — the playerId is
     authoritative. We accept it as a parameter to keep the URL stable
-    for caching, but the all-Initial-Set fan-out (slice #5, Issue #21)
-    uses the no-slug form `players/{id}` because we do not have slugs
-    for every kicker. Both forms return the same payload.
+    for caching, but the all-Initial-Set fan-out (`initial_set`) uses
+    the no-slug form `players/{id}` because we do not have slugs for
+    every kicker. Both forms return the same payload.
 
     The `slug` parameter is kept for callers (and tests) that already
     know it. An empty string yields the no-slug URL.
@@ -163,9 +158,7 @@ def _parse_birth_date(birth_date: Any) -> str:
         return ""
 
 
-# ---------------------------------------------------------------------------
 # Career history traversal
-# ---------------------------------------------------------------------------
 
 
 def iter_career_season_entries(
@@ -203,9 +196,7 @@ def season_name_to_year(season_name: str) -> int:
     return int(match.group(1))
 
 
-# ---------------------------------------------------------------------------
 # Per-team-season traversal
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -297,9 +288,7 @@ def filter_fixtures_by_team(
             yield fixture
 
 
-# ---------------------------------------------------------------------------
 # Per-match extraction
-# ---------------------------------------------------------------------------
 
 
 def extract_player_penalties_from_match(
@@ -369,9 +358,7 @@ def extract_player_penalties_from_match(
     return out
 
 
-# ---------------------------------------------------------------------------
 # Top-level orchestrator
-# ---------------------------------------------------------------------------
 
 
 def compute_lookback_window(
@@ -411,8 +398,8 @@ def fetch_player_penalty_history(
     "who else was on this team?" or "what else was in this match?".
 
     `player_slug` is optional: FotMob does not use it for routing (the
-    `player_id` is authoritative), so the all-Initial-Set fan-out (slice
-    #5, Issue #21) calls with `player_slug=""` for every kicker it does
+    `player_id` is authoritative), so the all-Initial-Set fan-out (in
+    `initial_set`) calls with `player_slug=""` for every kicker it does
     not have a slug for. The default target date is the current day; the
     slice's default is 2022-12-18 (the 2022 WC Final) so the test case
     is reproducible.
@@ -502,185 +489,7 @@ def _process_match_fixture(
     )
 
 
-# ---------------------------------------------------------------------------
-# Initial Set fan-out (slice #5, Issue #21)
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class InitialSetKicker:
-    """A Kicker in the Initial Set, identified by `player_id`.
-
-    The Initial Set is the union of training kickers (read from
-    `shootout_kicks.jsonl`) and prediction kickers (read from
-    `wc2026_roster.jsonl`). Both sources carry the player's national
-    team id (`team_id`); only the roster source carries a human-readable
-    `team_name`. Training kickers not in the roster (e.g. retired players
-    from earlier tournaments) have `team_name == ""`.
-
-    We do NOT carry the player slug — FotMob does not use the slug for
-    routing, only the `player_id` is authoritative, so the per-kicker
-    fetcher uses the no-slug URL form.
-    """
-
-    player_id: int
-    player_name: str
-    team_id: int
-    team_name: str  # "" for training kickers not in the prediction roster
-
-
-@dataclass(frozen=True)
-class MissingKicker:
-    """An Initial Set Kicker with zero penalty rows in the lookback window.
-
-    Written to `missing_history.jsonl` so downstream slices (#22 features,
-    #25 predictions) can decide whether to skip them or use a prior-based
-    fallback. We carry `team_name` for parity with the roster (some
-    downstream views show the player name + team together).
-    """
-
-    player_id: int
-    player_name: str
-    team_id: int
-    team_name: str
-
-
-@dataclass(frozen=True)
-class InitialSetFetchResult:
-    """The per-kicker outcome of `fetch_all_initial_set_penalty_history`.
-
-    `kicker` is the input Initial Set Kicker. `rows` is the list of
-    `PlayerPenalty` records found in the lookback window (possibly empty).
-    `error` is the stringified exception when the per-kicker fetch raised
-    (e.g. a transient FotMob 5xx); the kicker is reported as missing in
-    that case but the run continues. Successful fetches that yielded zero
-    rows have `error=None, rows=[]`.
-    """
-
-    kicker: InitialSetKicker
-    rows: list[PlayerPenalty]
-    error: str | None = None
-
-
-def iter_initial_set_kickers(
-    shootout_kicks_path: Path,
-    roster_path: Path,
-) -> Iterator[InitialSetKicker]:
-    """Yield the deduplicated union of training and prediction Kickers.
-
-    Training kickers come from `shootout_kicks.jsonl` (Issue #19). The row
-    carries `kicker_id`, `kicker_name`, and `team_id` but not `team_name`
-    (the team name is not on the shootout kick row). Prediction kickers
-    come from `wc2026_roster.jsonl` (Issue #18) and carry the full
-    (player_id, player_name, team_id, team_name) tuple.
-
-    Dedup + enrichment:
-    1. Read the roster into a dict by `player_id` (small, fits in memory).
-    2. Yield training kickers first, enriched with the roster's
-       `team_name` (and `player_name`/`team_id` if the roster has a more
-       up-to-date value) when the kicker is in both sets.
-    3. Yield roster-only kickers (not in training) at the end.
-
-    The "training first, roster-only last" ordering is what the caller
-    needs to tell apart a kicker the model is going to be trained on
-    (a shootout taker from a past tournament) from a kicker we only
-    know from the WC roster (no shootout kicks yet).
-
-    Two-level data graph preserved: the Initial Set is built from the
-    Training Initial Set (shootout kicks) and the Prediction Initial Set
-    (WC roster) — neither of which is derived from per-player penalty
-    data. The orchestrator never fans out from the Derived History
-    (per-kicker penalty rows) back into the Initial Set.
-    """
-    roster_by_id: dict[int, dict[str, object]] = {}
-    with roster_path.open(encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            row = json.loads(line)
-            pid = int(row.get("player_id", 0))
-            if pid:
-                roster_by_id[pid] = row
-
-    seen: set[int] = set()
-    with shootout_kicks_path.open(encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            row = json.loads(line)
-            kicker_id = int(row.get("kicker_id", 0))
-            if not kicker_id or kicker_id in seen:
-                continue
-            seen.add(kicker_id)
-            roster_row = roster_by_id.get(kicker_id) or {}
-            yield InitialSetKicker(
-                player_id=kicker_id,
-                player_name=str(roster_row.get("player_name") or row.get("kicker_name", "")),
-                team_id=coerce_int(roster_row.get("team_id") or row.get("team_id")),
-                team_name=str(roster_row.get("team_name", "")),
-            )
-
-    for player_id, row in roster_by_id.items():
-        if player_id in seen:
-            continue
-        seen.add(player_id)
-        yield InitialSetKicker(
-            player_id=player_id,
-            player_name=str(row.get("player_name", "")),
-            team_id=coerce_int(row.get("team_id")),
-            team_name=str(row.get("team_name", "")),
-        )
-
-
-def fetch_all_initial_set_penalty_history(
-    client: FotMobClient,
-    initial_set: Iterable[InitialSetKicker],
-    target_date: date | None = None,
-    lookback_years: int = LOOKBACK_WINDOW_YEARS,
-    history_floor: date = HISTORY_FLOOR,
-) -> Iterator[InitialSetFetchResult]:
-    """Fan out the per-kicker fetcher across the Initial Set.
-
-    Yields one `InitialSetFetchResult` per kicker, in input order. Per-kicker
-    fetch errors (transient FotMob 5xx, malformed player pages, etc.) are
-    caught and recorded in `error`; the kicker is reported as missing in
-    that case but the run continues. A successful fetch that returned
-    zero penalty rows in the window has `error=None, rows=[]`.
-
-    `target_date` defaults to 2022-12-18 (the 2022 WC Final) for the same
-    reason as `fetch_player_penalty_history`. The all-Initial-Set slice
-    uses `target_date=today_utc()` from `config` so the lookback window
-    ends "now" (we want every penalty the player took up to the present,
-    not just up to a fixed historical date).
-
-    Two-level data graph preserved: this orchestrator fans out across the
-    Initial Set (per-player) only; the per-kicker fetcher fans out
-    across per-team-season lookups within the player's career. The Derived
-    History (per-match penalty rows) is a leaf in the graph — we never
-    recurse from there.
-    """
-    for kicker in initial_set:
-        try:
-            rows = list(
-                fetch_player_penalty_history(
-                    client,
-                    player_id=kicker.player_id,
-                    target_date=target_date,
-                    lookback_years=lookback_years,
-                    history_floor=history_floor,
-                )
-            )
-        except Exception as e:  # noqa: BLE001 — boundary: one bad kicker must not abort the run
-            yield InitialSetFetchResult(kicker=kicker, rows=[], error=repr(e))
-            continue
-        yield InitialSetFetchResult(kicker=kicker, rows=rows, error=None)
-
-
-# ---------------------------------------------------------------------------
 # Internals
-# ---------------------------------------------------------------------------
 
 
 def _parse_fixture_date(value: str) -> date | None:

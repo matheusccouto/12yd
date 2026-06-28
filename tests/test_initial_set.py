@@ -1,16 +1,18 @@
-"""Tests for the Initial Set fan-out (slice #5, Issue #21).
+"""Tests for the Initial Set assembly and per-kicker orchestration.
 
 The tests cover three layers:
 
 1. **Pure helpers**: `iter_initial_set_kickers` dedup, ordering, and
-   the no-slug URL form for `fetch_player_data`. No network.
+   enrichment. No network. The typed iterables are sourced from JSONL
+   through the same `Artifacts` adapter the slice script uses, so the
+   test surface follows the production surface.
 
 2. **Orchestration**: `fetch_all_initial_set_penalty_history` against a
    stubbed `FotMobClient` that returns canned per-kicker data. Verifies
    the per-kicker yield, the error-capture (a single bad kicker must
    not abort the run), and the empty input case.
 
-3. **JSONL helpers**: `write_missing_jsonl` roundtrip and the
+3. **JSONL helpers**: `write_missing_history` roundtrip and the
    `InitialSetKicker` / `MissingKicker` / `InitialSetFetchResult`
    dataclass shapes.
 """
@@ -27,70 +29,65 @@ import pytest
 
 from penalty_pred.artifacts import Artifacts
 from penalty_pred.client import FotMobClient
-from penalty_pred.player_history import (
+from penalty_pred.initial_set import (
     InitialSetFetchResult,
     InitialSetKicker,
     MissingKicker,
     fetch_all_initial_set_penalty_history,
-    fetch_player_data,
     iter_initial_set_kickers,
 )
+from penalty_pred.player_history import fetch_player_data
+from penalty_pred.rosters import RosterPlayer
+from penalty_pred.shootouts import ShootoutKick
 
 # ---------------------------------------------------------------------------
-# Sample JSONL builders (for the iter_initial_set_kickers tests)
+# Typed row builders (the iter_initial_set_kickers tests)
 # ---------------------------------------------------------------------------
 
 
-def _shootout_kick_row(
-    match_id: int,
+def _shootout_kick(
     kicker_id: int,
-    kicker_name: str,
-    team_id: int,
-    x: float = 0.5,
-    side: str = "L",
-) -> dict[str, object]:
-    return {
-        "match_id": match_id,
-        "match_date": "2022-12-18T15:00:00+00:00",
-        "tournament_id": 77,
-        "tournament_name": "World Cup",
-        "round": "Final",
-        "kick_number": 1,
-        "kicker_id": kicker_id,
-        "kicker_name": kicker_name,
-        "team_id": team_id,
-        "is_home": True,
-        "x": x,
-        "side": side,
-        "is_on_target": True,
-        "outcome": "Goal",
-        "pen_score_before": [0, 0],
-        "pen_score_after": [1, 0],
-        "match_score_home": 3,
-        "match_score_away": 3,
-    }
+    kicker_name: str = "Stub",
+    team_id: int = 0,
+    match_id: int = 1,
+) -> ShootoutKick:
+    """A minimal `ShootoutKick` carrying only the fields `iter_initial_set_kickers`
+    reads. Other fields are zeroed — they are not on this code path."""
+    return ShootoutKick(
+        match_id=match_id,
+        match_date="2022-12-18T15:00:00+00:00",
+        tournament_id=77,
+        tournament_name="World Cup",
+        round="Final",
+        kick_number=1,
+        kicker_id=kicker_id,
+        kicker_name=kicker_name,
+        team_id=team_id,
+        is_home=True,
+        x=0.5,
+        side="L",
+        is_on_target=True,
+        outcome="Goal",
+        pen_score_before=[0, 0],
+        pen_score_after=[1, 0],
+        match_score_home=3,
+        match_score_away=3,
+    )
 
 
-def _roster_row(
+def _roster_player(
     player_id: int,
-    player_name: str,
-    team_id: int,
-    team_name: str,
-) -> dict[str, object]:
-    return {
-        "player_id": player_id,
-        "player_name": player_name,
-        "team_id": team_id,
-        "team_name": team_name,
-        "country_code": "ARG",
-    }
-
-
-def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
-    with path.open("w", encoding="utf-8") as f:
-        for row in rows:
-            f.write(json.dumps(row, ensure_ascii=False))
-            f.write("\n")
+    player_name: str = "Stub",
+    team_id: int = 0,
+    team_name: str = "",
+) -> RosterPlayer:
+    return RosterPlayer(
+        player_id=player_id,
+        player_name=player_name,
+        team_id=team_id,
+        team_name=team_name,
+        country_code="ARG",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -98,34 +95,26 @@ def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_iter_initial_set_kickers_dedupes_by_player_id(tmp_path: Path) -> None:
+def test_iter_initial_set_kickers_dedupes_by_player_id() -> None:
     """Training kickers are emitted first, then roster-only kickers.
     Kickers present in both sets keep the roster record (because the
     roster row has the team_name)."""
-    shootout = tmp_path / "shootout_kicks.jsonl"
-    _write_jsonl(
-        shootout,
-        [
-            _shootout_kick_row(1, kicker_id=100, kicker_name="Alpha", team_id=1),
-            _shootout_kick_row(1, kicker_id=200, kicker_name="Bravo", team_id=1),
-            # Duplicate kicker_id 100 within the training set itself — the
-            # same player can take multiple kicks in a single shootout.
-            # Dedupe is by player_id, so this second row is dropped.
-            _shootout_kick_row(1, kicker_id=100, kicker_name="Alpha", team_id=1),
-        ],
-    )
-    roster = tmp_path / "wc2026_roster.jsonl"
-    _write_jsonl(
-        roster,
-        [
-            # Bravo is in both — roster row wins (has team_name).
-            _roster_row(200, "Bravo", team_id=1, team_name="Argentina"),
-            # Charlie is roster-only.
-            _roster_row(300, "Charlie", team_id=2, team_name="Brazil"),
-        ],
-    )
+    shootout_kicks = [
+        _shootout_kick(kicker_id=100, kicker_name="Alpha", team_id=1),
+        _shootout_kick(kicker_id=200, kicker_name="Bravo", team_id=1),
+        # Duplicate kicker_id 100 within the training set itself — the
+        # same player can take multiple kicks in a single shootout.
+        # Dedupe is by player_id, so this second row is dropped.
+        _shootout_kick(kicker_id=100, kicker_name="Alpha", team_id=1),
+    ]
+    roster = [
+        # Bravo is in both — roster row wins (has team_name).
+        _roster_player(200, "Bravo", team_id=1, team_name="Argentina"),
+        # Charlie is roster-only.
+        _roster_player(300, "Charlie", team_id=2, team_name="Brazil"),
+    ]
 
-    kickers = list(iter_initial_set_kickers(shootout, roster))
+    kickers = list(iter_initial_set_kickers(shootout_kicks, roster))
     assert len(kickers) == 3
     assert [k.player_id for k in kickers] == [100, 200, 300]
     # Training-only row (Alpha) has no team_name.
@@ -140,60 +129,54 @@ def test_iter_initial_set_kickers_dedupes_by_player_id(tmp_path: Path) -> None:
     assert kickers[2].team_name == "Brazil"
 
 
-def test_iter_initial_set_kickers_handles_empty_inputs(tmp_path: Path) -> None:
-    """Empty input files yield no kickers."""
-    shootout = tmp_path / "shootout_kicks.jsonl"
-    roster = tmp_path / "wc2026_roster.jsonl"
-    _write_jsonl(shootout, [])
-    _write_jsonl(roster, [])
-    assert list(iter_initial_set_kickers(shootout, roster)) == []
+def test_iter_initial_set_kickers_handles_empty_inputs() -> None:
+    """Empty inputs yield no kickers."""
+    assert list(iter_initial_set_kickers([], [])) == []
 
 
-def test_iter_initial_set_kickers_skips_blank_lines(tmp_path: Path) -> None:
-    """A JSONL file with blank lines between rows is parsed correctly."""
-    shootout = tmp_path / "shootout_kicks.jsonl"
-    _write_jsonl(
-        shootout,
-        [
-            _shootout_kick_row(1, kicker_id=100, kicker_name="Alpha", team_id=1),
-        ],
-    )
-    # Inject blank lines.
-    raw = shootout.read_text(encoding="utf-8")
-    shootout.write_text("\n\n" + raw + "\n\n", encoding="utf-8")
-    roster = tmp_path / "wc2026_roster.jsonl"
-    _write_jsonl(roster, [])
-    kickers = list(iter_initial_set_kickers(shootout, roster))
-    assert [k.player_id for k in kickers] == [100]
-
-
-def test_iter_initial_set_kickers_training_only(tmp_path: Path) -> None:
-    """A roster file with no rows still yields the training kickers."""
-    shootout = tmp_path / "shootout_kicks.jsonl"
-    _write_jsonl(
-        shootout,
-        [_shootout_kick_row(1, kicker_id=100, kicker_name="Alpha", team_id=1)],
-    )
-    roster = tmp_path / "wc2026_roster.jsonl"
-    _write_jsonl(roster, [])
-    kickers = list(iter_initial_set_kickers(shootout, roster))
+def test_iter_initial_set_kickers_training_only() -> None:
+    """An empty roster still yields the training kickers."""
+    shootout_kicks = [_shootout_kick(kicker_id=100, kicker_name="Alpha", team_id=1)]
+    kickers = list(iter_initial_set_kickers(shootout_kicks, []))
     assert len(kickers) == 1
     assert kickers[0].player_id == 100
 
 
-def test_iter_initial_set_kickers_roster_only(tmp_path: Path) -> None:
-    """An empty shootout file still yields the roster kickers."""
-    shootout = tmp_path / "shootout_kicks.jsonl"
-    _write_jsonl(shootout, [])
-    roster = tmp_path / "wc2026_roster.jsonl"
-    _write_jsonl(
-        roster,
-        [_roster_row(300, "Charlie", team_id=2, team_name="Brazil")],
-    )
-    kickers = list(iter_initial_set_kickers(shootout, roster))
+def test_iter_initial_set_kickers_roster_only() -> None:
+    """Empty training data still yields the roster kickers."""
+    roster = [_roster_player(300, "Charlie", team_id=2, team_name="Brazil")]
+    kickers = list(iter_initial_set_kickers([], roster))
     assert len(kickers) == 1
     assert kickers[0].player_id == 300
     assert kickers[0].team_name == "Brazil"
+
+
+def test_iter_initial_set_kickers_reads_through_artifacts(tmp_path: Path) -> None:
+    """The slice's production path (Artifacts.read_* + iter_initial_set_kickers)
+    is exercised end-to-end against a JSONL fixture. The test pins the
+    seam at the data layer, not at the per-field construction site."""
+    art = Artifacts(root=tmp_path)
+    art.write_shootout_kicks(
+        [
+            _shootout_kick(kicker_id=100, kicker_name="Alpha", team_id=1),
+            _shootout_kick(kicker_id=200, kicker_name="Bravo", team_id=1),
+        ],
+    )
+    art.write_roster(
+        [
+            _roster_player(200, "Bravo", team_id=1, team_name="Argentina"),
+            _roster_player(300, "Charlie", team_id=2, team_name="Brazil"),
+        ],
+    )
+    kickers = list(
+        iter_initial_set_kickers(
+            art.read_shootout_kicks(),
+            art.read_roster(),
+        )
+    )
+    assert [k.player_id for k in kickers] == [100, 200, 300]
+    assert kickers[1].team_name == "Argentina"
+    assert kickers[2].team_name == "Brazil"
 
 
 # ---------------------------------------------------------------------------
@@ -654,5 +637,3 @@ def test_player_history_jsonl_schema_smoke() -> None:
         f"{len(uncovered_training)} training kickers have no penalty rows "
         f"in the lookback window: {sorted(uncovered_training)[:10]}..."
     )
-
-

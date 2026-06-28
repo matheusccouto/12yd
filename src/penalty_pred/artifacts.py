@@ -52,13 +52,14 @@ from typing import Any, TypeVar
 from .client import FotMobClient
 from .evaluate import MetricsReport
 from .features import TrainingRow
+from .initial_set import MissingKicker
 from .model import (
     load_artifact as _model_load_artifact,
 )
 from .model import (
     save_artifact as _model_save_artifact,
 )
-from .player_history import MissingKicker, PlayerPenalty
+from .player_history import PlayerPenalty
 from .predict import PredictionRow
 from .rosters import RosterPlayer
 from .shootouts import ShootoutKick

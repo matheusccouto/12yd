@@ -20,7 +20,8 @@ import pytest
 from penalty_pred.artifacts import Artifacts
 from penalty_pred.evaluate import BaselineMetrics, MetricsReport
 from penalty_pred.features import TrainingRow
-from penalty_pred.player_history import MissingKicker, PlayerPenalty
+from penalty_pred.initial_set import MissingKicker
+from penalty_pred.player_history import PlayerPenalty
 from penalty_pred.predict import PredictionRow
 from penalty_pred.rosters import RosterPlayer
 from penalty_pred.shootouts import ShootoutKick

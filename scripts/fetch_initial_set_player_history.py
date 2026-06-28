@@ -37,7 +37,7 @@ from pathlib import Path
 from penalty_pred.artifacts import Artifacts
 from penalty_pred.client import FotMobClient
 from penalty_pred.config import HISTORY_FLOOR, LOOKBACK_WINDOW_YEARS, today_utc
-from penalty_pred.player_history import (
+from penalty_pred.initial_set import (
     MissingKicker,
     fetch_all_initial_set_penalty_history,
     iter_initial_set_kickers,
@@ -113,7 +113,14 @@ def main() -> int:
     history_floor = date.fromisoformat(args.history_floor)
     client = FotMobClient(cache_dir=args.cache_dir)
 
-    initial_set = list(iter_initial_set_kickers(args.shootout_kicks, args.roster))
+    # Read the JSONL once into typed collections; the Initial Set
+    # assembly operates on the rows, not on the disk. This puts the
+    # JSONL re-parse in `Artifacts` (one place) and lets the per-kicker
+    # orchestrator take `Iterable[InitialSetKicker]`.
+    art = Artifacts()
+    shootout_kicks = art.read_shootout_kicks(path=args.shootout_kicks)
+    roster = art.read_roster(path=args.roster)
+    initial_set = list(iter_initial_set_kickers(shootout_kicks, roster))
     print(
         f"Initial Set: {len(initial_set)} unique kickers "
         f"({args.shootout_kicks} + {args.roster}, deduped by player_id)"
