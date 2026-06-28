@@ -31,6 +31,20 @@ jobs:
         env:
           OPENCODE_INSTALL_DIR: /usr/local/bin
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+
+      - name: Install Python dependencies
+        run: uv sync --extra dev
+
+      - name: Install hf CLI
+        run: curl -LsSf https://hf.co/cli/install.sh | bash -s
+
+      - name: Add hf to PATH
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
       - name: Run ralph
         run: bash ralph.sh
         env:
