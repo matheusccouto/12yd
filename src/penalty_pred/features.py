@@ -41,11 +41,20 @@ Re-runs are idempotent: the same input JSONLs and the same FotMob
 cache produce byte-identical output. The orchestrator sorts the
 training table by `(match_date, match_id, kick_number)` so the
 output order is stable.
+
+Phase 0 (Issue #30): a `PredictionTarget` value object carries only
+the 9 model features (no identifiers, no label). `build_features` is
+a thin packaging function that takes a `PredictionTarget` plus the
+row's identifiers and label, and returns a `TrainingRow`. The
+computation (A-group from history, C-group from metadata, is_decisive
+from the B-group context) lives in `compute_features` so the same
+pipeline serves both the training slice (with real B-group values
+from a `ShootoutKick`) and the prediction slice (with neutral
+B-group values, no fake `ShootoutKick`).
 """
 
 from __future__ import annotations
 
-import json
 import math
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -60,7 +69,6 @@ from .player_history import (
     extract_player_metadata,
     fetch_player_data,
 )
-from .shootouts import ShootoutKick
 
 # Prior over (L, C, R) for kickers with no history. The PRD specifies
 # "1/3 each" for the missing-history fallback.
@@ -69,6 +77,13 @@ PRIOR_PROB: tuple[float, float, float] = (1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0)
 # A1 horizons (PRD: "P(L), P(C), P(R) over the last 5, 10, and 20 kicks").
 A1_HORIZONS: tuple[int, ...] = (5, 10, 20)
 
+# Canonical class order. Probabilities are always returned in this order:
+# index 0 = P(L), index 1 = P(C), index 2 = P(R). The class strings are
+# the literal labels used in `training_table.jsonl`. Lives in
+# `features.py` because the unified `TrainingRow`'s `label_index` reads
+# from it; the model layer re-imports it from here.
+CLASSES: tuple[str, ...] = ("L", "C", "R")
+
 
 # ---------------------------------------------------------------------------
 # Row schema
@@ -76,13 +91,69 @@ A1_HORIZONS: tuple[int, ...] = (5, 10, 20)
 
 
 @dataclass(frozen=True)
-class TrainingTableRow:
+class PredictionTarget:
+    """The 9 model feature inputs (19 fields) for a single prediction target.
+
+    Carries only what the model needs — no identifiers, no label, no
+    `is_on_target`. The data layer's `ShootoutKick` is no longer
+    threaded through the feature builder; the prediction slice
+    constructs a `PredictionTarget` directly (with neutral B-group
+    values) and the feature builder packages it into a `TrainingRow`.
+
+    For the training slice, `compute_features` produces a
+    `PredictionTarget` from a `ShootoutKick` + history + metadata. For
+    the prediction slice, the same function produces one from
+    history + metadata + neutral B-group context — no synthetic
+    `ShootoutKick` needed.
+    """
+
+    # A1: P(L), P(C), P(R) over the last 5, 10, 20 kicks (chronological, oldest first)
+    p_L_5: float
+    p_C_5: float
+    p_R_5: float
+    p_L_10: float
+    p_C_10: float
+    p_R_10: float
+    p_L_20: float
+    p_C_20: float
+    p_R_20: float
+    # A2: last kick's side
+    last_side: str
+    # A3: kicking foot
+    kicking_foot: str
+    # A4: total career penalty count (before the target kick date)
+    career_penalty_count: int
+    # B1: kick number within the shootout
+    b1_kick_number: int
+    # B2: current shootout score + is_decisive flag
+    pen_score_home: int
+    pen_score_away: int
+    is_decisive: bool
+    # B3: match round
+    b3_round: str
+    # C1: position
+    position: str
+    # C2: age in years
+    age: float  # NaN → None in the JSONL (Python json does not emit NaN).
+
+
+@dataclass(frozen=True)
+class TrainingRow:
     """One training row: a target Shootout Kick plus the 9 features for it.
+
+    The unified row type (Issue #30): replaces both the old
+    `TrainingTableRow` (features.py, 30 fields, no `is_on_target`) and
+    the old `TrainingRow` (model.py, 13 fields + a `features` dict).
+    The 19 model features are individual fields (not a dict) so the
+    type checker can pin them, and the row carries its own identifiers
+    and label so the on-disk format is self-contained.
 
     Identifier fields are pass-throughs from `shootout_kicks.jsonl` so
     the row is self-contained. `label` is the side the kicker actually
-    took — the supervised target. Feature fields are documented at the
-    module level.
+    took — the supervised target. `is_on_target` is the per-row flag
+    for the counterfactual save rate (slice #22 dropped it from the
+    JSONL; the model layer joins it back in via
+    `is_on_target_by_key(shootout_kicks)`).
 
     The `is_decisive` flag is the B2 part: whether this kick is one
     whose outcome ends the shootout (either a Goal or a Miss/Missed
@@ -102,6 +173,8 @@ class TrainingTableRow:
     is_home: bool
     # Label
     label: str
+    # is_on_target (joined from shootout_kicks.jsonl; True for prediction)
+    is_on_target: bool
     # A1: P(L), P(C), P(R) over the last 5, 10, 20 kicks (chronological, oldest first)
     p_L_5: float
     p_C_5: float
@@ -130,6 +203,10 @@ class TrainingTableRow:
     position: str
     # C2: age in years
     age: float  # NaN → None in the JSONL (Python json does not emit NaN).
+
+    @property
+    def label_index(self) -> int:
+        return CLASSES.index(self.label)
 
 
 # ---------------------------------------------------------------------------
@@ -279,7 +356,39 @@ class KickIndex:
     away_kicks_done: int
 
 
-def index_kicks_done(shootout_kicks: Iterable[ShootoutKick]) -> dict[tuple[int, int], KickIndex]:
+@dataclass(frozen=True)
+class BGroupContext:
+    """The B-group inputs (B1, B2, B3) for a single prediction target.
+
+    Carries the shootout-state information that is known for a training
+    target (from the `ShootoutKick`) and is neutral for a prediction
+    target. Using a value object instead of a `ShootoutKick` keeps the
+    data layer's shape from leaking across the feature-builder seam.
+
+    For a prediction target: `kick_number=1`, `pen_score_before=(0, 0)`,
+    `is_home=True` (doesn't matter; both 0 kicks done → is_decisive=False),
+    `round=""` (LightGBM treats the empty string as missing).
+    """
+
+    kick_number: int
+    pen_score_home: int
+    pen_score_away: int
+    is_home: bool
+    round: str
+
+    @classmethod
+    def neutral(cls) -> BGroupContext:
+        """The neutral B-group context for a prediction target."""
+        return cls(
+            kick_number=1,
+            pen_score_home=0,
+            pen_score_away=0,
+            is_home=True,
+            round="",
+        )
+
+
+def index_kicks_done(shootout_kicks: Iterable) -> dict[tuple[int, int], KickIndex]:
     """Build a `(home_kicks_done, away_kicks_done)` index per kick.
 
     For each `(match_id, kick_number)` in the input, records how many
@@ -289,6 +398,8 @@ def index_kicks_done(shootout_kicks: Iterable[ShootoutKick]) -> dict[tuple[int, 
     The function is idempotent: re-running on the same input yields
     the same index.
     """
+    from .shootouts import ShootoutKick
+
     by_match: dict[int, list[ShootoutKick]] = {}
     for kick in shootout_kicks:
         by_match.setdefault(kick.match_id, []).append(kick)
@@ -333,21 +444,29 @@ def filter_history(
     return out
 
 
-def build_features(
-    target: ShootoutKick,
+def compute_features(
     history: Sequence[PlayerPenalty],
     metadata: PlayerMetadata | None,
+    target_date: str,
+    b_group: BGroupContext,
     kicks_done: KickIndex,
-) -> TrainingTableRow:
-    """Build a `TrainingTableRow` for one target kick.
+) -> PredictionTarget:
+    """Compute the 19 model features for one prediction target.
 
-    `history` is the kicker's full scraped history; this function
-    filters it to before the target kick's match date. `metadata` may
-    be None if the player page could not be fetched (then C1 is "" and
-    C2 is NaN). `kicks_done` is the pre-computed index from
-    `index_kicks_done` for the target kick.
+    Pure function. `history` is the kicker's full scraped history;
+    this function filters it to before `target_date` and computes the
+    A-group (side distribution, last_side, kicking_foot, career count).
+    `metadata` may be None if the player page could not be fetched
+    (then C1 is "" and C2 is NaN). `b_group` carries the B-group
+    inputs (kick_number, pen_score, is_home, round); `kicks_done` is
+    the pre-computed index for the `is_decisive` flag.
+
+    The function is the shared core of the training slice (where
+    `b_group` comes from a real `ShootoutKick`) and the prediction
+    slice (where `b_group = BGroupContext.neutral()`). No `ShootoutKick`
+    is constructed in the prediction path.
     """
-    filtered = filter_history(history, target.match_date)
+    filtered = filter_history(history, target_date)
     sides = [p.side for p in filtered]
     shot_types = [p.shot_type for p in filtered]
 
@@ -357,20 +476,9 @@ def build_features(
 
     position = metadata.position_key if metadata is not None else ""
     birth_date = metadata.birth_date if metadata is not None else ""
-    age = age_in_years(birth_date, target.match_date)
+    age = age_in_years(birth_date, target_date)
 
-    return TrainingTableRow(
-        match_id=target.match_id,
-        kick_number=target.kick_number,
-        kicker_id=target.kicker_id,
-        kicker_name=target.kicker_name,
-        match_date=target.match_date,
-        tournament_id=target.tournament_id,
-        tournament_name=target.tournament_name,
-        round=target.round,
-        team_id=target.team_id,
-        is_home=target.is_home,
-        label=target.side,
+    return PredictionTarget(
         p_L_5=p_L_5,
         p_C_5=p_C_5,
         p_R_5=p_R_5,
@@ -383,19 +491,83 @@ def build_features(
         last_side=sides[-1] if sides else "",
         kicking_foot=mode_kicking_foot(shot_types),
         career_penalty_count=len(filtered),
-        b1_kick_number=target.kick_number,
-        pen_score_home=target.pen_score_before[0],
-        pen_score_away=target.pen_score_before[1],
+        b1_kick_number=b_group.kick_number,
+        pen_score_home=b_group.pen_score_home,
+        pen_score_away=b_group.pen_score_away,
         is_decisive=is_decisive_kick(
-            target.pen_score_before[0],
-            target.pen_score_before[1],
+            b_group.pen_score_home,
+            b_group.pen_score_away,
             kicks_done.home_kicks_done,
             kicks_done.away_kicks_done,
-            target.is_home,
+            b_group.is_home,
         ),
-        b3_round=target.round,
+        b3_round=b_group.round,
         position=position,
         age=age,
+    )
+
+
+def build_features(
+    features: PredictionTarget,
+    *,
+    match_id: int,
+    kick_number: int,
+    kicker_id: int,
+    kicker_name: str,
+    match_date: str,
+    tournament_id: int,
+    tournament_name: str,
+    round: str,
+    team_id: int,
+    is_home: bool,
+    label: str,
+    is_on_target: bool,
+) -> TrainingRow:
+    """Package a `PredictionTarget` into a `TrainingRow`.
+
+    Thin packaging function (Issue #30): takes the 19 model features
+    plus the row's identifiers and label, returns the unified row
+    type. The actual feature computation lives in `compute_features`.
+
+    `is_on_target` is the per-row flag for the counterfactual save
+    rate. For training rows it comes from the `ShootoutKick` (joined
+    by `is_on_target_by_key` in `load_training_table`); for prediction
+    rows it is `True` (the dummy value — the model doesn't use it at
+    predict time, but the unified type carries it so the on-disk
+    schema is self-describing).
+    """
+    return TrainingRow(
+        match_id=match_id,
+        kick_number=kick_number,
+        kicker_id=kicker_id,
+        kicker_name=kicker_name,
+        match_date=match_date,
+        tournament_id=tournament_id,
+        tournament_name=tournament_name,
+        round=round,
+        team_id=team_id,
+        is_home=is_home,
+        label=label,
+        is_on_target=is_on_target,
+        p_L_5=features.p_L_5,
+        p_C_5=features.p_C_5,
+        p_R_5=features.p_R_5,
+        p_L_10=features.p_L_10,
+        p_C_10=features.p_C_10,
+        p_R_10=features.p_R_10,
+        p_L_20=features.p_L_20,
+        p_C_20=features.p_C_20,
+        p_R_20=features.p_R_20,
+        last_side=features.last_side,
+        kicking_foot=features.kicking_foot,
+        career_penalty_count=features.career_penalty_count,
+        b1_kick_number=features.b1_kick_number,
+        pen_score_home=features.pen_score_home,
+        pen_score_away=features.pen_score_away,
+        is_decisive=features.is_decisive,
+        b3_round=features.b3_round,
+        position=features.position,
+        age=features.age,
     )
 
 
@@ -411,6 +583,8 @@ def load_player_history(path: Path) -> dict[int, list[PlayerPenalty]]:
     kicker. The caller is expected to sort by `match_date` after
     filtering to the target date (see `filter_history`).
     """
+    import json
+
     out: dict[int, list[PlayerPenalty]] = {}
     with path.open(encoding="utf-8") as f:
         for line in f:
@@ -465,27 +639,53 @@ def fetcher_from_client(client: Any) -> MetadataFetcher:
 
 
 def build_training_table(
-    shootout_kicks: Sequence[ShootoutKick],
+    shootout_kicks: Sequence,
     player_history: Mapping[int, Sequence[PlayerPenalty]],
     metadata_fetcher: MetadataFetcher,
-) -> list[TrainingTableRow]:
+) -> list[TrainingRow]:
     """Build the full training table from the inputs.
 
     Returns the rows sorted by `(match_date, match_id, kick_number)`
     for a stable, idempotent output. The function is pure: same input
     → same output.
     """
+    from .shootouts import ShootoutKick
+
     kicks_done_index = index_kicks_done(shootout_kicks)
-    rows: list[TrainingTableRow] = []
+    rows: list[TrainingRow] = []
     for target in shootout_kicks:
+        assert isinstance(target, ShootoutKick)
         history = player_history.get(target.kicker_id, [])
         metadata = metadata_fetcher(target.kicker_id)
+        b_group = BGroupContext(
+            kick_number=target.kick_number,
+            pen_score_home=target.pen_score_before[0],
+            pen_score_away=target.pen_score_before[1],
+            is_home=target.is_home,
+            round=target.round,
+        )
+        features = compute_features(
+            history,
+            metadata,
+            target.match_date,
+            b_group,
+            kicks_done_index[(target.match_id, target.kick_number)],
+        )
         rows.append(
             build_features(
-                target,
-                history,
-                metadata,
-                kicks_done_index[(target.match_id, target.kick_number)],
+                features,
+                match_id=target.match_id,
+                kick_number=target.kick_number,
+                kicker_id=target.kicker_id,
+                kicker_name=target.kicker_name,
+                match_date=target.match_date,
+                tournament_id=target.tournament_id,
+                tournament_name=target.tournament_name,
+                round=target.round,
+                team_id=target.team_id,
+                is_home=target.is_home,
+                label=target.side,
+                is_on_target=target.is_on_target,
             )
         )
     rows.sort(key=lambda r: (r.match_date, r.match_id, r.kick_number))

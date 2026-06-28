@@ -28,6 +28,8 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
+import numpy as np
+
 from penalty_pred.artifacts import Artifacts
 from penalty_pred.evaluate import evaluate_predictions
 from penalty_pred.model import (
@@ -44,7 +46,6 @@ from penalty_pred.model import (
     fit_logistic_regression,
     is_on_target_by_key,
     load_training_table,
-    predict_proba,
     temporal_split,
 )
 
@@ -185,8 +186,8 @@ def main() -> int:
         f"(C={args.C}, class_weight={args.class_weight!r})."
     )
 
-    lgb_probs = predict_proba(lgb, holdout_matrix)
-    baseline_probs = predict_proba(baseline, holdout_matrix)
+    lgb_probs = np.asarray(lgb.predict_proba(holdout_matrix.X))
+    baseline_probs = np.asarray(baseline.predict_proba(holdout_matrix.X))
     report = evaluate_predictions(lgb_probs, holdout_rows, baseline_probs=baseline_probs)
     report = replace(
         report,

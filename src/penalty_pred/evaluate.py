@@ -42,7 +42,8 @@ from typing import Any
 
 import numpy as np
 
-from .model import CLASSES, TrainingRow
+from .features import CLASSES  # re-exported from .model for backwards-compat
+from .model import TrainingRow
 
 # Class indices (mirrors CLASSES in model.py).
 L: int = 0
@@ -152,7 +153,7 @@ def last_side_save_rate(
         return (None, 0)
     saves = 0
     for row in rows:
-        last = row.features.get("last_side", "")
+        last = row.last_side
         if last == "L":
             dive = L
         elif last == "R":

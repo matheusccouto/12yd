@@ -3,8 +3,7 @@
 The tests cover five layers:
 
 1. **Pure helpers** — `build_prediction_features` (the per-kicker
-   feature builder for a prediction target) and `_training_row_from_table_row`
-   (the `TrainingTableRow` → `TrainingRow` bridge). No network, no I/O.
+   feature builder for a prediction target). No network, no I/O.
 
 2. **Per-kicker predict** — `predict_kicker` against a stubbed model
    that records the input it received and returns canned probabilities.
@@ -14,8 +13,9 @@ The tests cover five layers:
    stubbed metadata fetcher. Verifies the row count, the order, and
    that one bad metadata fetch does not abort the run.
 
-4. **JSONL helpers** — `write_predictions_jsonl` / `read_predictions_jsonl`
-   roundtrip. NaN / float fields are serialised correctly.
+4. **JSONL helpers** — `Artifacts.write_predictions` /
+   `Artifacts.read_predictions` roundtrip. NaN / float fields are
+   serialised correctly.
 
 5. **Live smoke tests** — `output/predictions.jsonl` (skipped if absent):
    schema, row count matches the roster, probabilities sum to 1 and are
@@ -25,6 +25,11 @@ The tests cover five layers:
 The live smoke tests depend on the upstream artifacts being present
 (roster, player history, LightGBM model). The slice is re-runnable
 end-to-end via `python scripts/predict.py`.
+
+Phase 0 (Issue #30): no `_training_row_from_table_row` bridge — the
+unified `TrainingRow` carries its own features, so the predict slice
+constructs one via `compute_features` + `build_features` with neutral
+B-group context.
 """
 
 from __future__ import annotations
@@ -42,7 +47,6 @@ from penalty_pred.features import PRIOR_PROB
 from penalty_pred.player_history import PlayerMetadata, PlayerPenalty
 from penalty_pred.predict import (
     PredictionRow,
-    _training_row_from_table_row,
     build_prediction_features,
     predict_kicker,
     predict_roster,
@@ -208,33 +212,34 @@ def test_build_prediction_features_filters_history_to_before_target() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _training_row_from_table_row
+# build_prediction_features → TrainingRow (Issue #30)
 # ---------------------------------------------------------------------------
 
 
-def test_training_row_from_table_row_extracts_features() -> None:
-    """The bridge extracts all 19 PRD features from the
-    `TrainingTableRow` into the `features` dict and wraps it in a
-    `TrainingRow` with dummy label/is_on_target."""
+def test_build_prediction_features_returns_unified_training_row() -> None:
+    """`build_prediction_features` returns a `TrainingRow` whose
+    19 model features are individual fields (the unified row type).
+    The previous `_training_row_from_table_row` bridge is gone —
+    the row carries the features directly."""
     row = build_prediction_features(
         kicker=_roster_player(player_id=42),
         history=[],
         metadata=_metadata(player_id=42),
         target_date=TARGET_DATE,
     )
-    training_row = _training_row_from_table_row(row)
-    # All 19 feature columns are in the dict.
     from penalty_pred.model import FEATURE_COLUMNS
 
-    assert set(training_row.features.keys()) == set(FEATURE_COLUMNS)
-    assert training_row.features["position"] == "striker"
-    assert training_row.features["kicking_foot"] == "Unknown"
+    # All 19 feature columns are accessible as fields.
+    for col in FEATURE_COLUMNS:
+        assert hasattr(row, col), f"TrainingRow missing field {col!r}"
+    assert row.position == "striker"
+    assert row.kicking_foot == "Unknown"
     # Dummies (unused at predict time).
-    assert training_row.label == "L"
-    assert training_row.is_on_target is True
+    assert row.label == "L"
+    assert row.is_on_target is True
     # Identifiers are pass-throughs.
-    assert training_row.kicker_id == 42
-    assert training_row.match_date == TARGET_DATE
+    assert row.kicker_id == 42
+    assert row.match_date == TARGET_DATE
 
 
 # ---------------------------------------------------------------------------

@@ -25,6 +25,8 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
+import numpy as np
+
 from penalty_pred.artifacts import Artifacts
 from penalty_pred.evaluate import evaluate_predictions
 from penalty_pred.model import (
@@ -36,7 +38,6 @@ from penalty_pred.model import (
     fit_logistic_regression,
     is_on_target_by_key,
     load_training_table,
-    predict_proba,
     temporal_split,
 )
 
@@ -115,7 +116,7 @@ def main() -> int:
     )
 
     holdout_matrix = build_feature_matrix(holdout_rows)
-    probs = predict_proba(pipe, holdout_matrix)
+    probs = np.asarray(pipe.predict_proba(holdout_matrix.X))
     report = evaluate_predictions(probs, holdout_rows)
     # Stamp the split metadata the caller needs to interpret the report.
     report = replace(

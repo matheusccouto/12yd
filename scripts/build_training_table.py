@@ -5,7 +5,7 @@ Slice #6 (Issue #22): the feature builder. For every row in
 `output/player_history.jsonl` (filtered to before the target kick's
 match date) and the kicker's player page (cached on disk; no fresh
 network needed for the in-Initial-Set kickers) to produce one
-`TrainingTableRow` per target kick. The output is the supervised
+`TrainingRow` per target kick. The output is the supervised
 training table the model slice consumes.
 
 Re-runs are idempotent: the input JSONLs and the FotMob cache

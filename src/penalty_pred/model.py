@@ -40,6 +40,14 @@ artifact (sklearn and LightGBM both honour the seed). The temporal
 split (cutoff at 2026-01-01) and the column order are pinned by the
 module constants so the model and the predict path can be re-aligned
 without code changes.
+
+Phase 0 (Issue #30): the local `TrainingRow` is gone — the unified
+type lives in `features.py` and is re-exported here. The
+`build_feature_matrix` / `rows_to_predict_matrix` pair collapses to
+one function that takes rows plus optional `(y, on_target)`. The
+`predict_proba` dispatch shim is gone; callers call
+`model.predict_proba(matrix.X)` directly via the `PredictProba`
+Protocol on the model artifacts.
 """
 
 from __future__ import annotations
@@ -50,7 +58,7 @@ import pickle
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
 import pandas as pd
@@ -62,6 +70,11 @@ from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
+
+# Re-export the unified row type and `CLASSES` so callers can keep
+# using `from penalty_pred.model import TrainingRow, CLASSES` (the
+# import path the model layer and tests have always used).
+from .features import CLASSES, TrainingRow  # noqa: F401 — re-exported
 
 # sklearn < 1.2 used `sparse=`; >= 1.2 uses `sparse_output=`. Support
 # both via a runtime check so the baseline works across sklearn versions.
@@ -77,10 +90,10 @@ _OHE_KWARG: str = "sparse_output" if Version(sklearn.__version__) >= Version("1.
 # module constant so the model and the predict path cannot drift.
 HOLDOUT_CUTOFF_DATE: str = "2026-01-01"
 
-# Canonical class order. Probabilities are always returned in this order:
-# index 0 = P(L), index 1 = P(C), index 2 = P(R). The class strings are
-# the literal labels used in `training_table.jsonl`.
-CLASSES: tuple[str, ...] = ("L", "C", "R")
+# `CLASSES` is re-exported from `features` (the canonical home — the
+# unified `TrainingRow.label_index` reads from it). This block is
+# intentionally empty; the import at the top of the module is the
+# source of truth.
 
 # Feature column groups. The model takes the raw columns from the
 # training table; the baseline applies ColumnTransformer, LightGBM
@@ -163,37 +176,27 @@ LIGHTGBM_DEFAULTS: dict[str, Any] = {
 
 
 # ---------------------------------------------------------------------------
-# Data loading
+# PredictProba protocol (Issue #30)
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class TrainingRow:
-    """A row of `training_table.jsonl` plus the label extracted as a class index.
+class PredictProba(Protocol):
+    """The contract for model artifacts: `predict_proba(X) -> (n, 3) array.
 
-    The model module works with the same field set the feature builder
-    produced; `label` and `is_on_target` are exposed separately because
-    they have a different role (label is the supervised target;
-    `is_on_target` is for the counterfactual save rate).
+    Implemented by sklearn `Pipeline` (which delegates to the final
+    classifier) and by `LightGBMClassifierWrapper`. Callers do
+    `model.predict_proba(matrix.X)` directly; no dispatch shim is
+    needed. The `X` parameter is the model's feature matrix
+    (`pd.DataFrame`); the return is an `(n, 3)` array in `CLASSES`
+    order.
     """
 
-    match_id: int
-    kick_number: int
-    kicker_id: int
-    kicker_name: str
-    match_date: str
-    tournament_id: int
-    tournament_name: str
-    round: str
-    team_id: int
-    is_home: bool
-    label: str  # "L" | "C" | "R"
-    is_on_target: bool
-    features: dict[str, Any]
+    def predict_proba(self, X: pd.DataFrame) -> np.ndarray: ...
 
-    @property
-    def label_index(self) -> int:
-        return CLASSES.index(self.label)
+
+# ---------------------------------------------------------------------------
+# Data loading
+# ---------------------------------------------------------------------------
 
 
 def is_on_target_by_key(
@@ -242,7 +245,6 @@ def load_training_table(
             if not line:
                 continue
             row = json.loads(line)
-            features = {col: row.get(col) for col in FEATURE_COLUMNS}
             key = (int(row["match_id"]), int(row["kick_number"]))
             out.append(
                 TrainingRow(
@@ -258,7 +260,25 @@ def load_training_table(
                     is_home=bool(row["is_home"]),
                     label=str(row["label"]),
                     is_on_target=on_target_by_key.get(key, True),
-                    features=features,
+                    p_L_5=float(row["p_L_5"]),
+                    p_C_5=float(row["p_C_5"]),
+                    p_R_5=float(row["p_R_5"]),
+                    p_L_10=float(row["p_L_10"]),
+                    p_C_10=float(row["p_C_10"]),
+                    p_R_10=float(row["p_R_10"]),
+                    p_L_20=float(row["p_L_20"]),
+                    p_C_20=float(row["p_C_20"]),
+                    p_R_20=float(row["p_R_20"]),
+                    last_side=str(row["last_side"]),
+                    kicking_foot=str(row["kicking_foot"]),
+                    career_penalty_count=int(row["career_penalty_count"]),
+                    b1_kick_number=int(row["b1_kick_number"]),
+                    pen_score_home=int(row["pen_score_home"]),
+                    pen_score_away=int(row["pen_score_away"]),
+                    is_decisive=bool(row["is_decisive"]),
+                    b3_round=str(row["b3_round"]),
+                    position=str(row["position"]),
+                    age=math.nan if row.get("age") is None else float(row["age"]),
                 )
             )
     return out
@@ -272,6 +292,8 @@ class FeatureMatrix:
     `feature_columns` (so the predict path can build the same DataFrame
     shape). `y` is a 1D int array of class indices in `CLASSES` order.
     `on_target` is the per-row flag for the counterfactual save rate.
+    For prediction matrices (no labels), `y` and `on_target` are empty
+    arrays.
     """
 
     X: pd.DataFrame
@@ -282,7 +304,10 @@ class FeatureMatrix:
 
 
 def build_feature_matrix(
-    rows: Sequence[TrainingRow], feature_columns: Sequence[str] = FEATURE_COLUMNS
+    rows: Sequence[TrainingRow],
+    feature_columns: Sequence[str] = FEATURE_COLUMNS,
+    y: np.ndarray | None = None,
+    on_target: np.ndarray | None = None,
 ) -> FeatureMatrix:
     """Build the (X, y) matrix for a list of training rows.
 
@@ -297,6 +322,13 @@ def build_feature_matrix(
     dtype — the categorical pipeline's `SimpleImputer` fills any
     missing values with the most frequent category.
 
+    `y` and `on_target` are optional. When omitted (the predict path
+    in Issue #30), the returned matrix has empty arrays for both —
+    the classifier is the only consumer and it doesn't need them.
+    When supplied (the train path), `y` is a 1D int array of class
+    indices in `CLASSES` order; `on_target` is the per-row flag for
+    the counterfactual save rate.
+
     `feature_columns` defaults to the module's canonical `FEATURE_COLUMNS`.
     A different order can be supplied for testing, but the production
     path always uses the default so the artifact's column order matches
@@ -304,16 +336,26 @@ def build_feature_matrix(
     """
     n = len(rows)
     payload: dict[str, list[Any]] = {col: [] for col in feature_columns}
-    y = np.empty(n, dtype=np.int64)
-    on_target = np.empty(n, dtype=bool)
+    if y is None:
+        y_arr: np.ndarray = np.empty(n, dtype=np.int64)
+    else:
+        y_arr = y
+    if on_target is None:
+        on_target_arr: np.ndarray = np.empty(n, dtype=bool)
+    else:
+        on_target_arr = on_target
     for i, row in enumerate(rows):
         for col in feature_columns:
-            value = row.features.get(col)
+            value = getattr(row, col)
             if col in NUMERIC_FEATURES and value is None:
                 value = float("nan")
             payload[col].append(value)
-        y[i] = row.label_index
-        on_target[i] = row.is_on_target
+        # If y was not supplied, fall back to the row's label (the
+        # train path). If y was supplied, the caller is responsible
+        # for the encoding — this loop just reads what's there.
+        if y is None and on_target is None:
+            y_arr[i] = row.label_index
+            on_target_arr[i] = row.is_on_target
     X = pd.DataFrame(payload, columns=list(feature_columns))
     # Coerce numeric columns to float; the imputer needs a numeric dtype.
     for col in NUMERIC_FEATURES:
@@ -321,8 +363,8 @@ def build_feature_matrix(
             X[col] = pd.to_numeric(X[col], errors="coerce")
     return FeatureMatrix(
         X=X,
-        y=y,
-        on_target=on_target,
+        y=y_arr,
+        on_target=on_target_arr,
         feature_columns=list(feature_columns),
         rows=list(rows),
     )
@@ -406,35 +448,6 @@ def fit_logistic_regression(
 
 
 # ---------------------------------------------------------------------------
-# Predict
-# ---------------------------------------------------------------------------
-
-
-def predict_proba(model: Any, matrix: FeatureMatrix) -> np.ndarray:
-    """Return a (n, 3) array of class probabilities in `CLASSES` order.
-
-    For the sklearn baseline, the pipeline already returns a (n, 3)
-    array in CLASSES order (the column order is pinned by
-    `FEATURE_COLUMNS` and `LogisticRegression.classes_` is sorted
-    alphabetically — L < R < C, but the coefficients are fit on the
-    column order we set, so the output is in CLASSES order by
-    construction).
-
-    For LightGBM, the booster is wrapped in
-    `LightGBMClassifierWrapper` (see below). The wrapper:
-    - Coerces the categorical columns to `pd.Categorical` with the
-      categories observed at fit time (so unseen values at predict
-      time become NaN, which LightGBM treats as missing).
-    - Calls the underlying `LGBMClassifier.predict_proba`, which
-      returns columns in the order of the integer-encoded labels
-      (0=L, 1=C, 2=R — matching `CLASSES`).
-    """
-    if hasattr(model, "predict_proba"):
-        return np.asarray(model.predict_proba(matrix.X))
-    raise TypeError(f"model of type {type(model).__name__} has no predict_proba")
-
-
-# ---------------------------------------------------------------------------
 # Artifact I/O
 # ---------------------------------------------------------------------------
 
@@ -498,35 +511,6 @@ def is_numeric_nan(value: Any) -> bool:
         return math.isnan(float(value))
     except (TypeError, ValueError):
         return False
-
-
-def rows_to_predict_matrix(
-    rows: Sequence[TrainingRow],
-    feature_columns: Sequence[str] = FEATURE_COLUMNS,
-) -> FeatureMatrix:
-    """Build a `FeatureMatrix` from a list of `TrainingRow` (no labels).
-
-    Used by the predict path (#25) where the rows are constructed from
-    the WC roster (no `label` / `is_on_target`). The function reads
-    `row.features` for each requested column; missing keys yield
-    `None`, which the imputer fills.
-
-    `y` and `on_target` are empty arrays — callers that need them
-    (e.g. for the counterfactual save rate on holdout data) should
-    supply them separately.
-    """
-    payload: dict[str, list[Any]] = {col: [] for col in feature_columns}
-    for row in rows:
-        for col in feature_columns:
-            payload[col].append(row.features.get(col))
-    X = pd.DataFrame(payload, columns=list(feature_columns))
-    return FeatureMatrix(
-        X=X,
-        y=np.empty(0, dtype=np.int64),
-        on_target=np.empty(0, dtype=bool),
-        feature_columns=list(feature_columns),
-        rows=list(rows),
-    )
 
 
 # ---------------------------------------------------------------------------

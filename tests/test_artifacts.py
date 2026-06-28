@@ -19,7 +19,7 @@ import pytest
 
 from penalty_pred.artifacts import Artifacts
 from penalty_pred.evaluate import BaselineMetrics, MetricsReport
-from penalty_pred.features import TrainingTableRow
+from penalty_pred.features import TrainingRow
 from penalty_pred.player_history import MissingKicker, PlayerPenalty
 from penalty_pred.predict import PredictionRow
 from penalty_pred.rosters import RosterPlayer
@@ -194,7 +194,7 @@ def test_training_table_round_trip_with_nan_age(tmp_path: Path) -> None:
     JSON, not `NaN`); `read_training_table` recovers them as `None`."""
     art = Artifacts(root=tmp_path)
     rows = [
-        TrainingTableRow(
+        TrainingRow(
             match_id=1,
             kick_number=1,
             kicker_id=1,
@@ -206,6 +206,7 @@ def test_training_table_round_trip_with_nan_age(tmp_path: Path) -> None:
             team_id=1,
             is_home=True,
             label="L",
+            is_on_target=True,
             p_L_5=1.0,
             p_C_5=0.0,
             p_R_5=0.0,
@@ -374,7 +375,7 @@ def test_serialize_row_emits_nan_as_null() -> None:
     """`serialize_row(nan_to_null=True)` emits NaN ages as JSON `null`
     (strict JSON), matching `write_training_table`'s per-row shape."""
     art = Artifacts()
-    row = TrainingTableRow(
+    row = TrainingRow(
         match_id=1,
         kick_number=1,
         kicker_id=1,
@@ -386,6 +387,7 @@ def test_serialize_row_emits_nan_as_null() -> None:
         team_id=1,
         is_home=True,
         label="L",
+        is_on_target=True,
         p_L_5=1.0,
         p_C_5=0.0,
         p_R_5=0.0,

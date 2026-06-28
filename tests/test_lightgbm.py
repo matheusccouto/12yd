@@ -7,9 +7,10 @@ Four layers:
    fitting, no I/O.
 
 2. **Wrapper behaviour** — `make_lightgbm` / `fit_lightgbm` /
-   `predict_proba`. The wrapper returns (n, 3) arrays in `CLASSES`
-   order, handles unseen categorical values at predict time, and is
-   deterministic across runs (same seed).
+   `wrapper.predict_proba(X)`. The wrapper returns (n, 3) arrays in
+   `CLASSES` order, handles unseen categorical values at predict
+   time, and is deterministic across runs (same seed). Predict is
+   via the `PredictProba` Protocol — no dispatch shim.
 
 3. **Artifact I/O** — `save_artifact` / `load_artifact` roundtrip
    with `model_kind="lightgbm"`. The artifact's `feature_columns`
@@ -26,7 +27,6 @@ from __future__ import annotations
 import json
 import pickle
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -47,53 +47,12 @@ from penalty_pred.model import (
     fit_logistic_regression,
     load_artifact,
     make_lightgbm,
-    predict_proba,
-    rows_to_predict_matrix,
     save_artifact,
 )
 
 # ---------------------------------------------------------------------------
 # Helpers (test-local)
 # ---------------------------------------------------------------------------
-
-
-def _make_features(
-    label: str = "L",
-    kicking_foot: str = "RightFoot",
-    pos: str = "striker",
-    rnd: str = "1/8",
-    age: float | None = 25.0,
-    last_side: str = "L",
-    career: int = 5,
-    kick_number: int = 1,
-    score: tuple[int, int] = (0, 0),
-) -> dict[str, Any]:
-    """Build a complete feature dict for a single TrainingRow.
-
-    Mirrors the helper in `test_model.py` so the toy datasets are
-    interchangeable between the two test modules.
-    """
-    return {
-        "p_L_5": 1.0 if label == "L" else 0.0,
-        "p_C_5": 1.0 if label == "C" else 0.0,
-        "p_R_5": 1.0 if label == "R" else 0.0,
-        "p_L_10": 1.0 if label == "L" else 0.0,
-        "p_C_10": 1.0 if label == "C" else 0.0,
-        "p_R_10": 1.0 if label == "R" else 0.0,
-        "p_L_20": 1.0 if label == "L" else 0.0,
-        "p_C_20": 1.0 if label == "C" else 0.0,
-        "p_R_20": 1.0 if label == "R" else 0.0,
-        "career_penalty_count": career,
-        "b1_kick_number": kick_number,
-        "pen_score_home": score[0],
-        "pen_score_away": score[1],
-        "is_decisive": False,
-        "age": age,
-        "last_side": last_side,
-        "kicking_foot": kicking_foot,
-        "b3_round": rnd,
-        "position": pos,
-    }
 
 
 def _make_row(
@@ -103,9 +62,19 @@ def _make_row(
     kick_number: int = 1,
     kicker_id: int = 1,
     date: str = "2024-06-01T00:00:00+00:00",
-    **feature_overrides: Any,
+    kicking_foot: str = "RightFoot",
+    pos: str = "striker",
+    rnd: str = "1/8",
+    age: float | None = 25.0,
+    last_side: str = "L",
+    career: int = 5,
+    score: tuple[int, int] = (0, 0),
 ) -> TrainingRow:
-    features = _make_features(label=label, **feature_overrides)
+    """Build a complete `TrainingRow` (the unified row type).
+
+    Mirrors the helper in `test_model.py` so the toy datasets are
+    interchangeable between the two test modules.
+    """
     return TrainingRow(
         match_id=match_id,
         kick_number=kick_number,
@@ -114,12 +83,30 @@ def _make_row(
         match_date=date,
         tournament_id=77,
         tournament_name="World Cup",
-        round=feature_overrides.get("rnd", "1/8"),
+        round=rnd,
         team_id=1,
         is_home=True,
         label=label,
         is_on_target=True,
-        features=features,
+        p_L_5=1.0 if label == "L" else 0.0,
+        p_C_5=1.0 if label == "C" else 0.0,
+        p_R_5=1.0 if label == "R" else 0.0,
+        p_L_10=1.0 if label == "L" else 0.0,
+        p_C_10=1.0 if label == "C" else 0.0,
+        p_R_10=1.0 if label == "R" else 0.0,
+        p_L_20=1.0 if label == "L" else 0.0,
+        p_C_20=1.0 if label == "C" else 0.0,
+        p_R_20=1.0 if label == "R" else 0.0,
+        last_side=last_side,
+        kicking_foot=kicking_foot,
+        career_penalty_count=career,
+        b1_kick_number=kick_number,
+        pen_score_home=score[0],
+        pen_score_away=score[1],
+        is_decisive=False,
+        b3_round=rnd,
+        position=pos,
+        age=age if age is not None else float("nan"),
     )
 
 
@@ -254,7 +241,7 @@ def test_fit_lightgbm_predicts_valid_distribution() -> None:
     rows = _toy_dataset()
     matrix = build_feature_matrix(rows)
     wrapper = fit_lightgbm(matrix)
-    probs = predict_proba(wrapper, matrix)
+    probs = np.asarray(wrapper.predict_proba(matrix.X))
     assert probs.shape == (len(rows), 3)
     assert np.all(probs >= 0)
     assert np.allclose(probs.sum(axis=1), 1.0)
@@ -267,7 +254,7 @@ def test_fit_lightgbm_handles_none_age() -> None:
     rows = _toy_dataset() + [_make_row(label="L", age=None)]
     matrix = build_feature_matrix(rows)
     wrapper = fit_lightgbm(matrix)
-    probs = predict_proba(wrapper, matrix)
+    probs = np.asarray(wrapper.predict_proba(matrix.X))
     assert np.all(probs >= 0)
     assert np.allclose(probs.sum(axis=1), 1.0)
 
@@ -278,8 +265,8 @@ def test_fit_lightgbm_deterministic() -> None:
     matrix = build_feature_matrix(rows)
     w1 = fit_lightgbm(matrix, random_state=RANDOM_SEED)
     w2 = fit_lightgbm(matrix, random_state=RANDOM_SEED)
-    p1 = predict_proba(w1, matrix)
-    p2 = predict_proba(w2, matrix)
+    p1 = np.asarray(w1.predict_proba(matrix.X))
+    p2 = np.asarray(w2.predict_proba(matrix.X))
     assert np.allclose(p1, p2)
 
 
@@ -312,7 +299,7 @@ def test_predict_proba_columns_in_class_order() -> None:
     rows = _toy_dataset()
     matrix = build_feature_matrix(rows)
     wrapper = fit_lightgbm(matrix)
-    probs = predict_proba(wrapper, matrix)
+    probs = np.asarray(wrapper.predict_proba(matrix.X))
     # P(L) on L rows should exceed P(L) on R rows on average.
     p_L_by_class = np.array([probs[i * 30 : (i + 1) * 30, 0].mean() for i in range(3)])
     assert p_L_by_class[0] > p_L_by_class[2], (
@@ -336,8 +323,8 @@ def test_predict_handles_unseen_categorical_values() -> None:
 
     # Build a new row with an unseen `b3_round`.
     new_row = _make_row(label="L", rnd="NEVER_SEEN_BEFORE")
-    new_matrix = rows_to_predict_matrix([new_row])
-    probs = predict_proba(wrapper, new_matrix)
+    new_matrix = build_feature_matrix([new_row])
+    probs = np.asarray(wrapper.predict_proba(new_matrix.X))
     assert probs.shape == (1, 3)
     assert np.all(probs >= 0)
     assert np.allclose(probs.sum(axis=1), 1.0)
@@ -391,8 +378,8 @@ def test_lightgbm_versus_logreg_on_toy_dataset() -> None:
     matrix = build_feature_matrix(rows)
     lgb = fit_lightgbm(matrix)
     bl = fit_logistic_regression(matrix)
-    lgb_probs = predict_proba(lgb, matrix)
-    bl_probs = predict_proba(bl, matrix)
+    lgb_probs = np.asarray(lgb.predict_proba(matrix.X))
+    bl_probs = np.asarray(bl.predict_proba(matrix.X))
     lgb_acc = float((lgb_probs.argmax(axis=1) == matrix.y).mean())
     bl_acc = float((bl_probs.argmax(axis=1) == matrix.y).mean())
     # The LightGBM should match or beat the logreg on the toy
@@ -499,8 +486,8 @@ def test_live_lightgbm_artifact_smoke() -> None:
     assert isinstance(art["model"], LightGBMClassifierWrapper)
     # Predict on a stub row to confirm the artifact loads cleanly.
     rows = [_make_row(label="L")]
-    matrix = rows_to_predict_matrix(rows)
-    probs = predict_proba(art["model"], matrix)
+    matrix = build_feature_matrix(rows)
+    probs = np.asarray(art["model"].predict_proba(matrix.X))
     assert probs.shape == (1, 3)
     assert np.allclose(probs.sum(axis=1), 1.0)
     assert (probs >= 0).all()
@@ -524,8 +511,8 @@ def test_live_lightgbm_predictions_for_roster() -> None:
     # just confirm the artifact can be loaded and used to predict
     # on a stub row. The full predict slice is issue #25.
     rows = [_make_row(label="L", last_side=""), _make_row(label="C", last_side="C")]
-    matrix = rows_to_predict_matrix(rows)
-    probs = predict_proba(art_loaded["model"], matrix)
+    matrix = build_feature_matrix(rows)
+    probs = np.asarray(art_loaded["model"].predict_proba(matrix.X))
     assert probs.shape == (2, 3)
     assert np.allclose(probs.sum(axis=1), 1.0)
     assert (probs >= 0).all()

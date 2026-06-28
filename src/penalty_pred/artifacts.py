@@ -51,7 +51,7 @@ from typing import Any, TypeVar
 
 from .client import FotMobClient
 from .evaluate import MetricsReport
-from .features import TrainingTableRow
+from .features import TrainingRow
 from .model import (
     load_artifact as _model_load_artifact,
 )
@@ -225,11 +225,11 @@ class Artifacts:
 
     # -------------------------------------------------------- training_table
 
-    def read_training_table(self, path: Path | None = None) -> list[TrainingTableRow]:
-        return _read_jsonl_of_dataclasses(path or self.training_table, TrainingTableRow)
+    def read_training_table(self, path: Path | None = None) -> list[TrainingRow]:
+        return _read_jsonl_of_dataclasses(path or self.training_table, TrainingRow)
 
     def write_training_table(
-        self, rows: Iterable[TrainingTableRow], path: Path | None = None
+        self, rows: Iterable[TrainingRow], path: Path | None = None
     ) -> int:
         return _write_jsonl(path or self.training_table, rows, nan_to_null=True)
 

@@ -1,15 +1,16 @@
 """Tests for the feature builder (slice #6, Issue #22).
 
-The tests cover three layers:
+The tests cover five layers:
 
 1. **Pure helpers** — `side_distribution`, `last_side`,
    `mode_kicking_foot`, `is_decisive_kick`, `age_in_years`,
    `filter_history`, `index_kicks_done`. No network, no I/O.
 
-2. **Per-kick feature builder** — `build_features` against a
-   constructed `ShootoutKick` and a constructed `PlayerPenalty`
-   history. Verifies the A1/A2/A3/A4/B1/B2/B3/C1/C2 features and
-   the no-history fallback.
+2. **Per-kick feature builder** — `build_features` (the packaging
+   function) and `compute_features` (the A-group/C-group
+   computation) against a constructed `ShootoutKick` and a
+   constructed `PlayerPenalty` history. Verifies the
+   A1/A2/A3/A4/B1/B2/B3/C1/C2 features and the no-history fallback.
 
 3. **Orchestration** — `build_training_table` against a stubbed
    `MetadataFetcher` that returns canned metadata per kicker. Verifies
@@ -34,11 +35,14 @@ import pytest
 from penalty_pred.artifacts import Artifacts
 from penalty_pred.features import (
     PRIOR_PROB,
+    BGroupContext,
     KickIndex,
-    TrainingTableRow,
+    PredictionTarget,
+    TrainingRow,
     age_in_years,
     build_features,
     build_training_table,
+    compute_features,
     filter_history,
     index_kicks_done,
     is_decisive_kick,
@@ -360,11 +364,34 @@ def _target(
 def test_build_features_with_no_history_uses_prior() -> None:
     """No history → A1 = (1/3, 1/3, 1/3), A2 = "", A3 = "Unknown",
     A4 = 0."""
-    row = build_features(
-        target=_target(kicker_id=1, side="L"),
+    target = _target(kicker_id=1, side="L")
+    features = compute_features(
         history=[],
         metadata=PlayerMetadata(player_id=1, player_name="X", position_key="striker", birth_date="1990-01-01"),
+        target_date=target.match_date,
+        b_group=BGroupContext(
+            kick_number=target.kick_number,
+            pen_score_home=target.pen_score_before[0],
+            pen_score_away=target.pen_score_before[1],
+            is_home=target.is_home,
+            round=target.round,
+        ),
         kicks_done=KickIndex(0, 0),
+    )
+    row = build_features(
+        features,
+        match_id=target.match_id,
+        kick_number=target.kick_number,
+        kicker_id=target.kicker_id,
+        kicker_name=target.kicker_name,
+        match_date=target.match_date,
+        tournament_id=target.tournament_id,
+        tournament_name=target.tournament_name,
+        round=target.round,
+        team_id=target.team_id,
+        is_home=target.is_home,
+        label=target.side,
+        is_on_target=target.is_on_target,
     )
     assert row.label == "L"
     assert (row.p_L_5, row.p_C_5, row.p_R_5) == PRIOR_PROB
@@ -385,11 +412,34 @@ def test_build_features_with_history_computes_a1_a2_a3_a4() -> None:
         _penalty(4, "2022-04-01T00:00:00+00:00", side="L"),
         _penalty(5, "2022-05-01T00:00:00+00:00", side="R"),
     ]
-    row = build_features(
-        target=_target(kicker_id=1, side="L"),
+    target = _target(kicker_id=1, side="L")
+    features = compute_features(
         history=history,
         metadata=PlayerMetadata(player_id=1, player_name="X", position_key="striker", birth_date="1990-01-01"),
+        target_date=target.match_date,
+        b_group=BGroupContext(
+            kick_number=target.kick_number,
+            pen_score_home=target.pen_score_before[0],
+            pen_score_away=target.pen_score_before[1],
+            is_home=target.is_home,
+            round=target.round,
+        ),
         kicks_done=KickIndex(0, 0),
+    )
+    row = build_features(
+        features,
+        match_id=target.match_id,
+        kick_number=target.kick_number,
+        kicker_id=target.kicker_id,
+        kicker_name=target.kicker_name,
+        match_date=target.match_date,
+        tournament_id=target.tournament_id,
+        tournament_name=target.tournament_name,
+        round=target.round,
+        team_id=target.team_id,
+        is_home=target.is_home,
+        label=target.side,
+        is_on_target=target.is_on_target,
     )
     assert (row.p_L_5, row.p_C_5, row.p_R_5) == (0.6, 0.0, 0.4)
     assert row.last_side == "R"
@@ -407,11 +457,34 @@ def test_build_features_a1_horizons_nest() -> None:
         [_penalty(i, f"2021-{i:02d}-01T00:00:00+00:00", side="L") for i in range(1, 21)]
         + [_penalty(100 + i, f"2022-{i:02d}-01T00:00:00+00:00", side="L") for i in range(1, 6)]
     )
-    row = build_features(
-        target=_target(kicker_id=1),
+    target = _target(kicker_id=1)
+    features = compute_features(
         history=history,
         metadata=PlayerMetadata(player_id=1, player_name="X", position_key="striker", birth_date="1990-01-01"),
+        target_date=target.match_date,
+        b_group=BGroupContext(
+            kick_number=target.kick_number,
+            pen_score_home=target.pen_score_before[0],
+            pen_score_away=target.pen_score_before[1],
+            is_home=target.is_home,
+            round=target.round,
+        ),
         kicks_done=KickIndex(0, 0),
+    )
+    row = build_features(
+        features,
+        match_id=target.match_id,
+        kick_number=target.kick_number,
+        kicker_id=target.kicker_id,
+        kicker_name=target.kicker_name,
+        match_date=target.match_date,
+        tournament_id=target.tournament_id,
+        tournament_name=target.tournament_name,
+        round=target.round,
+        team_id=target.team_id,
+        is_home=target.is_home,
+        label=target.side,
+        is_on_target=target.is_on_target,
     )
     # Last 5 = 5L → p_L_5 = 1.0. Last 10 = 10L → 1.0. Last 20 = 20L → 1.0.
     # So monotonicity holds trivially.
@@ -423,8 +496,8 @@ def test_build_features_a1_horizons_nest() -> None:
 def test_build_features_c1_c2_from_metadata() -> None:
     """Position and age come from the metadata. C1 = position key, C2
     = age in years at the target date."""
-    row = build_features(
-        target=_target(),
+    target = _target()
+    features = compute_features(
         history=[],
         metadata=PlayerMetadata(
             player_id=1,
@@ -432,7 +505,30 @@ def test_build_features_c1_c2_from_metadata() -> None:
             position_key="centreback",
             birth_date="1995-05-01",
         ),
+        target_date=target.match_date,
+        b_group=BGroupContext(
+            kick_number=target.kick_number,
+            pen_score_home=target.pen_score_before[0],
+            pen_score_away=target.pen_score_before[1],
+            is_home=target.is_home,
+            round=target.round,
+        ),
         kicks_done=KickIndex(0, 0),
+    )
+    row = build_features(
+        features,
+        match_id=target.match_id,
+        kick_number=target.kick_number,
+        kicker_id=target.kicker_id,
+        kicker_name=target.kicker_name,
+        match_date=target.match_date,
+        tournament_id=target.tournament_id,
+        tournament_name=target.tournament_name,
+        round=target.round,
+        team_id=target.team_id,
+        is_home=target.is_home,
+        label=target.side,
+        is_on_target=target.is_on_target,
     )
     assert row.position == "centreback"
     # Target 2022-12-18, born 1995-05-01 → 27 years (had 27th birthday in May 2022).
@@ -441,11 +537,34 @@ def test_build_features_c1_c2_from_metadata() -> None:
 
 def test_build_features_c1_c2_handle_missing_metadata() -> None:
     """`metadata=None` → C1 = "" and C2 = NaN (serialised as null in JSONL)."""
-    row = build_features(
-        target=_target(),
+    target = _target()
+    features = compute_features(
         history=[],
         metadata=None,
+        target_date=target.match_date,
+        b_group=BGroupContext(
+            kick_number=target.kick_number,
+            pen_score_home=target.pen_score_before[0],
+            pen_score_away=target.pen_score_before[1],
+            is_home=target.is_home,
+            round=target.round,
+        ),
         kicks_done=KickIndex(0, 0),
+    )
+    row = build_features(
+        features,
+        match_id=target.match_id,
+        kick_number=target.kick_number,
+        kicker_id=target.kicker_id,
+        kicker_name=target.kicker_name,
+        match_date=target.match_date,
+        tournament_id=target.tournament_id,
+        tournament_name=target.tournament_name,
+        round=target.round,
+        team_id=target.team_id,
+        is_home=target.is_home,
+        label=target.side,
+        is_on_target=target.is_on_target,
     )
     assert row.position == ""
     assert math.isnan(row.age)
@@ -474,19 +593,93 @@ def test_build_features_b1_b2_b3_pass_through() -> None:
         match_score_home=2,
         match_score_away=2,
     )
-    row = build_features(
-        target=target,
+    features = compute_features(
         history=[],
         metadata=None,
+        target_date=target.match_date,
+        b_group=BGroupContext(
+            kick_number=target.kick_number,
+            pen_score_home=target.pen_score_before[0],
+            pen_score_away=target.pen_score_before[1],
+            is_home=target.is_home,
+            round=target.round,
+        ),
         # Before kick 7: home 3 done, away 3 done. Score 2-3.
         # Scoring (3-3) → not clinched, not eliminated. Missing (2-3) → not clinched, not eliminated. Not decisive.
         kicks_done=KickIndex(3, 3),
+    )
+    row = build_features(
+        features,
+        match_id=target.match_id,
+        kick_number=target.kick_number,
+        kicker_id=target.kicker_id,
+        kicker_name=target.kicker_name,
+        match_date=target.match_date,
+        tournament_id=target.tournament_id,
+        tournament_name=target.tournament_name,
+        round=target.round,
+        team_id=target.team_id,
+        is_home=target.is_home,
+        label=target.side,
+        is_on_target=target.is_on_target,
     )
     assert row.b1_kick_number == 7
     assert row.pen_score_home == 2
     assert row.pen_score_away == 3
     assert row.is_decisive is False
     assert row.b3_round == "Quarter-finals"
+
+
+def test_compute_features_returns_prediction_target() -> None:
+    """`compute_features` returns a `PredictionTarget` (not a `TrainingRow`).
+
+    The new split (Issue #30) separates the computation from the
+    packaging: `compute_features` produces the 19 model features; the
+    caller wraps them in a `TrainingRow` via `build_features`. The
+    `PredictionTarget` is the value object the prediction slice uses
+    directly, with no synthetic `ShootoutKick`.
+    """
+    target = _target()
+    features = compute_features(
+        history=[],
+        metadata=PlayerMetadata(
+            player_id=1,
+            player_name="X",
+            position_key="striker",
+            birth_date="1990-01-01",
+        ),
+        target_date=target.match_date,
+        b_group=BGroupContext(
+            kick_number=target.kick_number,
+            pen_score_home=target.pen_score_before[0],
+            pen_score_away=target.pen_score_before[1],
+            is_home=target.is_home,
+            round=target.round,
+        ),
+        kicks_done=KickIndex(0, 0),
+    )
+    assert isinstance(features, PredictionTarget)
+    assert (features.p_L_5, features.p_C_5, features.p_R_5) == PRIOR_PROB
+    assert features.last_side == ""
+    assert features.kicking_foot == "Unknown"
+    assert features.b1_kick_number == target.kick_number
+    assert features.b3_round == target.round
+
+
+def test_b_group_context_neutral_has_neutral_b_group() -> None:
+    """`BGroupContext.neutral()` produces the values the prediction
+    slice uses: kick_number=1, score=0-0, is_decisive=False, round="".
+
+    This is what the prediction slice feeds to `compute_features` so
+    the model's B-group features don't leak shootout-state info that
+    doesn't exist for a prediction target.
+    """
+    ctx = BGroupContext.neutral()
+    assert ctx.kick_number == 1
+    assert ctx.pen_score_home == 0
+    assert ctx.pen_score_away == 0
+    assert ctx.is_home is True
+    assert ctx.round == ""
 
 
 # ---------------------------------------------------------------------------
@@ -577,7 +770,7 @@ def test_build_training_table_idempotent() -> None:
     assert [asdict_payload(r) for r in rows1] == [asdict_payload(r) for r in rows2]
 
 
-def asdict_payload(r: TrainingTableRow) -> dict[str, object]:
+def asdict_payload(r: TrainingRow) -> dict[str, object]:
     """`asdict` for the row, with NaN ages normalised to None for JSONL
     compatibility."""
     payload = {
@@ -591,7 +784,7 @@ def asdict_payload(r: TrainingTableRow) -> dict[str, object]:
 def test_write_training_table_roundtrip(tmp_path: Path) -> None:
     """Writing and reading the JSONL preserves the schema. NaN ages
     are emitted as `null` (strict JSON), not `NaN`."""
-    row = TrainingTableRow(
+    row = TrainingRow(
         match_id=1,
         kick_number=1,
         kicker_id=1,
@@ -603,6 +796,7 @@ def test_write_training_table_roundtrip(tmp_path: Path) -> None:
         team_id=1,
         is_home=True,
         label="L",
+        is_on_target=True,
         p_L_5=1.0,
         p_C_5=0.0,
         p_R_5=0.0,
@@ -665,6 +859,8 @@ REQUIRED_FIELDS = frozenset(
         "is_home",
         # Label
         "label",
+        # is_on_target
+        "is_on_target",
         # A1
         "p_L_5",
         "p_C_5",

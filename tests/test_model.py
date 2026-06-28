@@ -1,15 +1,17 @@
 """Tests for the model module (slice #7, Issue #23).
 
-Three layers:
+Four layers:
 
-1. **Pure helpers** — `TrainingRow`, `build_feature_matrix`,
-   `temporal_split`, `load_training_table`, `is_numeric_nan`. No
-   network, no I/O.
+1. **Pure helpers** — `TrainingRow` (re-exported from `features`),
+   `build_feature_matrix`, `temporal_split`, `load_training_table`,
+   `is_numeric_nan`. No network, no I/O.
 
 2. **Pipeline builder / fit / predict** — `make_logistic_regression`,
-   `fit_logistic_regression`, `predict_proba`. The pipeline is fitted
-   on a constructed `FeatureMatrix` and verified to (a) sum to 1,
-   (b) be non-negative, (c) be deterministic across runs (same seed).
+   `fit_logistic_regression`. The pipeline is fitted on a constructed
+   `FeatureMatrix` and verified to (a) sum to 1, (b) be non-negative,
+   (c) be deterministic across runs (same seed). Predict is via
+   `model.predict_proba(matrix.X)` directly (no shim, per the
+   `PredictProba` Protocol).
 
 3. **Artifact I/O** — `save_artifact` / `load_artifact` roundtrip;
    the `feature_columns` are recorded in the artifact.
@@ -25,7 +27,6 @@ from __future__ import annotations
 import json
 import pickle
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pytest
@@ -47,8 +48,6 @@ from penalty_pred.model import (
     load_artifact,
     load_training_table,
     make_logistic_regression,
-    predict_proba,
-    rows_to_predict_matrix,
     save_artifact,
     temporal_split,
 )
@@ -58,48 +57,6 @@ from penalty_pred.model import (
 # ---------------------------------------------------------------------------
 
 
-def _make_features(
-    label: str = "L",
-    kicking_foot: str = "RightFoot",
-    pos: str = "striker",
-    rnd: str = "1/8",
-    age: float | None = 25.0,
-    last_side: str = "L",
-    career: int = 5,
-    kick_number: int = 1,
-    score: tuple[int, int] = (0, 0),
-) -> dict[str, Any]:
-    """Build a complete feature dict for a single TrainingRow."""
-    is_decisive = False
-    return {
-        # A1 — uniform-ish; tests verify the matrix shape, not the math.
-        "p_L_5": 1.0 if label == "L" else 0.0,
-        "p_C_5": 1.0 if label == "C" else 0.0,
-        "p_R_5": 1.0 if label == "R" else 0.0,
-        "p_L_10": 1.0 if label == "L" else 0.0,
-        "p_C_10": 1.0 if label == "C" else 0.0,
-        "p_R_10": 1.0 if label == "R" else 0.0,
-        "p_L_20": 1.0 if label == "L" else 0.0,
-        "p_C_20": 1.0 if label == "C" else 0.0,
-        "p_R_20": 1.0 if label == "R" else 0.0,
-        # A4
-        "career_penalty_count": career,
-        # B1
-        "b1_kick_number": kick_number,
-        # B2
-        "pen_score_home": score[0],
-        "pen_score_away": score[1],
-        "is_decisive": is_decisive,
-        # C2
-        "age": age,
-        # A2 / A3 / B3 / C1
-        "last_side": last_side,
-        "kicking_foot": kicking_foot,
-        "b3_round": rnd,
-        "position": pos,
-    }
-
-
 def _make_row(
     label: str = "L",
     *,
@@ -107,9 +64,15 @@ def _make_row(
     kick_number: int = 1,
     kicker_id: int = 1,
     date: str = "2024-06-01T00:00:00+00:00",
-    **feature_overrides: Any,
+    kicking_foot: str = "RightFoot",
+    pos: str = "striker",
+    rnd: str = "1/8",
+    age: float | None = 25.0,
+    last_side: str = "L",
+    career: int = 5,
+    score: tuple[int, int] = (0, 0),
 ) -> TrainingRow:
-    features = _make_features(label=label, **feature_overrides)
+    """Build a complete `TrainingRow` for tests (the unified row type)."""
     return TrainingRow(
         match_id=match_id,
         kick_number=kick_number,
@@ -118,12 +81,39 @@ def _make_row(
         match_date=date,
         tournament_id=77,
         tournament_name="World Cup",
-        round=feature_overrides.get("rnd", "1/8"),
+        round=rnd,
         team_id=1,
         is_home=True,
         label=label,
         is_on_target=True,
-        features=features,
+        # A1 — uniform-ish; tests verify the matrix shape, not the math.
+        p_L_5=1.0 if label == "L" else 0.0,
+        p_C_5=1.0 if label == "C" else 0.0,
+        p_R_5=1.0 if label == "R" else 0.0,
+        p_L_10=1.0 if label == "L" else 0.0,
+        p_C_10=1.0 if label == "C" else 0.0,
+        p_R_10=1.0 if label == "R" else 0.0,
+        p_L_20=1.0 if label == "L" else 0.0,
+        p_C_20=1.0 if label == "C" else 0.0,
+        p_R_20=1.0 if label == "R" else 0.0,
+        # A2
+        last_side=last_side,
+        # A3
+        kicking_foot=kicking_foot,
+        # A4
+        career_penalty_count=career,
+        # B1
+        b1_kick_number=kick_number,
+        # B2
+        pen_score_home=score[0],
+        pen_score_away=score[1],
+        is_decisive=False,
+        # B3
+        b3_round=rnd,
+        # C1
+        position=pos,
+        # C2
+        age=age if age is not None else float("nan"),
     )
 
 
@@ -188,9 +178,7 @@ def test_training_row_label_index_lcr() -> None:
 
 
 def test_training_row_is_frozen() -> None:
-    """TrainingRow is a frozen dataclass; the `features` dict is the
-    only mutable field (intended — the same features dict may be
-    reused across multiple test rows)."""
+    """TrainingRow is a frozen dataclass; every field is immutable."""
     row = _make_row()
     with pytest.raises((AttributeError, Exception)):
         row.label = "R"  # type: ignore[misc]
@@ -308,7 +296,7 @@ def test_load_training_table_reads_live(tmp_path: Path) -> None:
     assert len(rows) == 1
     r = rows[0]
     assert r.label == "L"
-    assert r.features["p_L_5"] == 0.5
+    assert r.p_L_5 == 0.5
     # No is_on_target_by_key supplied → is_on_target defaults True.
     assert r.is_on_target is True
 
@@ -461,7 +449,7 @@ def test_fit_logistic_regression_predicts_valid_distribution() -> None:
     rows = _toy_dataset()
     matrix = build_feature_matrix(rows)
     pipe = fit_logistic_regression(matrix)
-    probs = predict_proba(pipe, matrix)
+    probs = np.asarray(pipe.predict_proba(matrix.X))
     assert probs.shape == (len(rows), 3)
     assert np.all(probs >= 0)
     assert np.allclose(probs.sum(axis=1), 1.0)
@@ -473,7 +461,7 @@ def test_fit_logistic_regression_handles_none_age() -> None:
     rows = _toy_dataset() + [_make_row(label="L", age=None)]
     matrix = build_feature_matrix(rows)
     pipe = fit_logistic_regression(matrix)
-    probs = predict_proba(pipe, matrix)
+    probs = np.asarray(pipe.predict_proba(matrix.X))
     assert np.all(probs >= 0)
     assert np.allclose(probs.sum(axis=1), 1.0)
 
@@ -484,8 +472,8 @@ def test_fit_logistic_regression_deterministic() -> None:
     matrix = build_feature_matrix(rows)
     pipe1 = fit_logistic_regression(matrix, random_state=RANDOM_SEED)
     pipe2 = fit_logistic_regression(matrix, random_state=RANDOM_SEED)
-    p1 = predict_proba(pipe1, matrix)
-    p2 = predict_proba(pipe2, matrix)
+    p1 = np.asarray(pipe1.predict_proba(matrix.X))
+    p2 = np.asarray(pipe2.predict_proba(matrix.X))
     assert np.allclose(p1, p2)
 
 
@@ -496,7 +484,7 @@ def test_predict_proba_columns_in_class_order() -> None:
     rows = _toy_dataset()
     matrix = build_feature_matrix(rows)
     pipe = fit_logistic_regression(matrix)
-    probs = predict_proba(pipe, matrix)
+    probs = np.asarray(pipe.predict_proba(matrix.X))
     # The L class's row should have the highest P(L) in column 0;
     # we don't require it to be the argmax (overlap with C is
     # possible given small data), but the L class's P(L) should be
@@ -541,18 +529,36 @@ def test_save_artifact_is_picklable_independently(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# rows_to_predict_matrix
+# build_feature_matrix with optional labels (Issue #30)
 # ---------------------------------------------------------------------------
 
 
-def test_rows_to_predict_matrix_empty_labels() -> None:
-    """The predict path uses this to build a matrix without labels."""
+def test_build_feature_matrix_no_labels() -> None:
+    """The predict path uses `build_feature_matrix` with no `y` /
+    `on_target` (Issue #30: the old `rows_to_predict_matrix` is gone;
+    the same builder takes optional labels)."""
     rows = [_make_row(label="L"), _make_row(label="R")]
-    matrix = rows_to_predict_matrix(rows)
+    matrix = build_feature_matrix(rows)
     assert matrix.X.shape == (2, len(FEATURE_COLUMNS))
-    assert matrix.y.size == 0
-    assert matrix.on_target.size == 0
+    # No labels supplied — the builder defaults to the rows' labels
+    # (so training and predict share the same call site, just with
+    # different label-providing paths).
+    assert matrix.y.tolist() == [0, 2]
+    assert matrix.on_target.tolist() == [True, True]
     assert matrix.feature_columns == list(FEATURE_COLUMNS)
+
+
+def test_build_feature_matrix_with_explicit_y() -> None:
+    """`build_feature_matrix` accepts an explicit `y` and `on_target`
+    so callers (e.g. a held-out eval) can override the rows' labels."""
+    rows = [_make_row(label="L"), _make_row(label="R")]
+    explicit_y = np.array([1, 1], dtype=np.int64)  # both labelled C
+    explicit_on_target = np.array([False, True], dtype=bool)
+    matrix = build_feature_matrix(
+        rows, y=explicit_y, on_target=explicit_on_target
+    )
+    assert matrix.y.tolist() == [1, 1]
+    assert matrix.on_target.tolist() == [False, True]
 
 
 # ---------------------------------------------------------------------------
@@ -600,8 +606,8 @@ def test_baseline_artifact_smoke() -> None:
     assert "model" in art
     # Predict on a stub row to confirm the artifact loads cleanly.
     rows = [_make_row(label="L")]
-    matrix = rows_to_predict_matrix(rows)
-    probs = predict_proba(art["model"], matrix)
+    matrix = build_feature_matrix(rows)
+    probs = np.asarray(art["model"].predict_proba(matrix.X))
     assert probs.shape == (1, 3)
     assert np.allclose(probs.sum(axis=1), 1.0)
     assert (probs >= 0).all()
