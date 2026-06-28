@@ -13,7 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from penalty_pred.shootouts import extract_shootout_kicks, write_jsonl
+from penalty_pred.artifacts import Artifacts
+from penalty_pred.shootouts import extract_shootout_kicks
 
 # The 8 kickers in canonical shootout order. (3 from France took penalties but
 # Mbappé is counted once here; the actual 8-kicker list is below.)
@@ -144,7 +145,8 @@ def test_write_and_read_jsonl_roundtrip(
 ) -> None:
     kicks = extract_shootout_kicks(sample_2022_final)
     out = tmp_path / "kicks.jsonl"
-    n = write_jsonl(out, kicks)
+    art = Artifacts(root=tmp_path)
+    n = art.write_shootout_kicks(kicks, path=out)
     assert n == 8
     # Sanity: every line is valid JSON and has the expected fields.
     with out.open() as f:
@@ -160,7 +162,8 @@ def test_write_jsonl_one_record_per_line(
     sample_2022_final: Mapping[str, object], tmp_path: Path
 ) -> None:
     out = tmp_path / "kicks.jsonl"
-    write_jsonl(out, extract_shootout_kicks(sample_2022_final))
+    art = Artifacts(root=tmp_path)
+    art.write_shootout_kicks(extract_shootout_kicks(sample_2022_final), path=out)
     with out.open() as f:
         non_empty = [line for line in f if line.strip()]
     assert len(non_empty) == 8

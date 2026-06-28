@@ -14,11 +14,9 @@ and reuses `extract_shootout_kicks` for each match.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable, Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 from .client import FotMobClient
@@ -179,29 +177,6 @@ def _indexed_scores(
         else:
             post.append(list(score))
     return pre, post
-
-
-def write_jsonl(path: Path, rows: Iterable[ShootoutKick]) -> int:
-    """Write ShootoutKick records to a JSONL file. Returns the row count written."""
-    count = 0
-    with path.open("w", encoding="utf-8") as f:
-        for row in rows:
-            f.write(json.dumps(asdict(row), ensure_ascii=False))
-            f.write("\n")
-            count += 1
-    return count
-
-
-def read_jsonl(path: Path) -> list[ShootoutKick]:
-    """Read a JSONL file of ShootoutKick records."""
-    out: list[ShootoutKick] = []
-    with path.open(encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            out.append(ShootoutKick(**json.loads(line)))
-    return out
 
 
 # ---------------------------------------------------------------------------

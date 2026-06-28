@@ -29,9 +29,8 @@ window always includes all of today's penalties).
 
 from __future__ import annotations
 
-import json
-from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import asdict, dataclass
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -40,7 +39,6 @@ from .features import (
     KickIndex,
     TrainingTableRow,
     build_features,
-    load_player_history,
 )
 from .model import (
     CLASSES,
@@ -50,7 +48,7 @@ from .model import (
     rows_to_predict_matrix,
 )
 from .player_history import PlayerMetadata, PlayerPenalty
-from .rosters import RosterPlayer, read_jsonl
+from .rosters import RosterPlayer
 from .shootouts import ShootoutKick
 
 
@@ -201,17 +199,31 @@ def predict_kicker(
 
 
 # ---------------------------------------------------------------------------
-# I/O
+# I/O — the predictions JSONL is the read/write seam for the dashboard.
+# `load_player_history` re-exports the features-module reader; `load_roster`
+# re-exports the rosters JSONL reader. Both thin wrappers are kept here so
+# callers don't have to import four modules to wire the slice.
 # ---------------------------------------------------------------------------
 
 
-def load_roster(path: Path) -> list[RosterPlayer]:
-    """Load `wc2026_roster.jsonl` into a list of `RosterPlayer`.
+def load_player_history(path: Path) -> dict[int, list[PlayerPenalty]]:
+    """Load `player_history.jsonl` into a dict keyed by `kicker_id`.
 
-    Re-exported from `rosters.read_jsonl` so the predict module's
-    callers don't need to import both modules.
+    Re-exported from `features.load_player_history` for the predict
+    module's callers. Each value is the unsorted list of
+    `PlayerPenalty` rows for that kicker; the caller is expected to
+    sort by `match_date` after filtering to the target date.
     """
-    return read_jsonl(path)
+    from .features import load_player_history as _load_player_history
+
+    return _load_player_history(path)
+
+
+def load_roster(path: Path) -> list[RosterPlayer]:
+    """Load `wc2026_roster.jsonl` into a list of `RosterPlayer`."""
+    from .artifacts import Artifacts
+
+    return Artifacts().read_roster(path)
 
 
 def predict_roster(
@@ -243,40 +255,6 @@ def predict_roster(
     return out
 
 
-def write_predictions_jsonl(path: Path, predictions: Iterable[PredictionRow]) -> int:
-    """Write `PredictionRow` records to a JSONL file. Returns the row count.
-
-    The output is one row per call to `asdict` — no schema transformation.
-    `p_L`, `p_C`, `p_R` are written as the raw floats; the slice does
-    not round them (the model's `predict_proba` already returns a
-    valid distribution and the dashboard rounds for display).
-    """
-    count = 0
-    with path.open("w", encoding="utf-8") as f:
-        for row in predictions:
-            f.write(json.dumps(asdict(row), ensure_ascii=False))
-            f.write("\n")
-            count += 1
-    return count
-
-
-def read_predictions_jsonl(path: Path) -> list[PredictionRow]:
-    """Read a `predictions.jsonl` file back into `PredictionRow` records.
-
-    Roundtrip helper for tests. The same `asdict` schema is used
-    forwards and backwards.
-    """
-    out: list[PredictionRow] = []
-    with path.open(encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            out.append(PredictionRow(**json.loads(line)))
-    return out
-
-
-# Re-export the helper to keep the script's import surface small.
 __all__ = [
     "CLASSES",
     "PRIOR_PROB",
@@ -286,6 +264,4 @@ __all__ = [
     "load_roster",
     "predict_kicker",
     "predict_roster",
-    "read_predictions_jsonl",
-    "write_predictions_jsonl",
 ]

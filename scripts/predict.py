@@ -20,54 +20,46 @@ import sys
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+from penalty_pred.artifacts import Artifacts
 from penalty_pred.client import FotMobClient
-from penalty_pred.config import DEFAULT_CACHE_DIR, today_utc
+from penalty_pred.config import today_utc
 from penalty_pred.features import fetcher_from_client, load_player_history
 from penalty_pred.model import load_artifact
-from penalty_pred.predict import (
-    load_roster,
-    predict_roster,
-    write_predictions_jsonl,
-)
-
-# Default artifact paths — consistent with slices #2, #3, #5, #6, #7, #8.
-DEFAULT_ROSTER_PATH: Path = Path("output/wc2026_roster.jsonl")
-DEFAULT_PLAYER_HISTORY_PATH: Path = Path("output/player_history.jsonl")
-DEFAULT_MODEL_PATH: Path = Path("output/lightgbm.pkl")
-DEFAULT_OUTPUT_PATH: Path = Path("output/predictions.jsonl")
+from penalty_pred.predict import load_roster, predict_roster
 
 
 def main() -> int:
+    art = Artifacts()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--roster",
         type=Path,
-        default=DEFAULT_ROSTER_PATH,
-        help="Path to wc2026_roster.jsonl (default: output/wc2026_roster.jsonl).",
+        default=art.roster,
+        help=f"Path to wc2026_roster.jsonl (default: {art.roster}).",
     )
     parser.add_argument(
         "--player-history",
         type=Path,
-        default=DEFAULT_PLAYER_HISTORY_PATH,
-        help="Path to player_history.jsonl (default: output/player_history.jsonl).",
+        default=art.player_history,
+        help=f"Path to player_history.jsonl (default: {art.player_history}).",
     )
     parser.add_argument(
         "--model",
         type=Path,
-        default=DEFAULT_MODEL_PATH,
-        help="Path to the frozen model artifact (default: output/lightgbm.pkl).",
+        default=art.lightgbm_model,
+        help=f"Path to the frozen model artifact (default: {art.lightgbm_model}).",
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=DEFAULT_OUTPUT_PATH,
-        help="Path to write predictions.jsonl (default: output/predictions.jsonl).",
+        default=art.predictions,
+        help=f"Path to write predictions.jsonl (default: {art.predictions}).",
     )
     parser.add_argument(
         "--cache-dir",
         type=Path,
-        default=Path(DEFAULT_CACHE_DIR),
-        help="Persistent disk cache directory for player page fetches.",
+        default=art.cache_dir,
+        help=f"Persistent disk cache directory for player page fetches (default: {art.cache_dir}).",
     )
     parser.add_argument(
         "--target-date",
@@ -106,12 +98,12 @@ def main() -> int:
     # Load
     roster = load_roster(args.roster)
     history = load_player_history(args.player_history)
-    art = load_artifact(args.model)
-    model = art["model"]
+    art_model = load_artifact(args.model)
+    model = art_model["model"]
     print(
         f"Loaded {len(roster)} players from {args.roster}; "
         f"{len(history)} unique kickers in {args.player_history}; "
-        f"model_kind={art['model_kind']}; target_date={target.isoformat()}."
+        f"model_kind={art_model['model_kind']}; target_date={target.isoformat()}."
     )
 
     # Metadata fetcher (cache-warm from the player-history slice; the
@@ -125,7 +117,7 @@ def main() -> int:
     predictions = predict_roster(model, roster, history, metadata_fetcher, target_iso)
 
     # Write
-    n = write_predictions_jsonl(args.output, predictions)
+    n = art.write_predictions(predictions, path=args.output)
     n_with_history = sum(1 for r in predictions if r.kicking_foot != "Unknown")
     n_no_history = n - n_with_history
     print(

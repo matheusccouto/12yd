@@ -26,10 +26,8 @@ skipped at extraction time.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import asdict, dataclass
-from pathlib import Path
+from dataclasses import dataclass
 from typing import Any
 
 from .client import FotMobClient
@@ -170,26 +168,3 @@ def extract_lineup_players(
                 team_name=team_name,
                 country_code=str(player.get("countryCode") or ""),
             )
-
-
-def write_jsonl(path: Path, rows: Iterable[RosterPlayer]) -> int:
-    """Write RosterPlayer records to a JSONL file. Returns the row count written."""
-    count = 0
-    with path.open("w", encoding="utf-8") as f:
-        for row in rows:
-            f.write(json.dumps(asdict(row), ensure_ascii=False))
-            f.write("\n")
-            count += 1
-    return count
-
-
-def read_jsonl(path: Path) -> list[RosterPlayer]:
-    """Read a JSONL file of RosterPlayer records."""
-    out: list[RosterPlayer] = []
-    with path.open(encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            out.append(RosterPlayer(**json.loads(line)))
-    return out

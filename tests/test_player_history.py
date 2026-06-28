@@ -29,6 +29,7 @@ from typing import Any
 
 import pytest
 
+from penalty_pred.artifacts import Artifacts
 from penalty_pred.client import FotMobClient
 from penalty_pred.player_history import (
     PlayerMetadata,
@@ -42,7 +43,6 @@ from penalty_pred.player_history import (
     iter_career_season_entries,
     iter_team_season_lookups,
     season_name_to_year,
-    write_jsonl,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -428,11 +428,11 @@ def test_extract_penalties_uses_match_league_name_when_present(
 
 
 # ---------------------------------------------------------------------------
-# write_jsonl roundtrip
+# Artifacts.write_player_history roundtrip
 # ---------------------------------------------------------------------------
 
 
-def test_write_jsonl_roundtrip(tmp_path: Path) -> None:
+def test_write_player_history_roundtrip(tmp_path: Path) -> None:
     """Writing then reading a JSONL file gives the same rows back."""
     rows = [
         PlayerPenalty(
@@ -451,7 +451,8 @@ def test_write_jsonl_roundtrip(tmp_path: Path) -> None:
         )
     ]
     out = tmp_path / "x.jsonl"
-    n = write_jsonl(out, rows)
+    art = Artifacts(root=tmp_path)
+    n = art.write_player_history(rows, path=out)
     assert n == 1
     with out.open() as f:
         for line in f:

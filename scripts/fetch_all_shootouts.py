@@ -22,13 +22,12 @@ import argparse
 import sys
 from pathlib import Path
 
+from penalty_pred.artifacts import Artifacts
 from penalty_pred.client import FotMobClient
-from penalty_pred.config import DEFAULT_CACHE_DIR
 from penalty_pred.rsssf import load_rsssf_html, parse_rsssf_html
 from penalty_pred.shootouts import (
     fetch_all_shootout_kicks_with_skips,
     fetch_all_shootout_match_refs,
-    write_jsonl,
 )
 from penalty_pred.tournaments import LEAGUE_SEASONS_PREDICT_WINDOW
 from penalty_pred.validate import validate_shootout_count
@@ -41,25 +40,28 @@ DEFAULT_RSSSF_FIXTURE: Path = Path("docs/samples/rsssf_penaltiestour.html")
 
 
 def main() -> int:
+    art = Artifacts()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("output/shootout_kicks.jsonl"),
-        help="Path to write the JSONL artifact (default: output/shootout_kicks.jsonl).",
+        default=art.shootout_kicks,
+        help=f"Path to write the JSONL artifact (default: {art.shootout_kicks}).",
     )
     parser.add_argument(
         "--discrepancies",
         type=Path,
-        default=Path("output/discrepancies.json"),
-        help="Path to write the discrepancies file if the RSSSF count diverges "
-        "(default: output/discrepancies.json).",
+        default=art.discrepancies,
+        help=(
+            "Path to write the discrepancies file if the RSSSF count diverges "
+            f"(default: {art.discrepancies})."
+        ),
     )
     parser.add_argument(
         "--cache-dir",
         type=Path,
-        default=Path(DEFAULT_CACHE_DIR),
-        help="Persistent disk cache directory.",
+        default=art.cache_dir,
+        help=f"Persistent disk cache directory (default: {art.cache_dir}).",
     )
     parser.add_argument(
         "--rsssf-fixture",
@@ -88,7 +90,7 @@ def main() -> int:
     all_kicks = [k for r in results for k in r.kicks]
     skipped = [r.ref for r in results if r.skipped]
     no_kicks = [r.ref for r in results if r.no_kicks]
-    n_kicks = write_jsonl(args.output, all_kicks)
+    n_kicks = Artifacts().write_shootout_kicks(all_kicks, path=args.output)
     print(
         f"Wrote {n_kicks} shootout kicks to {args.output} "
         f"({len(skipped)} skipped due to stale (seo, h2h) hashes, "

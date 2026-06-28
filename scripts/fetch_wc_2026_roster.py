@@ -28,25 +28,26 @@ import argparse
 import sys
 from pathlib import Path
 
+from penalty_pred.artifacts import Artifacts
 from penalty_pred.client import FotMobClient
-from penalty_pred.config import DEFAULT_CACHE_DIR
-from penalty_pred.rosters import fetch_wc_2026_roster, write_jsonl
+from penalty_pred.rosters import fetch_wc_2026_roster
 from penalty_pred.tournaments import WC_2026_LEAGUE, WC_2026_SEASON
 
 
 def main() -> int:
+    art = Artifacts()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("output/wc2026_roster.jsonl"),
-        help="Path to write the JSONL artifact (default: output/wc2026_roster.jsonl).",
+        default=art.roster,
+        help=f"Path to write the JSONL artifact (default: {art.roster}).",
     )
     parser.add_argument(
         "--cache-dir",
         type=Path,
-        default=Path(DEFAULT_CACHE_DIR),
-        help="Persistent disk cache directory.",
+        default=art.cache_dir,
+        help=f"Persistent disk cache directory (default: {art.cache_dir}).",
     )
     parser.add_argument(
         "--league-id",
@@ -77,7 +78,7 @@ def main() -> int:
 
     league = League(args.league_id, args.slug, "")
     rows = fetch_wc_2026_roster(client, league, args.season)
-    n = write_jsonl(args.output, rows)
+    n = Artifacts().write_roster(rows, path=args.output)
     print(f"Wrote {n} unique players to {args.output}")
     return 0
 

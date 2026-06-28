@@ -32,6 +32,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from penalty_pred.artifacts import Artifacts
 from penalty_pred.model import (
     CATEGORICAL_FEATURES,
     FEATURE_COLUMNS,
@@ -409,9 +410,9 @@ def test_lightgbm_versus_logreg_on_toy_dataset() -> None:
 
 @pytest.mark.skipif(
     not (
-        Path("output/training_table.jsonl").exists()
-        and Path("output/lightgbm.pkl").exists()
-        and Path("output/metrics.json").exists()
+        Artifacts().training_table.exists()
+        and Artifacts().lightgbm_model.exists()
+        and Artifacts().metrics.exists()
     ),
     reason="output/ artifacts not present (run the slice first)",
 )
@@ -419,7 +420,7 @@ def test_live_metrics_json_shape_with_baseline() -> None:
     """The live `output/metrics.json` has the expected sections
     including the new `baseline` field (the logreg comparison
     classifier for slice #8)."""
-    with Path("output/metrics.json").open(encoding="utf-8") as f:
+    with Artifacts().metrics.open(encoding="utf-8") as f:
         payload = json.load(f)
     assert "model" in payload
     assert "baseline" in payload
@@ -443,7 +444,7 @@ def test_live_metrics_json_shape_with_baseline() -> None:
 
 
 @pytest.mark.skipif(
-    not (Path("output/lightgbm.pkl").exists() and Path("output/metrics.json").exists()),
+    not (Artifacts().lightgbm_model.exists() and Artifacts().metrics.exists()),
     reason="output/ artifacts not present (run the slice first)",
 )
 def test_live_lightgbm_beats_logreg_on_save_rate() -> None:
@@ -453,7 +454,7 @@ def test_live_lightgbm_beats_logreg_on_save_rate() -> None:
     small to distinguish the two models on log loss (LightGBM with
     conservative defaults is more confident than the logreg and gets
     higher log loss but better save rate — see progress.txt)."""
-    with Path("output/metrics.json").open(encoding="utf-8") as f:
+    with Artifacts().metrics.open(encoding="utf-8") as f:
         payload = json.load(f)
     lgb_save = payload["model"]["save_rate"]
     bl_save = payload["baseline"]["save_rate"]
@@ -464,13 +465,13 @@ def test_live_lightgbm_beats_logreg_on_save_rate() -> None:
 
 
 @pytest.mark.skipif(
-    not (Path("output/lightgbm.pkl").exists() and Path("output/metrics.json").exists()),
+    not (Artifacts().lightgbm_model.exists() and Artifacts().metrics.exists()),
     reason="output/ artifacts not present (run the slice first)",
 )
 def test_live_lightgbm_beats_random_and_kmf_on_save_rate() -> None:
     """Issue #24 AC: LightGBM also beats random and the
     kicker's-most-frequent-side baseline on save rate."""
-    with Path("output/metrics.json").open(encoding="utf-8") as f:
+    with Artifacts().metrics.open(encoding="utf-8") as f:
         payload = json.load(f)
     lgb_save = payload["model"]["save_rate"]
     rand_save = payload["random_baseline"]["save_rate"]
@@ -484,14 +485,14 @@ def test_live_lightgbm_beats_random_and_kmf_on_save_rate() -> None:
 
 
 @pytest.mark.skipif(
-    not Path("output/lightgbm.pkl").exists(),
+    not Artifacts().lightgbm_model.exists(),
     reason="output/lightgbm.pkl not present (run the slice first)",
 )
 def test_live_lightgbm_artifact_smoke() -> None:
     """Issue #24 AC: lightgbm.pkl is a valid LightGBM model artifact
     with the feature column order recorded, and it can be loaded
     to make predictions on a stub row."""
-    art = load_artifact(Path("output/lightgbm.pkl"))
+    art = load_artifact(Artifacts().lightgbm_model)
     assert art["model_kind"] == "lightgbm"
     assert art["feature_columns"] == list(FEATURE_COLUMNS)
     assert "model" in art
@@ -506,7 +507,7 @@ def test_live_lightgbm_artifact_smoke() -> None:
 
 
 @pytest.mark.skipif(
-    not Path("output/lightgbm.pkl").exists(),
+    not Artifacts().lightgbm_model.exists(),
     reason="output/lightgbm.pkl not present (run the slice first)",
 )
 def test_live_lightgbm_predictions_for_roster() -> None:
@@ -514,16 +515,17 @@ def test_live_lightgbm_predictions_for_roster() -> None:
     every player in `output/wc2026_roster.jsonl` (the predict slice
     #25's input). The probabilities sum to 1 and the prior-only
     rows (no penalty history) cluster near (1/3, 1/3, 1/3)."""
-    roster_path = Path("output/wc2026_roster.jsonl")
+    art = Artifacts()
+    roster_path = art.roster
     if not roster_path.exists():
-        pytest.skip("output/wc2026_roster.jsonl not present")
-    art = load_artifact(Path("output/lightgbm.pkl"))
+        pytest.skip(f"{roster_path} not present")
+    art_loaded = load_artifact(art.lightgbm_model)
     # We don't need to actually run the full predict slice here —
     # just confirm the artifact can be loaded and used to predict
     # on a stub row. The full predict slice is issue #25.
     rows = [_make_row(label="L", last_side=""), _make_row(label="C", last_side="C")]
     matrix = rows_to_predict_matrix(rows)
-    probs = predict_proba(art["model"], matrix)
+    probs = predict_proba(art_loaded["model"], matrix)
     assert probs.shape == (2, 3)
     assert np.allclose(probs.sum(axis=1), 1.0)
     assert (probs >= 0).all()

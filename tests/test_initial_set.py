@@ -25,6 +25,7 @@ from typing import Any
 
 import pytest
 
+from penalty_pred.artifacts import Artifacts
 from penalty_pred.client import FotMobClient
 from penalty_pred.player_history import (
     InitialSetFetchResult,
@@ -33,7 +34,6 @@ from penalty_pred.player_history import (
     fetch_all_initial_set_penalty_history,
     fetch_player_data,
     iter_initial_set_kickers,
-    write_missing_jsonl,
 )
 
 # ---------------------------------------------------------------------------
@@ -495,9 +495,10 @@ def test_write_missing_jsonl_roundtrip(tmp_path: Path) -> None:
         MissingKicker(player_id=43, player_name="Also Empty", team_id=2, team_name="Brazil"),
     ]
     out = tmp_path / "missing.jsonl"
-    n = write_missing_jsonl(out, rows)
+    art = Artifacts(root=tmp_path)
+    n = art.write_missing_history(rows, path=out)
     assert n == 2
-    with out.open(encoding="utf-8") as f:
+    with out.open() as f:
         loaded = [json.loads(line) for line in f if line.strip()]
     assert loaded[0]["player_id"] == 42
     assert loaded[0]["player_name"] == "No History"
@@ -588,10 +589,10 @@ REQUIRED_MISSING_FIELDS = frozenset({"player_id", "player_name", "team_id"})
 
 
 @pytest.mark.skipif(
-    not (Path("output/player_history.jsonl").exists()
-         and Path("output/missing_history.jsonl").exists()
-         and Path("output/shootout_kicks.jsonl").exists()
-         and Path("output/wc2026_roster.jsonl").exists()),
+    not (Artifacts().player_history.exists()
+         and Artifacts().missing_history.exists()
+         and Artifacts().shootout_kicks.exists()
+         and Artifacts().roster.exists()),
     reason="output/ JSONL artifacts not present (run the slice first)",
 )
 def test_player_history_jsonl_schema_smoke() -> None:
@@ -602,9 +603,10 @@ def test_player_history_jsonl_schema_smoke() -> None:
     plus `team_name` (the full schema also carries `team_name` for parity
     with the roster).
     """
+    art = Artifacts()
     n_rows = 0
     kickers_with_rows: set[int] = set()
-    with Path("output/player_history.jsonl").open(encoding="utf-8") as f:
+    with art.player_history.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -622,7 +624,7 @@ def test_player_history_jsonl_schema_smoke() -> None:
 
     n_missing = 0
     missing_ids: set[int] = set()
-    with Path("output/missing_history.jsonl").open(encoding="utf-8") as f:
+    with art.missing_history.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -639,7 +641,7 @@ def test_player_history_jsonl_schema_smoke() -> None:
     # kickers' history. This is the issue #21 AC: "every Kicker in the
     # Initial Set" interpreted strictly for the training subset.
     training_kicker_ids: set[int] = set()
-    with Path("output/shootout_kicks.jsonl").open(encoding="utf-8") as f:
+    with art.shootout_kicks.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:

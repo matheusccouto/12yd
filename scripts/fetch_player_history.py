@@ -22,12 +22,9 @@ import sys
 from datetime import date
 from pathlib import Path
 
+from penalty_pred.artifacts import Artifacts
 from penalty_pred.client import FotMobClient
-from penalty_pred.config import DEFAULT_CACHE_DIR
-from penalty_pred.player_history import (
-    fetch_player_penalty_history,
-    write_jsonl,
-)
+from penalty_pred.player_history import fetch_player_penalty_history
 
 # Default test case (PRD story 7): Lionel Messi, target date 2022-12-18.
 DEFAULT_PLAYER_ID: int = 30981
@@ -36,6 +33,7 @@ DEFAULT_TARGET_DATE: str = "2022-12-18"
 
 
 def main() -> int:
+    art = Artifacts()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--player-id",
@@ -57,14 +55,14 @@ def main() -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("output/player_history.jsonl"),
-        help="Path to write the JSONL artifact (default: output/player_history.jsonl).",
+        default=art.player_history,
+        help=f"Path to write the JSONL artifact (default: {art.player_history}).",
     )
     parser.add_argument(
         "--cache-dir",
         type=Path,
-        default=Path(DEFAULT_CACHE_DIR),
-        help="Persistent disk cache directory.",
+        default=art.cache_dir,
+        help=f"Persistent disk cache directory (default: {art.cache_dir}).",
     )
     args = parser.parse_args()
 
@@ -77,7 +75,7 @@ def main() -> int:
         player_slug=args.player_slug,
         target_date=target,
     )
-    n = write_jsonl(args.output, rows)
+    n = Artifacts().write_player_history(rows, path=args.output)
     print(f"Wrote {n} penalty rows to {args.output}")
     return 0
 

@@ -17,8 +17,10 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .artifacts import Artifacts
 from .match_ref import MatchRef
 from .rsssf import RSSSFShootout, count_shootouts_by_pairs
+from .shootouts import ShootoutKick
 
 
 @dataclass(frozen=True)
@@ -47,39 +49,27 @@ class ShootoutCountReport:
         return self.actual - self.expected
 
 
-def _read_jsonl_tournament_year(path: Path) -> list[tuple[str, int]]:
-    """Read the (tournament_name, match_year) of every distinct match in JSONL.
+def _tournament_year_pairs(
+    shootout_kicks: Iterable[ShootoutKick],
+) -> list[tuple[str, int]]:
+    """Return the sorted (tournament_name, match_year) of every distinct match.
 
-    `tournament_name` is the FotMob `tournament_name` field. `match_year` is
-    the calendar year parsed from the ISO 8601 `match_date`. Used to surface
-    which (tournament, year) tuples the scraper actually fetched.
+    `tournament_name` is the FotMob `tournament_name` field. `match_year`
+    is the calendar year parsed from the ISO 8601 `match_date`. The
+    validator surfaces these so the discrepancies file shows which
+    (tournament, year) tuples the scraper actually fetched.
     """
     pairs: set[tuple[str, int]] = set()
-    with path.open(encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            row = json.loads(line)
-            date_str = str(row.get("match_date") or "")
-            year = int(date_str[:4]) if len(date_str) >= 4 else 0
-            pairs.add((str(row.get("tournament_name", "")), year))
+    for kick in shootout_kicks:
+        date_str = kick.match_date or ""
+        year = int(date_str[:4]) if len(date_str) >= 4 else 0
+        pairs.add((kick.tournament_name, year))
     return sorted(pairs)
 
 
-def _read_jsonl_match_ids(path: Path) -> set[int]:
-    """Read the distinct `match_id`s in the JSONL."""
-    ids: set[int] = set()
-    with path.open(encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            row = json.loads(line)
-            mid = row.get("match_id")
-            if isinstance(mid, int):
-                ids.add(mid)
-    return ids
+def _distinct_match_ids(shootout_kicks: Iterable[ShootoutKick]) -> set[int]:
+    """Return the set of distinct `match_id`s across the input."""
+    return {k.match_id for k in shootout_kicks}
 
 
 def validate_shootout_count(
@@ -89,6 +79,7 @@ def validate_shootout_count(
     discrepancies_path: Path | None = None,
     skipped_refs: Iterable[MatchRef] = (),
     no_kicks_refs: Iterable[MatchRef] = (),
+    artifacts: Artifacts | None = None,
 ) -> ShootoutCountReport:
     """Compare the count of shootout matches in the JSONL to the RSSSF count.
 
@@ -102,11 +93,18 @@ def validate_shootout_count(
     was correct but `extract_shootout_kicks` returned no kicks (FotMob has
     `penaltyShootoutEvents` but the shotmap is empty for these matches).
     Both lists are included in the discrepancies file for debugging.
+
+    The JSONL is read through the data layer's reader (`Artifacts.read_shootout_kicks`)
+    so the validator stops re-parsing the file format with its own
+    ad-hoc readers. `artifacts` is overridable for tests that need a
+    custom root; the default reads from `Path("output")`.
     """
-    actual_ids = _read_jsonl_match_ids(jsonl_path)
+    art = artifacts or Artifacts()
+    shootout_kicks = art.read_shootout_kicks(jsonl_path)
+    actual_ids = _distinct_match_ids(shootout_kicks)
     actual = len(actual_ids)
     expected = count_shootouts_by_pairs(rsssf_shootouts, league_seasons)
-    actual_pairs = _read_jsonl_tournament_year(jsonl_path)
+    actual_pairs = _tournament_year_pairs(shootout_kicks)
     skipped_list = list(skipped_refs)
     no_kicks_list = list(no_kicks_refs)
     report = ShootoutCountReport(

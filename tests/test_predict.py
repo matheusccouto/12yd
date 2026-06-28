@@ -37,6 +37,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from penalty_pred.artifacts import Artifacts
 from penalty_pred.features import PRIOR_PROB
 from penalty_pred.player_history import PlayerMetadata, PlayerPenalty
 from penalty_pred.predict import (
@@ -45,8 +46,6 @@ from penalty_pred.predict import (
     build_prediction_features,
     predict_kicker,
     predict_roster,
-    read_predictions_jsonl,
-    write_predictions_jsonl,
 )
 from penalty_pred.rosters import RosterPlayer
 
@@ -461,7 +460,7 @@ def test_predict_roster_preserves_team_metadata() -> None:
 
 
 def test_predictions_jsonl_roundtrip(tmp_path: Path) -> None:
-    """`write_predictions_jsonl` then `read_predictions_jsonl` yields
+    """`Artifacts.write_predictions` then `read_predictions` yields
     the same `PredictionRow` records (probabilities preserved as
     floats, not strings)."""
     preds = [
@@ -489,9 +488,10 @@ def test_predictions_jsonl_roundtrip(tmp_path: Path) -> None:
         ),
     ]
     out_path = tmp_path / "predictions.jsonl"
-    n = write_predictions_jsonl(out_path, preds)
+    art = Artifacts(root=tmp_path)
+    n = art.write_predictions(preds, path=out_path)
     assert n == 2
-    back = read_predictions_jsonl(out_path)
+    back = art.read_predictions(path=out_path)
     assert back == preds
 
 
@@ -501,10 +501,9 @@ def test_predictions_jsonl_roundtrip(tmp_path: Path) -> None:
 
 
 def _live_artifacts_present() -> bool:
+    art = Artifacts()
     return (
-        Path("output/wc2026_roster.jsonl").exists()
-        and Path("output/player_history.jsonl").exists()
-        and Path("output/lightgbm.pkl").exists()
+        art.roster.exists() and art.player_history.exists() and art.lightgbm_model.exists()
     )
 
 
@@ -517,8 +516,9 @@ def test_live_predictions_jsonl_schema_smoke() -> None:
     `p_L + p_C + p_R ≈ 1.0` (within 1e-6), and the per-row schema is
     the canonical 9 fields.
     """
-    roster_path = Path("output/wc2026_roster.jsonl")
-    preds_path = Path("output/predictions.jsonl")
+    art = Artifacts()
+    roster_path = art.roster
+    preds_path = art.predictions
     if not preds_path.exists():
         pytest.skip(f"{preds_path} not present (run scripts/predict.py first)")
 
@@ -561,7 +561,7 @@ def test_live_predictions_jsonl_schema_smoke() -> None:
     not _live_artifacts_present(),
     reason="output/ artifacts not present (run the slices first)",
 )
-def test_live_predictions_deterministic_run() -> None:
+def test_live_deterministic_run() -> None:
     """Issue #25 AC: the slice is re-runnable and produces identical
     output. Two consecutive runs of the predict orchestrator on the
     same inputs yield byte-identical predictions (per-player, to
@@ -575,10 +575,10 @@ def test_live_predictions_deterministic_run() -> None:
     from penalty_pred.model import load_artifact
     from penalty_pred.predict import load_roster, predict_roster
 
-    art = load_artifact(Path("output/lightgbm.pkl"))
+    art = load_artifact(Artifacts().lightgbm_model)
     model = art["model"]
-    roster = load_roster(Path("output/wc2026_roster.jsonl"))[:20]
-    history = load_player_history(Path("output/player_history.jsonl"))
+    roster = load_roster(Artifacts().roster)[:20]
+    history = load_player_history(Artifacts().player_history)
     client = FotMobClient(cache_dir=Path(DEFAULT_CACHE_DIR))
     fetcher = fetcher_from_client(client)
     # Fixed target date so the test is reproducible.
@@ -608,10 +608,11 @@ def test_live_no_history_kickers_have_unknown_foot() -> None:
     is the trained model's prior). The check is loose: we just
     confirm the schema and that all 1063 missing-history players
     from the player-history slice have `kicking_foot="Unknown"`."""
-    preds_path = Path("output/predictions.jsonl")
+    art = Artifacts()
+    preds_path = art.predictions
     if not preds_path.exists():
         pytest.skip(f"{preds_path} not present")
-    missing_path = Path("output/missing_history.jsonl")
+    missing_path = art.missing_history
     if not missing_path.exists():
         pytest.skip(f"{missing_path} not present")
 
@@ -636,7 +637,8 @@ def test_live_no_history_kickers_have_unknown_foot() -> None:
 def test_live_with_history_kickers_have_known_foot() -> None:
     """Players with penalty history have a non-"Unknown" kicking_foot
     derived from the history's `shot_type` mode."""
-    preds_path = Path("output/predictions.jsonl")
+    art = Artifacts()
+    preds_path = art.predictions
     if not preds_path.exists():
         pytest.skip(f"{preds_path} not present")
     with preds_path.open(encoding="utf-8") as f:
@@ -661,8 +663,9 @@ def test_live_with_history_kickers_have_known_foot() -> None:
 def test_live_predictions_for_all_roster_players() -> None:
     """Every player in `wc2026_roster.jsonl` has a `PredictionRow` in
     `predictions.jsonl`. The two files are 1-to-1 on `player_id`."""
-    roster_path = Path("output/wc2026_roster.jsonl")
-    preds_path = Path("output/predictions.jsonl")
+    art = Artifacts()
+    roster_path = art.roster
+    preds_path = art.predictions
     if not preds_path.exists():
         pytest.skip(f"{preds_path} not present")
     with roster_path.open(encoding="utf-8") as f:

@@ -274,6 +274,43 @@ class MetricsReport:
         payload.update(self.extras)
         return payload
 
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> MetricsReport:
+        """Reconstruct a `MetricsReport` from a dict produced by `to_dict`.
+
+        The round-trip preserves every field, including the optional
+        `baseline` classifier section and the `extras` dict (which carries
+        the model_kind, classes, feature_columns, and params). Any keys
+        not in the known schema are kept in `extras` so a future report
+        with new metadata is read back intact.
+        """
+        known = {
+            "model",
+            "random_baseline",
+            "kicker_most_frequent_baseline",
+            "actual_keeper_baseline",
+            "baseline",
+            "n_train",
+            "n_holdout",
+            "holdout_cutoff_date",
+        }
+        extras = {k: v for k, v in payload.items() if k not in known}
+        return cls(
+            model=BaselineMetrics(**payload["model"]),
+            random_baseline=BaselineMetrics(**payload["random_baseline"]),
+            kicker_most_frequent_baseline=BaselineMetrics(
+                **payload["kicker_most_frequent_baseline"]
+            ),
+            actual_keeper_baseline=BaselineMetrics(**payload["actual_keeper_baseline"]),
+            baseline=(
+                BaselineMetrics(**payload["baseline"]) if payload.get("baseline") else None
+            ),
+            n_train=int(payload["n_train"]),
+            n_holdout=int(payload["n_holdout"]),
+            holdout_cutoff_date=str(payload.get("holdout_cutoff_date", "")),
+            extras=extras,
+        )
+
 
 def evaluate_predictions(
     probs: np.ndarray,

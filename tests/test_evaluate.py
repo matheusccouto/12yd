@@ -30,6 +30,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from penalty_pred.artifacts import Artifacts
 from penalty_pred.evaluate import (
     BaselineMetrics,
     MetricsReport,
@@ -395,7 +396,7 @@ def test_write_metrics_json_roundtrip(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(
-    not Path("output/metrics.json").exists(),
+    not Artifacts().metrics.exists(),
     reason="output/metrics.json not present (run the slice first)",
 )
 def test_live_metrics_json_shape() -> None:
@@ -409,7 +410,7 @@ def test_live_metrics_json_shape() -> None:
     the random baseline's value (a property of the uniform
     distribution, not the model).
     """
-    with Path("output/metrics.json").open(encoding="utf-8") as f:
+    with Artifacts().metrics.open(encoding="utf-8") as f:
         payload = json.load(f)
     assert "model" in payload
     assert "random_baseline" in payload

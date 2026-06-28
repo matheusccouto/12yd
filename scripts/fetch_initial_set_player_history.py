@@ -29,61 +29,56 @@ A1/A2/A3/A4 for any future target kick.
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 import time
-from dataclasses import asdict
 from datetime import date
 from pathlib import Path
 
+from penalty_pred.artifacts import Artifacts
 from penalty_pred.client import FotMobClient
-from penalty_pred.config import DEFAULT_CACHE_DIR, HISTORY_FLOOR, LOOKBACK_WINDOW_YEARS, today_utc
+from penalty_pred.config import HISTORY_FLOOR, LOOKBACK_WINDOW_YEARS, today_utc
 from penalty_pred.player_history import (
     MissingKicker,
     fetch_all_initial_set_penalty_history,
     iter_initial_set_kickers,
-    write_missing_jsonl,
 )
-
-# Default artifact paths — consistent with slices #2 and #3.
-DEFAULT_SHOOTOUT_KICKS_PATH: Path = Path("output/shootout_kicks.jsonl")
-DEFAULT_ROSTER_PATH: Path = Path("output/wc2026_roster.jsonl")
-DEFAULT_OUTPUT_PATH: Path = Path("output/player_history.jsonl")
-DEFAULT_MISSING_PATH: Path = Path("output/missing_history.jsonl")
 
 
 def main() -> int:
+    art = Artifacts()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--shootout-kicks",
         type=Path,
-        default=DEFAULT_SHOOTOUT_KICKS_PATH,
-        help="Path to shootout_kicks.jsonl (default: output/shootout_kicks.jsonl).",
+        default=art.shootout_kicks,
+        help=f"Path to shootout_kicks.jsonl (default: {art.shootout_kicks}).",
     )
     parser.add_argument(
         "--roster",
         type=Path,
-        default=DEFAULT_ROSTER_PATH,
-        help="Path to wc2026_roster.jsonl (default: output/wc2026_roster.jsonl).",
+        default=art.roster,
+        help=f"Path to wc2026_roster.jsonl (default: {art.roster}).",
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=DEFAULT_OUTPUT_PATH,
-        help="Path to write the per-kicker JSONL artifact (default: output/player_history.jsonl).",
+        default=art.player_history,
+        help=f"Path to write the per-kicker JSONL artifact (default: {art.player_history}).",
     )
     parser.add_argument(
         "--missing",
         type=Path,
-        default=DEFAULT_MISSING_PATH,
-        help="Path to write the missing-kicker JSONL artifact "
-        "(default: output/missing_history.jsonl).",
+        default=art.missing_history,
+        help=(
+            "Path to write the missing-kicker JSONL artifact "
+            f"(default: {art.missing_history})."
+        ),
     )
     parser.add_argument(
         "--cache-dir",
         type=Path,
-        default=Path(DEFAULT_CACHE_DIR),
-        help="Persistent disk cache directory.",
+        default=art.cache_dir,
+        help=f"Persistent disk cache directory (default: {art.cache_dir}).",
     )
     parser.add_argument(
         "--target-date",
@@ -124,6 +119,7 @@ def main() -> int:
         f"({args.shootout_kicks} + {args.roster}, deduped by player_id)"
     )
 
+    art = Artifacts()
     # Stream results to disk as we go. A full run on a cold cache takes
     # ~3h for 1327 kickers; we don't want to lose that to a Ctrl-C or
     # process kill. The rows are written in initial-set order; the missing
@@ -145,7 +141,7 @@ def main() -> int:
         ):
             results.append(result)
             for row in result.rows:
-                out_f.write(json.dumps(asdict(row), ensure_ascii=False))
+                out_f.write(art._serialize_row(row))
                 out_f.write("\n")
                 n_rows_written += 1
             out_f.flush()
@@ -169,7 +165,7 @@ def main() -> int:
         for r in results
         if not r.rows
     ]
-    write_missing_jsonl(args.missing, missing)
+    art.write_missing_history(missing, path=args.missing)
 
     n_with_rows = len(results) - len(missing)
     pct = 100.0 * n_with_rows / len(results) if results else 0.0

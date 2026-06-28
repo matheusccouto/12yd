@@ -15,8 +15,8 @@ The tests cover three layers:
    `MetadataFetcher` that returns canned metadata per kicker. Verifies
    the row count, the sort order, and the JSONL roundtrip.
 
-4. **JSONL helpers** — `write_jsonl` roundtrip; NaN age is emitted as
-   `null`.
+4. **JSONL helpers** — `Artifacts.write_training_table` roundtrip; NaN
+   age is emitted as `null`.
 
 5. **Live smoke test** — `output/training_table.jsonl` (skipped if
    absent): schema, row count matches the live shootout kicks file,
@@ -27,13 +27,11 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Iterator, Mapping
-from datetime import date
 from pathlib import Path
-from typing import Any
 
 import pytest
 
+from penalty_pred.artifacts import Artifacts
 from penalty_pred.features import (
     PRIOR_PROB,
     KickIndex,
@@ -47,11 +45,9 @@ from penalty_pred.features import (
     load_player_history,
     mode_kicking_foot,
     side_distribution,
-    write_jsonl,
 )
 from penalty_pred.player_history import PlayerMetadata, PlayerPenalty
 from penalty_pred.shootouts import ShootoutKick
-
 
 # ---------------------------------------------------------------------------
 # side_distribution
@@ -526,7 +522,7 @@ def test_load_player_history_groups_by_kicker(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# build_training_table + write_jsonl
+# build_training_table + Artifacts.write_training_table
 # ---------------------------------------------------------------------------
 
 
@@ -592,7 +588,7 @@ def asdict_payload(r: TrainingTableRow) -> dict[str, object]:
     return payload  # type: ignore[return-value]
 
 
-def test_write_jsonl_roundtrip(tmp_path: Path) -> None:
+def test_write_training_table_roundtrip(tmp_path: Path) -> None:
     """Writing and reading the JSONL preserves the schema. NaN ages
     are emitted as `null` (strict JSON), not `NaN`."""
     row = TrainingTableRow(
@@ -628,7 +624,8 @@ def test_write_jsonl_roundtrip(tmp_path: Path) -> None:
         age=math.nan,
     )
     out = tmp_path / "tt.jsonl"
-    n = write_jsonl(out, [row])
+    art = Artifacts(root=tmp_path)
+    n = art.write_training_table([row], path=out)
     assert n == 1
     with out.open(encoding="utf-8") as f:
         text = f.read()
@@ -639,10 +636,11 @@ def test_write_jsonl_roundtrip(tmp_path: Path) -> None:
     assert loaded["age"] is None
 
 
-def test_write_jsonl_empty(tmp_path: Path) -> None:
+def test_write_training_table_empty(tmp_path: Path) -> None:
     """An empty row list writes an empty file and returns 0."""
     out = tmp_path / "tt.jsonl"
-    n = write_jsonl(out, [])
+    art = Artifacts(root=tmp_path)
+    n = art.write_training_table([], path=out)
     assert n == 0
     assert out.read_text(encoding="utf-8") == ""
 
@@ -696,9 +694,9 @@ REQUIRED_FIELDS = frozenset(
 
 @pytest.mark.skipif(
     not (
-        Path("output/shootout_kicks.jsonl").exists()
-        and Path("output/player_history.jsonl").exists()
-        and Path("output/training_table.jsonl").exists()
+        Artifacts().shootout_kicks.exists()
+        and Artifacts().player_history.exists()
+        and Artifacts().training_table.exists()
     ),
     reason="output/ JSONL artifacts not present (run the slice first)",
 )
@@ -715,8 +713,9 @@ def test_training_table_jsonl_schema_smoke() -> None:
     7. Every training kicker (from `shootout_kicks.jsonl`) has at
        least one row (sanity: no kickers dropped).
     """
+    art = Artifacts()
     n_target = 0
-    with Path("output/shootout_kicks.jsonl").open(encoding="utf-8") as f:
+    with art.shootout_kicks.open(encoding="utf-8") as f:
         for line in f:
             if line.strip():
                 n_target += 1
@@ -725,14 +724,14 @@ def test_training_table_jsonl_schema_smoke() -> None:
     n_rows = 0
     kickers: set[int] = set()
     training_kickers: set[int] = set()
-    with Path("output/shootout_kicks.jsonl").open(encoding="utf-8") as f:
+    with art.shootout_kicks.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
                 continue
             training_kickers.add(int(json.loads(line)["kicker_id"]))
 
-    with Path("output/training_table.jsonl").open(encoding="utf-8") as f:
+    with art.training_table.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -763,7 +762,7 @@ def test_training_table_jsonl_schema_smoke() -> None:
 
 
 @pytest.mark.skipif(
-    not Path("output/training_table.jsonl").exists(),
+    not Artifacts().training_table.exists(),
     reason="output/training_table.jsonl not present (run the slice first)",
 )
 def test_training_table_a1_monotonicity_smoke() -> None:
@@ -780,7 +779,7 @@ def test_training_table_a1_monotonicity_smoke() -> None:
     is too sparse to check).
     """
     by_kicker: dict[int, list[dict[str, object]]] = {}
-    with Path("output/training_table.jsonl").open(encoding="utf-8") as f:
+    with Artifacts().training_table.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -790,7 +789,7 @@ def test_training_table_a1_monotonicity_smoke() -> None:
 
     n_checked = 0
     n_monotone = 0
-    for kicker_id, rows in by_kicker.items():
+    for _kicker_id, rows in by_kicker.items():
         rows.sort(key=lambda r: (r["match_date"], r["match_id"], r["kick_number"]))
         for row in rows:
             p5 = float(row["p_L_5"])

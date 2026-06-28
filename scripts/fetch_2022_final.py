@@ -11,9 +11,9 @@ import argparse
 import sys
 from pathlib import Path
 
+from penalty_pred.artifacts import Artifacts
 from penalty_pred.client import FotMobClient
-from penalty_pred.config import DEFAULT_CACHE_DIR
-from penalty_pred.shootouts import extract_shootout_kicks, write_jsonl
+from penalty_pred.shootouts import extract_shootout_kicks
 
 # 2022 FIFA World Cup Final: Argentina vs France, matchId 3370572.
 # Slug segments are taken from the match pageUrl; seo/h2h are stable for the lifetime
@@ -24,18 +24,19 @@ DEFAULT_MATCH_ID = 3370572
 
 
 def main() -> int:
+    art = Artifacts()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("output/shootout_kicks.jsonl"),
-        help="Path to write the JSONL artifact (default: output/shootout_kicks.jsonl).",
+        default=art.shootout_kicks,
+        help=f"Path to write the JSONL artifact (default: {art.shootout_kicks}).",
     )
     parser.add_argument(
         "--cache-dir",
         type=Path,
-        default=Path(DEFAULT_CACHE_DIR),
-        help="Persistent disk cache directory.",
+        default=art.cache_dir,
+        help=f"Persistent disk cache directory (default: {art.cache_dir}).",
     )
     parser.add_argument("--match-id", type=int, default=DEFAULT_MATCH_ID)
     parser.add_argument("--seo", default=DEFAULT_SEO)
@@ -46,7 +47,7 @@ def main() -> int:
     client = FotMobClient(cache_dir=args.cache_dir)
     data = client.get(f"matches/{args.seo}/{args.h2h}")
     kicks = extract_shootout_kicks(data)
-    n = write_jsonl(args.output, kicks)
+    n = Artifacts().write_shootout_kicks(kicks, path=args.output)
     print(f"Wrote {n} shootout kicks to {args.output}")
     return 0
 

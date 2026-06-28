@@ -27,7 +27,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -503,22 +503,6 @@ def _process_match_fixture(
 
 
 # ---------------------------------------------------------------------------
-# JSONL
-# ---------------------------------------------------------------------------
-
-
-def write_jsonl(path: Path, rows: Iterable[PlayerPenalty]) -> int:
-    """Write PlayerPenalty records to a JSONL file. Returns the row count written."""
-    count = 0
-    with path.open("w", encoding="utf-8") as f:
-        for row in rows:
-            f.write(json.dumps(asdict(row), ensure_ascii=False))
-            f.write("\n")
-            count += 1
-    return count
-
-
-# ---------------------------------------------------------------------------
 # Initial Set fan-out (slice #5, Issue #21)
 # ---------------------------------------------------------------------------
 
@@ -692,17 +676,6 @@ def fetch_all_initial_set_penalty_history(
             yield InitialSetFetchResult(kicker=kicker, rows=[], error=repr(e))
             continue
         yield InitialSetFetchResult(kicker=kicker, rows=rows, error=None)
-
-
-def write_missing_jsonl(path: Path, missing: Iterable[MissingKicker]) -> int:
-    """Write MissingKicker records to a JSONL file. Returns the row count written."""
-    count = 0
-    with path.open("w", encoding="utf-8") as f:
-        for row in missing:
-            f.write(json.dumps(asdict(row), ensure_ascii=False))
-            f.write("\n")
-            count += 1
-    return count
 
 
 # ---------------------------------------------------------------------------

@@ -29,6 +29,7 @@ from typing import Any
 
 import pytest
 
+from penalty_pred.artifacts import Artifacts
 from penalty_pred.client import FotMobClient
 from penalty_pred.leagues import LEAGUE_BY_ID
 from penalty_pred.match_ref import MatchRef
@@ -37,8 +38,6 @@ from penalty_pred.rosters import (
     extract_lineup_players,
     fetch_wc_2026_roster,
     iter_roster_match_refs,
-    read_jsonl,
-    write_jsonl,
 )
 from penalty_pred.tournaments import WC_2026_LEAGUE, WC_2026_SEASON
 
@@ -304,7 +303,7 @@ def test_extract_lineup_players_skips_zero_id() -> None:
 
 
 def test_write_and_read_jsonl_roundtrip(tmp_path: Path) -> None:
-    """write_jsonl + read_jsonl round-trips a RosterPlayer record."""
+    """Artifacts.write_roster + read_roster round-trips a RosterPlayer record."""
     path = tmp_path / "roster.jsonl"
     rows = [
         RosterPlayer(
@@ -322,9 +321,10 @@ def test_write_and_read_jsonl_roundtrip(tmp_path: Path) -> None:
             country_code="ARG",
         ),
     ]
-    n = write_jsonl(path, rows)
+    art = Artifacts(root=tmp_path)
+    n = art.write_roster(rows, path=path)
     assert n == 2
-    out = read_jsonl(path)
+    out = art.read_roster(path=path)
     assert out == rows
 
 

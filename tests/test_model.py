@@ -30,6 +30,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from penalty_pred.artifacts import Artifacts
 from penalty_pred.model import (
     CATEGORICAL_FEATURES,
     CLASSES,
@@ -42,6 +43,7 @@ from penalty_pred.model import (
     build_feature_matrix,
     fit_logistic_regression,
     is_numeric_nan,
+    is_on_target_by_key,
     load_artifact,
     load_training_table,
     make_logistic_regression,
@@ -266,7 +268,7 @@ def test_temporal_split_custom_cutoff() -> None:
 def test_load_training_table_reads_live(tmp_path: Path) -> None:
     """The loader reads the JSONL and recovers the per-row features
     from the schema, falling back to True for is_on_target when the
-    shootout_kicks.jsonl is missing or the row is missing."""
+    is_on_target_by_key lookup is absent or the row is missing."""
     table_path = tmp_path / "training_table.jsonl"
     row = {
         "match_id": 1,
@@ -307,37 +309,16 @@ def test_load_training_table_reads_live(tmp_path: Path) -> None:
     r = rows[0]
     assert r.label == "L"
     assert r.features["p_L_5"] == 0.5
-    # No shootout_kicks.jsonl in tmp_path → is_on_target defaults True.
+    # No is_on_target_by_key supplied → is_on_target defaults True.
     assert r.is_on_target is True
 
 
 def test_load_training_table_joins_is_on_target(tmp_path: Path) -> None:
-    """If a sibling `shootout_kicks.jsonl` is present, the loader
-    uses it to recover `is_on_target` per (match_id, kick_number)."""
+    """When `is_on_target_by_key` is passed, the loader joins the
+    per-row on-target flag against the supplied lookup. The data
+    layer's directory layout is no longer leaked into the model
+    layer (the join is the caller's responsibility)."""
     table_path = tmp_path / "training_table.jsonl"
-    sk_path = tmp_path / "shootout_kicks.jsonl"
-    sk_row = {
-        "match_id": 1,
-        "kick_number": 1,
-        "kicker_id": 2,
-        "kicker_name": "Stub",
-        "match_date": "2024-06-01T00:00:00+00:00",
-        "tournament_id": 77,
-        "tournament_name": "World Cup",
-        "round": "1/8",
-        "team_id": 1,
-        "is_home": True,
-        "x": 0.5,
-        "side": "L",
-        "is_on_target": False,  # off-target kick
-        "outcome": "Missed",
-        "pen_score_before": [0, 0],
-        "pen_score_after": [0, 0],
-        "match_score_home": 1,
-        "match_score_away": 1,
-    }
-    with sk_path.open("w", encoding="utf-8") as f:
-        f.write(json.dumps(sk_row) + "\n")
     table_row = {
         "match_id": 1,
         "kick_number": 1,
@@ -372,8 +353,64 @@ def test_load_training_table_joins_is_on_target(tmp_path: Path) -> None:
     }
     with table_path.open("w", encoding="utf-8") as f:
         f.write(json.dumps(table_row) + "\n")
-    rows = load_training_table(table_path)
+    rows = load_training_table(
+        table_path,
+        is_on_target_by_key={(1, 1): False},  # off-target
+    )
     assert rows[0].is_on_target is False
+
+
+def test_is_on_target_by_key_builds_lookup() -> None:
+    """`is_on_target_by_key` builds the lookup from any iterable of
+    objects with `match_id`, `kick_number`, `is_on_target` (the
+    `ShootoutKick` dataclass is the canonical caller)."""
+    from penalty_pred.shootouts import ShootoutKick
+
+    kicks = [
+        ShootoutKick(
+            match_id=1,
+            kick_number=1,
+            match_date="2024-01-01T00:00:00+00:00",
+            tournament_id=77,
+            tournament_name="WC",
+            round="Final",
+            kicker_id=1,
+            kicker_name="X",
+            team_id=1,
+            is_home=True,
+            x=0.5,
+            side="L",
+            is_on_target=True,
+            outcome="Goal",
+            pen_score_before=[0, 0],
+            pen_score_after=[1, 0],
+            match_score_home=0,
+            match_score_away=0,
+        ),
+        ShootoutKick(
+            match_id=1,
+            kick_number=2,
+            match_date="2024-01-01T00:00:00+00:00",
+            tournament_id=77,
+            tournament_name="WC",
+            round="Final",
+            kicker_id=2,
+            kicker_name="Y",
+            team_id=2,
+            is_home=False,
+            x=0.5,
+            side="R",
+            is_on_target=False,  # off-target
+            outcome="Missed",
+            pen_score_before=[1, 0],
+            pen_score_after=[1, 0],
+            match_score_home=0,
+            match_score_away=0,
+        ),
+    ]
+    lookup = is_on_target_by_key(kicks)
+    assert lookup[(1, 1)] is True
+    assert lookup[(1, 2)] is False
 
 
 # ---------------------------------------------------------------------------
@@ -525,9 +562,9 @@ def test_rows_to_predict_matrix_empty_labels() -> None:
 
 @pytest.mark.skipif(
     not (
-        Path("output/training_table.jsonl").exists()
-        and Path("output/baseline.pkl").exists()
-        and Path("output/metrics.json").exists()
+        Artifacts().training_table.exists()
+        and Artifacts().baseline_model.exists()
+        and Artifacts().metrics.exists()
     ),
     reason="output/ artifacts not present (run the slice first)",
 )
@@ -540,7 +577,7 @@ def test_baseline_metrics_beat_random_on_log_loss() -> None:
     section). The test reads the `baseline` section if present
     (slice #24+), otherwise the `model` section (slice #23).
     """
-    with Path("output/metrics.json").open(encoding="utf-8") as f:
+    with Artifacts().metrics.open(encoding="utf-8") as f:
         metrics = json.load(f)
     baseline_section = metrics.get("baseline", metrics["model"])
     baseline_ll = baseline_section["log_loss"]
@@ -551,13 +588,13 @@ def test_baseline_metrics_beat_random_on_log_loss() -> None:
 
 
 @pytest.mark.skipif(
-    not Path("output/baseline.pkl").exists(),
+    not Artifacts().baseline_model.exists(),
     reason="output/baseline.pkl not present (run the slice first)",
 )
 def test_baseline_artifact_smoke() -> None:
     """Issue #23 AC: baseline.pkl is a serializable artifact that
     records the feature column order."""
-    art = load_artifact(Path("output/baseline.pkl"))
+    art = load_artifact(Artifacts().baseline_model)
     assert art["model_kind"] == "baseline"
     assert art["feature_columns"] == list(FEATURE_COLUMNS)
     assert "model" in art

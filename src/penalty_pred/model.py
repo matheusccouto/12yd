@@ -47,7 +47,7 @@ from __future__ import annotations
 import json
 import math
 import pickle
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -196,7 +196,28 @@ class TrainingRow:
         return CLASSES.index(self.label)
 
 
-def load_training_table(path: Path) -> list[TrainingRow]:
+def is_on_target_by_key(
+    shootout_kicks: Iterable[Any],
+) -> dict[tuple[int, int], bool]:
+    """Build a `(match_id, kick_number) -> is_on_target` lookup from shootout kicks.
+
+    Used by `load_training_table` to recover the per-row on-target flag
+    (the training table dropped the column in slice #22 to keep the
+    schema focused on the model features). The caller is expected to
+    pass the list of `ShootoutKick` (or any object with `match_id`,
+    `kick_number`, `is_on_target` attributes / keys).
+    """
+    out: dict[tuple[int, int], bool] = {}
+    for kick in shootout_kicks:
+        key = (int(kick.match_id), int(kick.kick_number))
+        out[key] = bool(kick.is_on_target)
+    return out
+
+
+def load_training_table(
+    path: Path,
+    is_on_target_by_key: dict[tuple[int, int], bool] | None = None,
+) -> list[TrainingRow]:
     """Read `output/training_table.jsonl` into a list of `TrainingRow`.
 
     Missing `age` (the C2 feature) is allowed: the JSONL emits `null`,
@@ -204,23 +225,15 @@ def load_training_table(path: Path) -> list[TrainingRow]:
     fills `None` with the column median at fit time.
 
     `is_on_target` is NOT in the training table (slice #22 dropped it
-    to keep the schema focused on the model features). We recover it
-    from `output/shootout_kicks.jsonl` via the `(match_id, kick_number)`
-    join — the same source the feature builder used. If the JSONL is
-    absent or a row is missing, `is_on_target` defaults to `True` (the
-    common case: most shootout kicks are on-target).
+    to keep the schema focused on the model features). The caller is
+    expected to pass the lookup from `is_on_target_by_key(shootout_kicks)`;
+    if the lookup is absent or a row is missing, `is_on_target` defaults
+    to `True` (the common case: most shootout kicks are on-target).
+    The data layer's directory layout is no longer leaked into the
+    model layer — the join is the caller's responsibility, not the
+    loader's.
     """
-    shootout_kicks_path = path.parent / "shootout_kicks.jsonl"
-    on_target_by_key: dict[tuple[int, int], bool] = {}
-    if shootout_kicks_path.exists():
-        with shootout_kicks_path.open(encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                row = json.loads(line)
-                key = (int(row["match_id"]), int(row["kick_number"]))
-                on_target_by_key[key] = bool(row.get("is_on_target", True))
+    on_target_by_key = is_on_target_by_key or {}
 
     out: list[TrainingRow] = []
     with path.open(encoding="utf-8") as f:

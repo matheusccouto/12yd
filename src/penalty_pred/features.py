@@ -48,8 +48,8 @@ from __future__ import annotations
 import json
 import math
 from collections import Counter
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from dataclasses import asdict, dataclass, field
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -490,27 +490,3 @@ def build_training_table(
         )
     rows.sort(key=lambda r: (r.match_date, r.match_id, r.kick_number))
     return rows
-
-
-# ---------------------------------------------------------------------------
-# JSONL
-# ---------------------------------------------------------------------------
-
-
-def write_jsonl(path: Path, rows: Iterable[TrainingTableRow]) -> int:
-    """Write `TrainingTableRow` records to a JSONL file. Returns the row count.
-
-    NaN ages are serialised as JSON `null` (not `NaN`) — strict JSON
-    parsers reject `NaN`, and downstream consumers (pandas, polars)
-    treat `null` as a missing value, which is the intended semantics.
-    """
-    count = 0
-    with path.open("w", encoding="utf-8") as f:
-        for row in rows:
-            payload = asdict(row)
-            if math.isnan(payload["age"]):
-                payload["age"] = None
-            f.write(json.dumps(payload, ensure_ascii=False, allow_nan=False))
-            f.write("\n")
-            count += 1
-    return count

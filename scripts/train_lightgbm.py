@@ -28,7 +28,8 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
-from penalty_pred.evaluate import evaluate_predictions, write_metrics_json
+from penalty_pred.artifacts import Artifacts
+from penalty_pred.evaluate import evaluate_predictions
 from penalty_pred.model import (
     CATEGORICAL_FEATURES,
     CLASSES,
@@ -41,16 +42,11 @@ from penalty_pred.model import (
     build_feature_matrix,
     fit_lightgbm,
     fit_logistic_regression,
+    is_on_target_by_key,
     load_training_table,
     predict_proba,
-    save_artifact,
     temporal_split,
 )
-
-# Default artifact paths — consistent with slices #2, #3, #5, #6, #7.
-DEFAULT_TRAINING_TABLE_PATH: Path = Path("output/training_table.jsonl")
-DEFAULT_MODEL_PATH: Path = Path("output/lightgbm.pkl")
-DEFAULT_METRICS_PATH: Path = Path("output/metrics.json")
 
 
 def _train_logreg_on_fold(
@@ -74,24 +70,25 @@ def _train_logreg_on_fold(
 
 
 def main() -> int:
+    art = Artifacts()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--training-table",
         type=Path,
-        default=DEFAULT_TRAINING_TABLE_PATH,
-        help="Path to training_table.jsonl (default: output/training_table.jsonl).",
+        default=art.training_table,
+        help=f"Path to training_table.jsonl (default: {art.training_table}).",
     )
     parser.add_argument(
         "--model-output",
         type=Path,
-        default=DEFAULT_MODEL_PATH,
-        help="Path to write the frozen LightGBM artifact (default: output/lightgbm.pkl).",
+        default=art.lightgbm_model,
+        help=f"Path to write the frozen LightGBM artifact (default: {art.lightgbm_model}).",
     )
     parser.add_argument(
         "--metrics-output",
         type=Path,
-        default=DEFAULT_METRICS_PATH,
-        help="Path to write the metrics JSON (default: output/metrics.json).",
+        default=art.metrics,
+        help=f"Path to write the metrics JSON (default: {art.metrics}).",
     )
     parser.add_argument(
         "--holdout-cutoff",
@@ -144,7 +141,14 @@ def main() -> int:
         print(f"error: {args.training_table} not found", file=sys.stderr)
         return 1
 
-    rows = load_training_table(args.training_table)
+    # The on-target flag is no longer a sibling-reach: we read the
+    # shootout kicks through the artifacts adapter and pass the lookup
+    # to `load_training_table` explicitly.
+    shootout_kicks = art.read_shootout_kicks()
+    rows = load_training_table(
+        args.training_table,
+        is_on_target_by_key=is_on_target_by_key(shootout_kicks),
+    )
     train_rows, holdout_rows = temporal_split(rows, cutoff_date=args.holdout_cutoff)
     print(
         f"Loaded {len(rows)} rows from {args.training_table}; "
@@ -202,7 +206,7 @@ def main() -> int:
         },
     )
 
-    write_metrics_json(args.metrics_output, report)
+    art.write_metrics(report, path=args.metrics_output)
     print(
         f"Wrote {args.metrics_output} (held-out metrics).\n"
         f"  model (lightgbm): log_loss={report.model.log_loss:.3f} "
@@ -223,17 +227,17 @@ def main() -> int:
         random_state=RANDOM_SEED,
     )
     args.model_output.parent.mkdir(parents=True, exist_ok=True)
-    save_artifact(
-        args.model_output,
+    art.write_model(
         frozen,
-        FEATURE_COLUMNS,
-        model_kind="lightgbm",
+        list(FEATURE_COLUMNS),
+        "lightgbm",
         params={
             **lgb_params,
             "class_weight": "inverse_frequency",
             "random_state": RANDOM_SEED,
             "n_train_rows": len(rows),
         },
+        path=args.model_output,
     )
     print(
         f"\nFroze LightGBM on all {len(rows)} rows → {args.model_output}.\n"
