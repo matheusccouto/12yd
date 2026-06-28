@@ -33,7 +33,9 @@ from pathlib import Path
 from typing import Any
 
 from .client import FotMobClient
+from .fotmob_parsing import coerce_int
 from .leagues import LEAGUE_BY_ID, League
+from .match_ref import MatchRef
 from .shootouts import fetch_season_fixtures
 
 # FotMob leagueId + slug for the 2026 FIFA World Cup.
@@ -60,25 +62,6 @@ class RosterPlayer:
     team_id: int
     team_name: str
     country_code: str  # ISO 3166-1 alpha-3, "" if missing
-
-
-@dataclass(frozen=True)
-class RosterMatchRef:
-    """A reference to one WC 2026 match's lineup payload.
-
-    `home_team_id` and `away_team_id` are the FotMob national team ids
-    (string-typed on the wire; we cast to int here so the per-team
-    extraction downstream doesn't have to). `home_team_name` and
-    `away_team_name` are the human-readable team names.
-    """
-
-    match_id: int
-    seo: str
-    h2h: str
-    home_team_id: int
-    home_team_name: str
-    away_team_id: int
-    away_team_name: str
 
 
 def fetch_wc_2026_roster(
@@ -120,9 +103,9 @@ def _iter_roster_players(
 ) -> Iterator[RosterPlayer]:
     """Yield roster rows from each match, before dedup. Internal helper."""
     fixtures = fetch_season_fixtures(client, league, season)
-    for ref in _extract_roster_match_refs(fixtures):
+    for ref in iter_roster_match_refs(fixtures):
         data = client.get(f"matches/{ref.seo}/{ref.h2h}")
-        page_match_id = _int((data.get("pageProps") or {}).get("general", {}).get("matchId"))
+        page_match_id = coerce_int((data.get("pageProps") or {}).get("general", {}).get("matchId"))
         if page_match_id and page_match_id != ref.match_id:
             # Stale (seo, h2h) hash — skip silently.
             continue
@@ -134,44 +117,27 @@ def _iter_roster_players(
         yield from extract_lineup_players(lineup_payload, ref)
 
 
-def _extract_roster_match_refs(
+def iter_roster_match_refs(
     fixtures: Iterable[Mapping[str, Any]],
-) -> Iterator[RosterMatchRef]:
-    """Build a `RosterMatchRef` for every fixture in the season list.
+) -> Iterator[MatchRef]:
+    """Yield a `MatchRef` for every fixture in the season list.
 
     We do NOT filter on `status.reason.shortKey` — the roster slice
     wants every match, not just shootouts. We do filter out fixtures
     with no `home.id` or `away.id` (defensive; the live payload
-    always has them for the WC 2026 league).
+    always has them for the WC 2026 league) and entries whose
+    `pageUrl` cannot be parsed.
     """
-    from .shootouts import parse_page_url
-
     for fixture in fixtures:
-        home = fixture.get("home") or {}
-        away = fixture.get("away") or {}
-        home_id = _int(home.get("id"))
-        away_id = _int(away.get("id"))
-        page_url = str(fixture.get("pageUrl") or "")
-        if not (home_id and away_id and page_url):
+        ref = MatchRef.from_fixture(fixture)
+        if ref is None or not (ref.home_team_id and ref.away_team_id):
             continue
-        try:
-            match_id, seo, h2h = parse_page_url(page_url)
-        except ValueError:
-            continue
-        yield RosterMatchRef(
-            match_id=match_id,
-            seo=seo,
-            h2h=h2h,
-            home_team_id=home_id,
-            home_team_name=str(home.get("name", "")),
-            away_team_id=away_id,
-            away_team_name=str(away.get("name", "")),
-        )
+        yield ref
 
 
 def extract_lineup_players(
     lineup_payload: Mapping[str, Any],
-    ref: RosterMatchRef,
+    ref: MatchRef,
 ) -> Iterator[RosterPlayer]:
     """Yield every registered player from one match's lineup payload.
 
@@ -199,7 +165,7 @@ def extract_lineup_players(
             # Placeholder knockout-round match — skip.
             continue
         for player in (*(team_block.get("starters") or []), *(team_block.get("subs") or [])):
-            player_id = _int(player.get("id"))
+            player_id = coerce_int(player.get("id"))
             if not player_id:
                 continue
             yield RosterPlayer(
@@ -232,12 +198,3 @@ def read_jsonl(path: Path) -> list[RosterPlayer]:
                 continue
             out.append(RosterPlayer(**json.loads(line)))
     return out
-
-
-def _int(value: Any) -> int:
-    if value is None or value == "":
-        return 0
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0

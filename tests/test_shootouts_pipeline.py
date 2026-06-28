@@ -13,11 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from penalty_pred.shootouts import (
-    ShootoutMatchRef,
-    extract_shootout_match_fixtures,
-    parse_page_url,
-)
+from penalty_pred.match_ref import MatchRef, parse_page_url
+from penalty_pred.shootouts import extract_shootout_match_fixtures
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SLIM_FIXTURE = REPO_ROOT / "docs" / "samples" / "league_wc_2022_slim.json"
@@ -75,7 +72,7 @@ def test_filter_returns_only_penalties_short(slim_season: list[dict[str, object]
     refs = extract_shootout_match_fixtures(slim_season)
     assert len(refs) == 3
     for ref in refs:
-        assert isinstance(ref, ShootoutMatchRef)
+        assert isinstance(ref, MatchRef)
 
 
 def test_filter_preserves_fixture_order(slim_season: list[dict[str, object]]) -> None:
@@ -119,7 +116,8 @@ def test_from_fixture_round_label_falls_back_to_round() -> None:
         "away": {"name": "France"},
         "status": {"utcTime": "2022-12-18T15:00:00Z", "scoreStr": "3 - 3"},
     }
-    ref = ShootoutMatchRef.from_fixture(fixture)
+    ref = MatchRef.from_fixture(fixture)
+    assert ref is not None
     assert ref.round_name == "F"
 
 
@@ -131,9 +129,10 @@ def test_from_fixture_team_names() -> None:
         "away": {"name": "France"},
         "status": {"utcTime": "2022-12-18T15:00:00Z", "scoreStr": "3 - 3"},
     }
-    ref = ShootoutMatchRef.from_fixture(fixture)
-    assert ref.home_name == "Argentina"
-    assert ref.away_name == "France"
+    ref = MatchRef.from_fixture(fixture)
+    assert ref is not None
+    assert ref.home_team_name == "Argentina"
+    assert ref.away_team_name == "France"
     assert ref.match_date == "2022-12-18T15:00:00Z"
     assert ref.score_str == "3 - 3"
 
@@ -204,20 +203,18 @@ def test_skips_match_when_response_id_differs(
     """A (seo, h2h) that resolves to a different matchId in the response
     (e.g. FotMob has reused the hash) is reported as `skipped=True`."""
     from penalty_pred.client import FotMobClient
-    from penalty_pred.shootouts import (
-        ShootoutMatchRef,
-        fetch_all_shootout_kicks_with_skips,
-    )
+    from penalty_pred.match_ref import MatchRef
+    from penalty_pred.shootouts import fetch_all_shootout_kicks_with_skips
 
     # The sample is the 2022 final (matchId 3370572). Pretend the ref's
     # matchId is different from what the response says.
-    fake_ref = ShootoutMatchRef(
+    fake_ref = MatchRef(
         match_id=999999,  # not the real id
         seo="argentina-vs-france",
         h2h="1hox8a",
         round_name="Final",
-        home_name="Argentina",
-        away_name="France",
+        home_team_name="Argentina",
+        away_team_name="France",
         match_date="2022-12-18T15:00:00Z",
         score_str="3 - 3",
     )
@@ -233,18 +230,16 @@ def test_processes_match_when_response_id_matches(
 ) -> None:
     """A ref whose (seo, h2h) resolves to the right matchId is processed."""
     from penalty_pred.client import FotMobClient
-    from penalty_pred.shootouts import (
-        ShootoutMatchRef,
-        fetch_all_shootout_kicks_with_skips,
-    )
+    from penalty_pred.match_ref import MatchRef
+    from penalty_pred.shootouts import fetch_all_shootout_kicks_with_skips
 
-    real_ref = ShootoutMatchRef(
+    real_ref = MatchRef(
         match_id=3370572,
         seo="argentina-vs-france",
         h2h="1hox8a",
         round_name="Final",
-        home_name="Argentina",
-        away_name="France",
+        home_team_name="Argentina",
+        away_team_name="France",
         match_date="2022-12-18T15:00:00Z",
         score_str="3 - 3",
     )
@@ -260,18 +255,16 @@ def test_fetch_all_kicks_simple_still_works(
 ) -> None:
     """`fetch_all_shootout_kicks` keeps the simple (kicks-only) API for tests."""
     from penalty_pred.client import FotMobClient
-    from penalty_pred.shootouts import (
-        ShootoutMatchRef,
-        fetch_all_shootout_kicks,
-    )
+    from penalty_pred.match_ref import MatchRef
+    from penalty_pred.shootouts import fetch_all_shootout_kicks
 
-    real_ref = ShootoutMatchRef(
+    real_ref = MatchRef(
         match_id=3370572,
         seo="argentina-vs-france",
         h2h="1hox8a",
         round_name="Final",
-        home_name="Argentina",
-        away_name="France",
+        home_team_name="Argentina",
+        away_team_name="France",
         match_date="2022-12-18T15:00:00Z",
         score_str="3 - 3",
     )
@@ -285,18 +278,16 @@ def test_fetch_all_kicks_skips_stale_match_silently(
 ) -> None:
     """`fetch_all_shootout_kicks` silently skips stale-URL matches."""
     from penalty_pred.client import FotMobClient
-    from penalty_pred.shootouts import (
-        ShootoutMatchRef,
-        fetch_all_shootout_kicks,
-    )
+    from penalty_pred.match_ref import MatchRef
+    from penalty_pred.shootouts import fetch_all_shootout_kicks
 
-    fake_ref = ShootoutMatchRef(
+    fake_ref = MatchRef(
         match_id=999999,
         seo="argentina-vs-france",
         h2h="1hox8a",
         round_name="Final",
-        home_name="Argentina",
-        away_name="France",
+        home_team_name="Argentina",
+        away_team_name="France",
         match_date="2022-12-18T15:00:00Z",
         score_str="3 - 3",
     )
@@ -315,10 +306,8 @@ def test_marks_match_as_no_kicks_when_shotmap_empty(
     import copy
 
     from penalty_pred.client import FotMobClient
-    from penalty_pred.shootouts import (
-        ShootoutMatchRef,
-        fetch_all_shootout_kicks_with_skips,
-    )
+    from penalty_pred.match_ref import MatchRef
+    from penalty_pred.shootouts import fetch_all_shootout_kicks_with_skips
 
     data = copy.deepcopy(sample_2022_final)
     shots = data["pageProps"]["content"]["shotmap"]["shots"]
@@ -327,13 +316,13 @@ def test_marks_match_as_no_kicks_when_shotmap_empty(
     ]
 
     # Stub the client to return our modified data for this ref.
-    real_ref = ShootoutMatchRef(
+    real_ref = MatchRef(
         match_id=3370572,
         seo="argentina-vs-france",
         h2h="1hox8a",
         round_name="Final",
-        home_name="Argentina",
-        away_name="France",
+        home_team_name="Argentina",
+        away_team_name="France",
         match_date="2022-12-18T15:00:00Z",
         score_str="3 - 3",
     )

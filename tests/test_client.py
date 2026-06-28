@@ -7,18 +7,9 @@ from pathlib import Path
 from typing import Any, cast
 
 import httpx
-import pytest
 
 from penalty_pred import client as client_module
 from penalty_pred.client import FotMobClient
-
-
-@pytest.fixture(autouse=True)
-def _reset_build_id_cache():
-    """The BuildId is process-global; reset between tests so each test starts cold."""
-    client_module.reset_build_id_cache()
-    yield
-    client_module.reset_build_id_cache()
 
 
 class _StubResponse:
@@ -65,8 +56,8 @@ def _stub_httpx_client(
     monkeypatch.setattr(client_module.httpx, "Client", _StubHTTP)
 
 
-def test_discover_build_id_caches_in_process(tmp_path: Path, monkeypatch) -> None:
-    """The BuildId is discovered once per process and reused on subsequent calls."""
+def test_discover_build_id_caches_per_client(tmp_path: Path, monkeypatch) -> None:
+    """The BuildId is discovered once per client and reused on subsequent calls."""
     discover_calls: list[str] = []
 
     def fake_discover(c: FotMobClient) -> str:
@@ -84,7 +75,8 @@ def test_discover_build_id_caches_in_process(tmp_path: Path, monkeypatch) -> Non
     assert discover_calls == ["discover"]
 
 
-def test_reset_build_id_cache_forces_rediscovery(tmp_path: Path, monkeypatch) -> None:
+def test_distinct_clients_discover_independently(tmp_path: Path, monkeypatch) -> None:
+    """Two FotMobClient instances each discover their own BuildId."""
     state = {"count": 0}
 
     def fake_discover(c: FotMobClient) -> str:
@@ -99,7 +91,6 @@ def test_reset_build_id_cache_forces_rediscovery(tmp_path: Path, monkeypatch) ->
     c1 = FotMobClient(cache_dir=tmp_path)
     c1.get("matches/x/y")
     assert state["count"] == 1
-    client_module.reset_build_id_cache()
     c2 = FotMobClient(cache_dir=tmp_path)
     c2.get("matches/x/y")
     assert state["count"] == 2

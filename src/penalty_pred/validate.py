@@ -17,8 +17,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .match_ref import MatchRef
 from .rsssf import RSSSFShootout, count_shootouts_by_pairs
-from .shootouts import ShootoutMatchRef
 
 
 @dataclass(frozen=True)
@@ -39,7 +39,7 @@ class ShootoutCountReport:
     expected: int
     match: bool
     actual_pairs: list[tuple[str, int]]
-    skipped_refs: list[ShootoutMatchRef] = field(default_factory=list)
+    skipped_refs: list[MatchRef] = field(default_factory=list)
 
     @property
     def delta(self) -> int:
@@ -87,8 +87,8 @@ def validate_shootout_count(
     rsssf_shootouts: list[RSSSFShootout],
     league_seasons: Iterable[tuple[int, int]],
     discrepancies_path: Path | None = None,
-    skipped_refs: Iterable[ShootoutMatchRef] = (),
-    no_kicks_refs: Iterable[ShootoutMatchRef] = (),
+    skipped_refs: Iterable[MatchRef] = (),
+    no_kicks_refs: Iterable[MatchRef] = (),
 ) -> ShootoutCountReport:
     """Compare the count of shootout matches in the JSONL to the RSSSF count.
 
@@ -135,12 +135,12 @@ def validate_shootout_count(
     return report
 
 
-def _ref_payload(r: ShootoutMatchRef) -> dict[str, object]:
-    """Serialise a ShootoutMatchRef for the discrepancies file."""
+def _ref_payload(r: MatchRef) -> dict[str, object]:
+    """Serialise a MatchRef for the discrepancies file."""
     return {
         "match_id": r.match_id,
-        "home": r.home_name,
-        "away": r.away_name,
+        "home": r.home_team_name,
+        "away": r.away_team_name,
         "round": r.round_name,
         "match_date": r.match_date,
     }

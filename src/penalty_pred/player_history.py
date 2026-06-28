@@ -36,7 +36,12 @@ from typing import Any
 from .client import FotMobClient
 from .config import HISTORY_FLOOR, LOOKBACK_WINDOW_YEARS
 from .coordinates import side
-from .shootouts import parse_page_url
+from .fotmob_parsing import (
+    SHOTMAP_EVENT_TYPE_TO_OUTCOME,
+    coerce_int,
+    parse_match_date,
+)
+from .match_ref import parse_page_url
 
 
 @dataclass(frozen=True)
@@ -80,18 +85,6 @@ class PlayerMetadata:
     birth_date: str  # ISO 8601 date (UTC)
 
 
-# shotmap eventType → canonical outcome label (same map as shootouts.py).
-# `Post` is FotMob's tag for shots that hit the post without going in
-# (a miss in our domain — the keeper did not concede). See shootouts.py
-# for the rationale.
-_SHOTMAP_EVENT_TYPE_TO_OUTCOME: dict[str, str] = {
-    "Goal": "Goal",
-    "AttemptSaved": "Saved",
-    "Miss": "Missed",
-    "Post": "Missed",
-}
-
-
 # ---------------------------------------------------------------------------
 # Player page helpers
 # ---------------------------------------------------------------------------
@@ -129,7 +122,7 @@ def extract_player_metadata(player_payload: Mapping[str, Any]) -> PlayerMetadata
     We fall back to "" / "Unknown" if either is missing.
     """
     player_data = (player_payload.get("pageProps") or {}).get("data") or {}
-    player_id = _int(player_data.get("id"))
+    player_id = coerce_int(player_data.get("id"))
     player_name = str(player_data.get("name", ""))
     position_key = _primary_position_key(player_data)
     birth_date = _parse_birth_date(player_data.get("birthDate"))
@@ -242,11 +235,11 @@ def iter_team_season_lookups(
     we cannot form a FotMob URL without a league id.
     """
     for entry in season_entries:
-        team_id = _int(entry.get("teamId"))
+        team_id = coerce_int(entry.get("teamId"))
         if not team_id:
             continue
         for stat in entry.get("tournamentStats") or []:
-            league_id = _int(stat.get("leagueId"))
+            league_id = coerce_int(stat.get("leagueId"))
             if not league_id:
                 continue
             yield TeamSeasonLookup(
@@ -299,8 +292,8 @@ def filter_fixtures_by_team(
     (e.g. some friendly metadata) are dropped.
     """
     for fixture in fixtures:
-        home_id = _int((fixture.get("home") or {}).get("id"))
-        away_id = _int((fixture.get("away") or {}).get("id"))
+        home_id = coerce_int((fixture.get("home") or {}).get("id"))
+        away_id = coerce_int((fixture.get("away") or {}).get("id"))
         if team_id and team_id in (home_id, away_id):
             yield fixture
 
@@ -337,24 +330,24 @@ def extract_player_penalties_from_match(
     header = page.get("header") or {}
     general = page.get("general") or {}
 
-    match_id = _int(general.get("matchId"))
-    match_date = _parse_match_date(general.get("matchTimeUTC"))
-    home_team_id = _int((header.get("teams") or [{}])[0].get("id"))
+    match_id = coerce_int(general.get("matchId"))
+    match_date = parse_match_date(general.get("matchTimeUTC"))
+    home_team_id = coerce_int((header.get("teams") or [{}])[0].get("id"))
     league_name_actual = str(general.get("leagueName") or league_name)
 
     shots = (content.get("shotmap") or {}).get("shots") or []
     out: list[PlayerPenalty] = []
     for shot in shots:
-        if _int(shot.get("playerId")) != player_id:
+        if coerce_int(shot.get("playerId")) != player_id:
             continue
         if shot.get("situation") != "Penalty":
             continue
-        shot_team_id = _int(shot.get("teamId"))
+        shot_team_id = coerce_int(shot.get("teamId"))
         if not shot_team_id:
             shot_team_id = team_id
         is_home = (shot_team_id == home_team_id) if (shot_team_id and home_team_id) else False
         x = float(shot["onGoalShot"]["x"])
-        outcome = _SHOTMAP_EVENT_TYPE_TO_OUTCOME.get(
+        outcome = SHOTMAP_EVENT_TYPE_TO_OUTCOME.get(
             shot.get("eventType", ""), str(shot.get("eventType", ""))
         )
         shot_type = str(shot.get("shotType", ""))
@@ -446,7 +439,7 @@ def fetch_player_penalty_history(
             continue
         dedupe_key = (
             lookup.team_id,
-            _int(lookup.tournament_stat.get("leagueId")),
+            coerce_int(lookup.tournament_stat.get("leagueId")),
             season_year,
             player_id,
         )
@@ -454,7 +447,7 @@ def fetch_player_penalty_history(
             continue
         seen_lookups.add(dedupe_key)
 
-        league_id = _int(lookup.tournament_stat.get("leagueId"))
+        league_id = coerce_int(lookup.tournament_stat.get("leagueId"))
         league_name = str(lookup.tournament_stat.get("leagueName", ""))
         fixtures = fetch_league_season_fixtures(client, league_id, season_year)
         for fixture in filter_fixtures_by_team(fixtures, lookup.team_id):
@@ -502,7 +495,7 @@ def _process_match_fixture(
     except ValueError:
         return
     match = client.get(f"matches/{seo}/{h2h}")
-    page_match_id = _int((match.get("pageProps") or {}).get("general", {}).get("matchId"))
+    page_match_id = coerce_int((match.get("pageProps") or {}).get("general", {}).get("matchId"))
     if page_match_id and page_match_id != match_id:
         return  # stale (seo, h2h) hash — skip silently
     yield from extract_player_penalties_from_match(
@@ -736,32 +729,6 @@ def write_missing_jsonl(path: Path, missing: Iterable[MissingKicker]) -> int:
 # ---------------------------------------------------------------------------
 # Internals
 # ---------------------------------------------------------------------------
-
-
-def _int(value: Any) -> int:
-    if value is None or value == "":
-        return 0
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _parse_match_date(value: Any) -> str:
-    """Coerce a FotMob matchTimeUTC to an ISO 8601 string (UTC, second precision)."""
-    if not value:
-        return ""
-    text = str(value)
-    try:
-        return parsedate_to_datetime(text).astimezone(UTC).isoformat()
-    except (TypeError, ValueError):
-        pass
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    try:
-        return datetime.fromisoformat(text).astimezone(UTC).isoformat()
-    except ValueError:
-        return text
 
 
 def _parse_fixture_date(value: str) -> date | None:

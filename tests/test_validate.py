@@ -160,7 +160,7 @@ def test_skipped_refs_included_in_discrepancies(
 ) -> None:
     """When the JSONL is short of the expected count, skipped_refs are
     serialised in discrepancies.json for debugging."""
-    from penalty_pred.shootouts import ShootoutMatchRef
+    from penalty_pred.match_ref import MatchRef
 
     rows = [
         {
@@ -174,13 +174,13 @@ def test_skipped_refs_included_in_discrepancies(
     disc = tmp_path / "discrepancies.json"
 
     skipped = [
-        ShootoutMatchRef(
+        MatchRef(
             match_id=999,
             seo="x-vs-y",
             h2h="abc123",
             round_name="QF",
-            home_name="X",
-            away_name="Y",
+            home_team_name="X",
+            away_team_name="Y",
             match_date="2022-07-01T15:00:00Z",
             score_str="1 - 1",
         )
@@ -206,7 +206,7 @@ def test_no_kicks_refs_included_in_discrepancies(
     tmp_path: Path, rsssf_shootouts: list[object]
 ) -> None:
     """`no_kicks_refs` are also serialised in discrepancies.json."""
-    from penalty_pred.shootouts import ShootoutMatchRef
+    from penalty_pred.match_ref import MatchRef
 
     rows = [
         {
@@ -220,13 +220,13 @@ def test_no_kicks_refs_included_in_discrepancies(
     disc = tmp_path / "discrepancies.json"
 
     no_kicks = [
-        ShootoutMatchRef(
+        MatchRef(
             match_id=888,
             seo="a-vs-b",
             h2h="zzz999",
             round_name="SF",
-            home_name="A",
-            away_name="B",
+            home_team_name="A",
+            away_team_name="B",
             match_date="2022-02-03T19:00:00Z",
             score_str="0 - 0",
         )

@@ -4,14 +4,14 @@ The tests cover three layers:
 
 1. **Pure helpers**: `extract_lineup_players` (against the trimmed 2026
    WC match fixture saved to `docs/samples/match_4667751_wc2026_mexico_
-   vs_south_africa.json.gz`), and the league fixture → `RosterMatchRef`
+   vs_south_africa.json.gz`), and the league fixture → `MatchRef`
    extraction (against the slim WC 2026 league fixture list at
    `docs/samples/league_wc_2026_slim.json`).
 
-2. **RosterMatchRef extraction**: `_extract_roster_match_refs` should
-   yield one ref per real match, including both group-stage and
-   knockout-round placeholder matches (the latter will contribute zero
-   players at extraction time).
+2. **MatchRef extraction**: `iter_roster_match_refs` should yield one
+   ref per real match, including both group-stage and knockout-round
+   placeholder matches (the latter will contribute zero players at
+   extraction time).
 
 3. **Orchestration**: `fetch_wc_2026_roster` against a stubbed
    `FotMobClient` that returns canned data. The stub mirrors the live
@@ -31,14 +31,14 @@ import pytest
 
 from penalty_pred.client import FotMobClient
 from penalty_pred.leagues import LEAGUE_BY_ID
+from penalty_pred.match_ref import MatchRef
 from penalty_pred.rosters import (
     WC_2026_LEAGUE,
     WC_2026_SEASON,
-    RosterMatchRef,
     RosterPlayer,
-    _extract_roster_match_refs,
     extract_lineup_players,
     fetch_wc_2026_roster,
+    iter_roster_match_refs,
     read_jsonl,
     write_jsonl,
 )
@@ -118,19 +118,19 @@ def test_wc_2026_league_constant() -> None:
 
 
 # ---------------------------------------------------------------------------
-# RosterMatchRef extraction
+# MatchRef extraction
 # ---------------------------------------------------------------------------
 
 
-def test_extract_roster_match_refs_yields_one_per_match(
+def test_iter_roster_match_refs_yields_one_per_match(
     sample_wc_2026_league: Mapping[str, object],
 ) -> None:
     """The slim fixture has 3 matches — 2 real group-stage + 1 knockout placeholder."""
     fixtures = sample_wc_2026_league["pageProps"]["fixtures"]["allMatches"]
-    refs = list(_extract_roster_match_refs(fixtures))
+    refs = list(iter_roster_match_refs(fixtures))
     assert len(refs) == 3
     for ref in refs:
-        assert isinstance(ref, RosterMatchRef)
+        assert isinstance(ref, MatchRef)
         assert ref.match_id > 0
         assert ref.seo
         assert ref.h2h
@@ -140,7 +140,7 @@ def test_extract_roster_match_refs_yields_one_per_match(
         assert ref.away_team_name
 
 
-def test_extract_roster_match_refs_skips_placeholder_match(
+def test_iter_roster_match_refs_skips_placeholder_match(
     sample_wc_2026_league: Mapping[str, object],
 ) -> None:
     """The 3rd match in the slim fixture is a knockout placeholder match;
@@ -149,12 +149,12 @@ def test_extract_roster_match_refs_skips_placeholder_match(
     rows because the home/away team blocks are empty.
     """
     fixtures = sample_wc_2026_league["pageProps"]["fixtures"]["allMatches"]
-    refs = list(_extract_roster_match_refs(fixtures))
+    refs = list(iter_roster_match_refs(fixtures))
     placeholder = next(r for r in refs if "Winner" in r.home_team_name)
     assert placeholder.home_team_id > 0  # the fixture lists a numeric id
 
 
-def test_extract_roster_match_refs_skips_fixtures_without_team_ids() -> None:
+def test_iter_roster_match_refs_skips_fixtures_without_team_ids() -> None:
     """Fixtures missing `home.id` or `away.id` (defensive) are skipped."""
     fixtures = [
         {
@@ -178,16 +178,16 @@ def test_extract_roster_match_refs_skips_fixtures_without_team_ids() -> None:
             "away": {"id": "2", "name": "B"},
         },
     ]
-    refs = list(_extract_roster_match_refs(fixtures))
+    refs = list(iter_roster_match_refs(fixtures))
     assert [r.match_id for r in refs] == [1, 4]
 
 
-def test_extract_roster_match_refs_skips_malformed_page_url() -> None:
+def test_iter_roster_match_refs_skips_malformed_page_url() -> None:
     """A fixture with an unparseable `pageUrl` is skipped, not crashed."""
     fixtures = [
         {"pageUrl": "garbage", "home": {"id": "1", "name": "A"}, "away": {"id": "2", "name": "B"}},
     ]
-    refs = list(_extract_roster_match_refs(fixtures))
+    refs = list(iter_roster_match_refs(fixtures))
     assert refs == []
 
 
@@ -201,7 +201,7 @@ def test_extract_lineup_players_mexico_vs_south_africa(
 ) -> None:
     """The Mexico vs South Africa match has 11 starters + 15 subs per team = 26 each."""
     lineup = sample_wc_2026_match["pageProps"]["content"]["lineup"]
-    ref = RosterMatchRef(
+    ref = MatchRef(
         match_id=4667751,
         seo="south-africa-vs-mexico",
         h2h="1einvt",
@@ -233,7 +233,7 @@ def test_extract_lineup_players_empty_lineup() -> None:
     the iterator yields zero rows.
     """
     lineup = {"homeTeam": {}, "awayTeam": {}}
-    ref = RosterMatchRef(
+    ref = MatchRef(
         match_id=1,
         seo="x-vs-y",
         h2h="abc",
@@ -257,7 +257,7 @@ def test_extract_lineup_players_missing_country_code() -> None:
         },
         "awayTeam": {"id": 200, "name": "Y", "starters": [], "subs": []},
     }
-    ref = RosterMatchRef(
+    ref = MatchRef(
         match_id=1,
         seo="x-vs-y",
         h2h="abc",
@@ -286,7 +286,7 @@ def test_extract_lineup_players_skips_zero_id() -> None:
         },
         "awayTeam": {"id": 200, "name": "Y", "starters": [], "subs": []},
     }
-    ref = RosterMatchRef(
+    ref = MatchRef(
         match_id=1,
         seo="x-vs-y",
         h2h="abc",

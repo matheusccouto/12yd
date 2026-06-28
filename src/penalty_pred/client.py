@@ -1,8 +1,9 @@
 """HTTP client for FotMob with gzip, ETag revalidation, and persistent disk cache.
 
-PRD: BuildId discovery is one-time per process; cached for the lifetime of the run.
-ETag revalidation means 304 responses return zero bytes on cache hit.
-Persistent disk cache bypasses the 1h CloudFront TTL (docs/fotmob.md).
+PRD: BuildId discovery is one-time per client; cached for the lifetime of the
+FotMobClient instance. ETag revalidation means 304 responses return zero bytes
+on cache hit. Persistent disk cache bypasses the 1h CloudFront TTL
+(docs/fotmob.md).
 """
 
 from __future__ import annotations
@@ -19,15 +20,12 @@ import httpx
 
 from .config import HTTP_TIMEOUT_SECONDS, USER_AGENT
 
-# Process-level BuildId cache (one discovery per Python process).
-_build_id_cache: str | None = None
-
 
 @dataclass
 class FotMobClient:
     cache_dir: Path
     timeout: float = HTTP_TIMEOUT_SECONDS
-    # Discovered BuildId (process-level). Populated lazily on first use.
+    # Discovered BuildId (instance-level). Populated lazily on first use.
     build_id: str | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:
@@ -39,17 +37,12 @@ class FotMobClient:
         `path` is the post-buildId segment, e.g. `matches/argentina-vs-france/1hox8a`.
         Returns the parsed JSON body. 304 responses are served from disk cache.
         """
-        self._ensure_build_id()
+        if self.build_id is None:
+            self.build_id = _discover_build_id(self)
         url = f"https://www.fotmob.com/_next/data/{self.build_id}/{path}.json"
         if params:
             url = f"{url}?{'&'.join(f'{k}={v}' for k, v in params.items())}"
         return _cached_get(self, url)
-
-    def _ensure_build_id(self) -> None:
-        global _build_id_cache
-        if _build_id_cache is None:
-            _build_id_cache = _discover_build_id(self)
-        self.build_id = _build_id_cache
 
 
 def _discover_build_id(client: FotMobClient) -> str:
@@ -107,9 +100,3 @@ def _decompress(response: httpx.Response) -> bytes:
 
 def _load_cached(cache_file: Path) -> Any:
     return json.loads(gzip.decompress(cache_file.read_bytes()))
-
-
-def reset_build_id_cache() -> None:
-    """Clear the process-level BuildId cache. Tests use this to force re-discovery."""
-    global _build_id_cache
-    _build_id_cache = None
