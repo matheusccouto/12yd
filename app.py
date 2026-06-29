@@ -2,12 +2,12 @@
 
 A single-page app on Streamlit Cloud that surfaces live shootout
 predictions. At load time, the app fetches the WC 2026 fixture list
-from FotMob, filters to upcoming knockout matches (R16, QF, SF, F)
-with both teams decided, and lets the user pick a match from a
-selectbox. For the selected match, the app loads the frozen LightGBM
-from Hugging Face, re-scores each likely kicker with the match's
-actual round, and shows a per-kicker table: name, team, kicking foot,
-P(L), P(C), P(R), and the recommended dive (`argmin`).
+from FotMob, filters to upcoming matches with both teams decided
+(any round — R32, R16, QF, SF, F), and lets the user pick a match
+from a selectbox. For the selected match, the app loads the frozen
+LightGBM from Hugging Face, re-scores each likely kicker with the
+match's actual round, and shows a per-kicker table: name, team,
+kicking foot, P(L), P(C), P(R), and the recommended dive (`argmin`).
 
 The data + re-score logic lives in `penalty_pred.dashboard` — this
 file is a thin Streamlit layer over the library, so the same code
@@ -127,20 +127,17 @@ def render_sidebar() -> None:
 
 
 def render_match_selector() -> MatchContext | None:
-    """Render the upcoming-knockouts selectbox; return the selected match.
+    """Render the upcoming-matches selectbox; return the selected match.
 
     The fixture list is fetched once per page load (the
     `@st.cache_data` on `load_upcoming_knockouts` would cache across
     page reruns but not across days — a stale fixture list would be a
     bug here, so we always re-fetch).
     """
-    st.subheader("Upcoming knockout matches")
+    st.subheader("Upcoming matches")
     matches = load_upcoming_knockouts(build_fotmob_client())
     if not matches:
-        st.info(
-            "No upcoming knockout matches with both teams decided. "
-            "The dashboard will populate as group-stage results decide the knockout slots."
-        )
+        st.info("No upcoming matches with both teams decided.")
         return None
     labels = [_match_label(m) for m in matches]
     index = st.selectbox(
@@ -163,6 +160,7 @@ def _match_label(m: MatchContext) -> str:
 def _round_label(round_code: str) -> str:
     """A human-readable round label for the FotMob codes."""
     return {
+        "1/16": "Round of 32",
         "1/8": "Round of 16",
         "1/4": "Quarter-finals",
         "1/2": "Semi-finals",

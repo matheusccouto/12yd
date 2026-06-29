@@ -15,7 +15,6 @@ from typing import Any
 import pytest
 
 from penalty_pred.dashboard import (
-    KNOCKOUT_ROUNDS,
     MatchContext,
     is_placeholder_team,
     load_upcoming_knockouts,
@@ -116,29 +115,57 @@ def _kickoff(days_from_now: int) -> str:
     return (_NOW + timedelta(days=days_from_now)).isoformat()
 
 
-def test_load_upcoming_knockouts_returns_only_knockout_rounds() -> None:
-    """Group-stage (round=1/2/3/1/16) and bronze are dropped; 1/8/1/4/1/2/final pass."""
+@pytest.mark.parametrize(
+    "round_name",
+    ["1/16", "1/8", "1/4", "1/2", "final"],
+)
+def test_load_upcoming_knockouts_accepts_every_round(round_name: str) -> None:
+    """Any round passes the filter when both teams are real and the kickoff is upcoming.
+
+    The 48-team WC adds Round of 32 (FotMob code `"1/16"`); the same
+    code must work whether the tournament is in R32, R16, QF, SF, or
+    F. The round is display-only.
+    """
     fixtures = [
-        # group stage — should be dropped
+        _fixture(
+            match_id=42,
+            round_name=round_name,
+            utc_time=_kickoff(5),
+            home_id=5810,
+            home_name="Brazil",
+            away_id=6710,
+            away_name="Japan",
+        ),
+    ]
+    out = load_upcoming_knockouts(FakeFotMobClient(_payload(fixtures)), now=_NOW)
+    assert [m.match_id for m in out] == [42]
+    assert out[0].round == round_name
+
+
+def test_load_upcoming_knockouts_returns_only_knockout_rounds() -> None:
+    """The round is no longer a filter; this test exercises the placeholder check
+    for fixtures whose teams are group-stage placeholders (`A/B`) or
+    undecided-knockout placeholders (`Winner N` / `Loser N`).
+
+    Historical behaviour — kept as a regression pin for the case where
+    the fixture list mixes group-stage and knockout rounds. The current
+    filter relies on the placeholder check to drop group-stage matches
+    (their opponents are joined by `/`, e.g. "Netherlands/Morocco"),
+    so this test only exercises the placeholder drop, not a round
+    allowlist.
+    """
+    fixtures = [
+        # group stage — opponent joined by `/`, dropped by placeholder check
         _fixture(
             match_id=1,
             round_name="1",
             utc_time=_kickoff(5),
             home_id=10,
-            home_name="Brazil",
+            home_name="Netherlands/Morocco",
             away_id=20,
             away_name="Croatia",
         ),
-        _fixture(
-            match_id=2,
-            round_name="1/16",
-            utc_time=_kickoff(6),
-            home_id=11,
-            home_name="Argentina",
-            away_id=21,
-            away_name="France",
-        ),
-        # bronze — should be dropped
+        # bronze — both teams are "Loser SF N" placeholders, dropped
         _fixture(
             match_id=3,
             round_name="bronze",
@@ -198,8 +225,74 @@ def test_load_upcoming_knockouts_drops_past_matches() -> None:
     assert [m.match_id for m in out] == [12]
 
 
+@pytest.mark.parametrize(
+    ("round_name", "home_name", "home_id", "away_name", "away_id"),
+    [
+        # "Winner N" — undecided knockout slot naming the prior round
+        ("1/4", "Winner EF 1", 1440908, "France", 9826),
+        ("1/2", "Winner QF 1", 2036, "Brazil", 5810),
+        ("final", "Winner SF 1", 1981, "Winner SF 2", 1982),
+        # "Loser N" — undecided knockout slot (3rd-place play-off etc.)
+        ("1/2", "Loser QF 1", 2001, "Loser QF 2", 2002),
+        ("1/4", "Loser R16 1", 2001, "Loser R16 2", 2002),
+        # "A/B" — group stage opponent whose winner will fill the slot
+        ("1/8", "Netherlands/Morocco", 2055187, "France", 9826),
+        ("1/16", "Argentina/Cape Verde", 2056838, "France", 9826),
+        # empty name with a real id — name wins over id
+        ("final", "", 5810, "France", 9826),
+        # empty name with id=0 — placeholder
+        ("1/4", "", 0, "France", 9826),
+        # R32 round (1/16) is the most recent addition; it must be filtered
+        # by the placeholder check too, not the round
+        ("1/16", "Winner AB 1", 2055187, "France", 9826),
+    ],
+)
+def test_load_upcoming_knockouts_drops_placeholder_teams(
+    round_name: str,
+    home_name: str,
+    home_id: int,
+    away_name: str,
+    away_id: int,
+) -> None:
+    """A match with a placeholder team on either side is dropped, regardless of round.
+
+    Covers the four placeholder shapes FotMob emits: `Winner N` /
+    `Loser N` (undecided knockout slot), `A/B` (group stage opponent
+    TBD), and empty name (with or without a non-zero id). The round
+    is not consulted; only the placeholder check matters.
+    """
+    fixtures = [
+        _fixture(
+            match_id=20,
+            round_name=round_name,
+            utc_time=_kickoff(10),
+            home_id=home_id,
+            home_name=home_name,
+            away_id=away_id,
+            away_name=away_name,
+        ),
+        # Real teams on both sides — should be kept as a sanity check.
+        _fixture(
+            match_id=22,
+            round_name="1/8",
+            utc_time=_kickoff(5),
+            home_id=5810,
+            home_name="Canada",
+            away_id=6710,
+            away_name="Mexico",
+        ),
+    ]
+    out = load_upcoming_knockouts(FakeFotMobClient(_payload(fixtures)), now=_NOW)
+    assert [m.match_id for m in out] == [22]
+
+
 def test_load_upcoming_knockouts_drops_placeholders() -> None:
-    """A match with a placeholder team (Winner X, Loser X, or "A/B" group TBD) is dropped."""
+    """A match with a placeholder team (Winner X, Loser X, or "A/B" group TBD) is dropped.
+
+    Kept as a non-parametrized regression pin so the test name remains
+    self-documenting in pytest output; the parametrized version above
+    covers the full placeholder × round cross product.
+    """
     fixtures = [
         _fixture(
             match_id=20,
@@ -300,11 +393,6 @@ def test_load_upcoming_knockouts_drops_unparseable_kickoffs() -> None:
     ]
     out = load_upcoming_knockouts(FakeFotMobClient(_payload(fixtures)), now=_NOW)
     assert [m.match_id for m in out] == [41]
-
-
-def test_knockout_rounds_is_the_frozen_set() -> None:
-    """The PRD names R16, QF, SF, F as the four knockout rounds. Pin the set."""
-    assert KNOCKOUT_ROUNDS == frozenset({"1/8", "1/4", "1/2", "final"})
 
 
 # ---------------------------------------------------------------------------

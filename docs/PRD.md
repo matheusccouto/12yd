@@ -22,7 +22,7 @@ Three phases, ordered by dependency.
 
 **Phase 1 — Hugging Face persistence.** One repo, `couto/12yd`, with two subpaths: `model/` (the frozen `lightgbm.pkl` + a minimal model card) and `data/` (the raw inputs — `shootout_kicks.jsonl`, `player_history.jsonl`, `wc2026_roster.jsonl` — plus the `predictions.jsonl` artifact the dashboard reads). Manual updates via `huggingface-cli` after the slice pipeline re-runs. No new server, no new service: HF is a file store with a model-card surface, and the dashboard reads from it at startup.
 
-**Phase 2 — Streamlit dashboard.** A single-page Streamlit app on Streamlit Cloud that surfaces live shootout predictions. At load time, the app fetches the WC 2026 fixture list from FotMob (live, via the persistent ETag/gzip cache), filters to upcoming knockout rounds (R16, QF, SF, F) with both teams decided, and lets the user pick a match from a selectbox. For the selected match, the app loads `lightgbm.pkl` from HF, builds the 9-feature row for each likely kicker on each team (using the match's actual `round` for the B3 feature), re-scores, and shows a per-kicker table: name, team, kicking foot, P(L), P(C), P(R), and the recommended dive (`argmin`).
+**Phase 2 — Streamlit dashboard.** A single-page Streamlit app on Streamlit Cloud that surfaces live shootout predictions. At load time, the app fetches the WC 2026 fixture list from FotMob (live, via the persistent ETag/gzip cache), filters to upcoming matches with both teams decided, and lets the user pick a match from a selectbox. For the selected match, the app loads `lightgbm.pkl` from HF, builds the 9-feature row for each likely kicker on each team (using the match's actual `round` for the B3 feature), re-scores, and shows a per-kicker table: name, team, kicking foot, P(L), P(C), P(R), and the recommended dive (`argmin`). (v3 simplified this filter to drop the per-round allowlist; see PRD-v3 Issue 1.)
 
 **Precondition (not a phase).** The slice pipeline (`output/lightgbm.pkl`, `output/predictions.jsonl`, the data layer's JSONLs) is not on disk. Before Phase 1 can push to HF, the user re-runs the slice scripts in the natural order (roster → shootouts → player history → training table → train_lightgbm → predict). This is a one-time recovery, not a new phase; the v1 slice scripts are unchanged and idempotent.
 
@@ -69,7 +69,7 @@ Three phases, ordered by dependency.
 
 ### Phase 2 — Streamlit dashboard
 
-34. As a viewer, I want a Streamlit app at `matheusccouto/12yd` (deployed to Streamlit Cloud) that lists upcoming 2026 World Cup knockout matches (R16, QF, SF, F) and shows per-kicker P(L), P(C), P(R) for a selected match, so I can pick a side to dive during a live shootout.
+34. As a viewer, I want a Streamlit app at `matheusccouto/12yd` (deployed to Streamlit Cloud) that lists upcoming 2026 World Cup knockout matches (any round) and shows per-kicker P(L), P(C), P(R) for a selected match, so I can pick a side to dive during a live shootout.
 35. As a viewer, I want the app to fetch the WC 2026 fixture list from FotMob at load time (via `huggingface_hub.hf_hub_download` for the model and `penalty_pred.client.FotMobClient` for the fixtures), so the schedule is always fresh within the cache window.
 36. As a viewer, I want only matches where both teams are decided to appear in the selector, so the app doesn't show "Winner Group A vs Winner Group B" placeholders.
 37. As a viewer, I want the per-kicker predictions to be re-scored with the match's actual round (e.g. "Quarter-finals" for an R16 match, "Final" for the F), so I see round-specific predictions, not the round-agnostic ones from `predictions.jsonl`.
@@ -175,8 +175,7 @@ Three phases, ordered by dependency.
 **Match filter:**
 
 - Upcoming: `kickoff > now` (UTC).
-- Knockout: `round` is one of "Round of 16", "Quarter-finals", "Semi-finals", "Final" (or FotMob's equivalent — verified at prototype time).
-- Both teams decided: each side has a non-placeholder team id (skip "Winner Group A", "Loser QF 1", etc.).
+- Both teams decided: each side has a non-placeholder team id (skip "Winner Group A", "Loser QF 1", etc.). The round is a display attribute, not a filter (v3 dropped the round allowlist; see PRD-v3 Issue 1).
 
 **Fixture source:**
 
@@ -236,7 +235,7 @@ Three phases, ordered by dependency.
 **What changes in Phase 2:**
 
 - The dashboard's logic (filtering, re-scoring, recommended dive) is tested in `test_dashboard.py` against fixture data. The Streamlit UI itself is not unit-tested (Streamlit apps aren't typically unit-tested; the seam is the library).
-- The end-to-end flow (HF model load → FotMob fixture fetch → re-score → table) is verified manually after deployment to Streamlit Cloud, with a one-page checklist: 4 R16 matches show, both teams known for each, kicker lists populated, predictions sum to 1, recommended dive is `argmin`.
+- The end-to-end flow (HF model load → FotMob fixture fetch → re-score → table) is verified manually after deployment to Streamlit Cloud, with a one-page checklist: every upcoming knockout match with both teams decided shows in the selectbox, kicker lists populate, predictions sum to 1, recommended dive is `argmin`. (v3 dropped the round allowlist — see PRD-v3 Issue 1 — so the checklist is "every round", not a fixed count.)
 
 **Modules tested in Phase 0 + Phase 2:**
 

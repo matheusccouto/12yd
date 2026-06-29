@@ -2,24 +2,26 @@
 
 PRD: A single-page Streamlit app on Streamlit Cloud that surfaces live
 shootout predictions. At load time, the app fetches the WC 2026 fixture
-list from FotMob, filters to upcoming knockout matches (R16, QF, SF, F)
-with both teams decided, and lets the user pick a match from a selectbox.
-For the selected match, the app loads `lightgbm.pkl` from HF, builds the
-9-feature row for each likely kicker on each team (using the match's
-actual `round` for the B3 feature), re-scores, and shows a per-kicker
+list from FotMob, filters to upcoming matches with both teams decided
+(any round, including the 48-team format's Round of 32, code `"1/16"`),
+and lets the user pick a match from a selectbox. For the selected
+match, the app loads `lightgbm.pkl` from HF, builds the feature row
+for each likely kicker on each team, re-scores, and shows a per-kicker
 table: name, team, kicking foot, P(L), P(C), P(R), and the recommended
 dive (`argmin`).
 
 This module is the dashboard's *library* side: the data loading, the
 match filter, the re-score, and the recommended dive. The Streamlit
-`app.py` at the repo root is a thin layer on top of these three
-functions — the seam is the data, not the UI, so the logic can be
-unit-tested without launching Streamlit.
+`app.py` at the repo root is a thin layer on top of these functions —
+the seam is the data, not the UI, so the logic can be unit-tested
+without launching Streamlit.
 
-The dashboard's three entry points (the three functions the PRD names):
+The dashboard's entry points (the functions the PRD names):
 
-- `load_upcoming_knockouts(client)` — fetch + filter to upcoming + knockout
-  + both teams decided. Returns a list of `MatchContext`.
+- `load_upcoming_knockouts(client)` — fetch + filter to upcoming + both
+  teams decided. The round is not consulted (any round passes, so the
+  selector adapts to whatever knockout stage the tournament is in:
+  R32, R16, QF, SF, F). Returns a list of `MatchContext`.
 - `predict_match(roster, history, metadata_fetcher, model, context)` —
   re-score the match's likely kickers (the roster, filtered to the
   match's two teams) with the match's actual round. Returns a list of
@@ -30,10 +32,8 @@ The dashboard's three entry points (the three functions the PRD names):
 
 The `MatchContext` is a pure value object — it carries the match's
 identity (FotMob match id), the two teams (id + name), the kickoff
-time, and the round. The round string is the same form FotMob uses on
-the fixture list AND the same form the model was trained on
-("1/8", "1/4", "1/2", "bronze", "final"), so the re-score is a
-literal pass-through — no round-name translation needed.
+time, and the round (kept for display and for the re-score's B3
+feature; no longer used as a filter).
 """
 
 from __future__ import annotations
@@ -51,31 +51,20 @@ from .predict import (
 )
 from .rosters import RosterPlayer
 
-# FotMob round codes for the four knockout rounds we surface in the
-# dashboard. "bronze" (3rd-place play-off) is excluded — it doesn't have
-# a shootout in practice and would never be selected for a "what side
-# should the keeper dive" use case.
-#
-# These exact strings are what FotMob returns in the fixture's `round`
-# field AND what the model was trained on (the training data's
-# `ShootoutKick.round` carries the same codes), so the dashboard can
-# pass them straight through to `PredictContext(round=...)` without a
-# translation layer.
-KNOCKOUT_ROUNDS: frozenset[str] = frozenset({"1/8", "1/4", "1/2", "final"})
-
 
 @dataclass(frozen=True)
 class MatchContext:
-    """One upcoming knockout match, filtered to both-teams-decided.
+    """One upcoming match, filtered to both-teams-decided.
 
     Carries the union of fields the dashboard renders (kickoff, round,
     the two teams) and the fields `predict_match` needs (the team ids
     to filter the roster, the round string for the PredictContext).
 
     `kickoff_utc` is the parsed datetime (UTC) of the fixture's
-    `status.utcTime`. The `round` is the FotMob round code
-    ("1/8" / "1/4" / "1/2" / "final") — same form the model was
-    trained on.
+    `status.utcTime`. `round` is the FotMob round code (e.g. `"1/16"`
+    for Round of 32, `"1/8"` for Round of 16, `"1/4"` for QF, `"1/2"`
+    for SF, `"final"` for F) — kept as a display attribute and the
+    B3 feature source, not used as a filter.
     """
 
     match_id: int
@@ -169,21 +158,27 @@ def load_upcoming_knockouts(
     slug: str = "world-cup",
     season: int = 2026,
 ) -> list[MatchContext]:
-    """Fetch the WC 2026 fixture list, filter to upcoming knockout matches.
+    """Fetch the WC 2026 fixture list, filter to upcoming matches with both teams decided.
 
-    The filter is the conjunction of three conditions:
+    The filter is the conjunction of two conditions:
 
-    1. **Knockout round.** `round` is in `KNOCKOUT_ROUNDS` (R16, QF,
-       SF, F). Group-stage matches (round `1`, `2`, `3`, `1/16`) and
-       the 3rd-place play-off (`bronze`) are dropped.
-    2. **Upcoming.** The fixture's `status.utcTime` is strictly after
+    1. **Upcoming.** The fixture's `status.utcTime` is strictly after
        `now` (default: current UTC time). Past matches are dropped so
        the user never picks a match that's already kicked off.
-    3. **Both teams decided.** Neither `home` nor `away` is a
+    2. **Both teams decided.** Neither `home` nor `away` is a
        placeholder. The placeholder check is the conjunction of
        name pattern (no "Winner " / "Loser " prefix, no `/`) and
        non-zero `id` (defensive; the live payload always has them for
        real teams).
+
+    The round is not consulted — group-stage matches are filtered out
+    only if at least one team is a placeholder (group-stage matches
+    whose group opponents are joined by `/`, e.g. `"Netherlands/Morocco"`,
+    ARE placeholders and are dropped). The 48-team WC's Round of 32
+    (FotMob code `"1/16"`) is the first knockout round and passes the
+    filter like any other round. The same code works for the 32-team
+    WC's Round of 16 (code `"1/8"`), the 24-team format's playoff
+    round, etc.
 
     The returned list is sorted by `kickoff_utc` ascending so the
     selectbox shows the nearest match first.
@@ -202,8 +197,6 @@ def load_upcoming_knockouts(
     out: list[MatchContext] = []
     for f in all_matches:
         round_name = str(f.get("round") or "")
-        if round_name not in KNOCKOUT_ROUNDS:
-            continue
         kickoff = _parse_kickoff_utc(str((f.get("status") or {}).get("utcTime") or ""))
         if kickoff is None or kickoff <= now:
             continue
@@ -347,7 +340,6 @@ def recommended_dive(p_L: float, p_C: float, p_R: float) -> str:
 
 __all__ = [
     "KickerPrediction",
-    "KNOCKOUT_ROUNDS",
     "MatchContext",
     "is_placeholder_team",
     "load_upcoming_knockouts",
