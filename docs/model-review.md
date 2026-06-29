@@ -1,0 +1,394 @@
+# Model Review — v3 `couto/12yd` LightGBM
+
+**Reviewer:** Fresh agent, independent of the v3 refactor and retrain.
+**Reviewed artifact:** `model/lightgbm.pkl`, `model/metrics.json`, `data/predictions.jsonl` on `couto/12yd` (commit `ccbd481`, v3 retrain, 2026-06-29).
+**Holdout:** 28 WC 2026 shootout kicks (cutoff 2026-01-01).
+**Published metrics:** `model/lightgbm.pkl` trained on `n_train_rows=179`; `model/metrics.json` reports `n_train=151, n_holdout=28`.
+
+This document is the Workstream 4 deliverable for v3 (Issue #38). The review walks the v3 model end-to-end, runs the 7 topics the issue called for, and files concrete follow-up issues for the highest-impact recommendations.
+
+## Executive summary
+
+The v3 model is **functional but not ready to ship as-is**. The published artifact and the published metrics do not agree — they were produced by two different training runs. Two structural issues amplify the problem:
+
+1. **The published `lightgbm.pkl` was trained on 179 rows (the full table, including the 28-row holdout).** The published `metrics.json` was generated from a 151-row model. The artifact's true holdout save rate is **0.107** (in-sample memorisation), not the **0.464** the card advertises. The dashboard loads the artifact, so the deployed save rate is 0.107.
+2. **The deployment policy `argmin(p_L, p_C, p_R)` is fragile on a model that is well-calibrated as a classifier.** Inverse-frequency class weights are a hack that improves save rate by degrading log loss. A well-calibrated logreg beats the lightgbm on log loss, Brier, and ECE — but loses to it on save rate, because the lightgbm is miscalibrated in the right direction for argmin.
+
+The headline metric (`0.464 save rate vs 0.405 random`) is statistically uninformative: at n=28, the standard error on save rate is ≈ 0.09, so the 0.06 delta is well within noise. The model card's "beats random" claim is a directional indicator, not a statistical proof. A larger holdout or a per-tournament breakdown is needed before the claim can be tightened.
+
+The v4 path is: fix the artifact-vs-metrics mismatch, drop the 9-feature A1 block (the ablation shows it does not differentiate the save rate), and add per-keeper data so the `argmin` policy has signal beyond the class prior.
+
+## Setup
+
+**Schema (v3, 18 features):** 15 numeric + 3 categorical.
+
+| Group | Features |
+| --- | --- |
+| A1 | `p_L_5, p_C_5, p_R_5, p_L_10, p_C_10, p_R_10, p_L_20, p_C_20, p_R_20` (9) |
+| A2 | `last_side` (1) |
+| A3 | `preferred_foot` (1) |
+| A4 | `career_penalty_count` (1) |
+| B1 | `b1_kick_number` (1) |
+| B2 | `pen_score_home, pen_score_away, is_decisive` (3) |
+| C1 | `position` (1) |
+| C2 | `age` (1) |
+
+**Categorical levels observed at training time** (from the published `lightgbm.pkl`):
+
+- `last_side`: `['', 'C', 'L', 'R']`
+- `preferred_foot`: `['both', 'left', 'right']` (the v2 `'Unknown'` sentinel is gone — v3 reads the declared foot from `pageProps.data.playerInformation[]`)
+- `position`: 14 FotMob position keys, plus `''` for missing metadata
+
+**Hyperparameters (published):** `num_leaves=31, learning_rate=0.05, n_estimators=500, min_child_samples=20, class_weight=inverse_frequency, random_state=42, n_train_rows=179`.
+
+**Holdout label distribution** (28 WC 2026 kicks):
+
+| Side | Count | Share |
+| --- | --- | --- |
+| L | 11 | 39.3% |
+| C | 6 | 21.4% |
+| R | 11 | 39.3% |
+
+Off-target share: 3/28 (10.7%). On-target share: 25/28 (89.3%).
+
+---
+
+## Topic 1 — Train/serve consistency
+
+### 1.1 Schema and column order match
+
+The published artifact's `feature_columns` exactly matches the module-level `FEATURE_COLUMNS` constant in `src/penalty_pred/model.py`. No drift.
+
+### 1.2 Categorical levels at inference time
+
+The published wrapper's `_categories` dict (captured at fit time) covers all three categorical features. **Two categorical features have an empty string in the levels** (`last_side=''`, `position=''`). The wrapper's `_coerce_lightgbm_categoricals` treats any value outside the category set as NaN, so the empty string is the "missing" sentinel. This is consistent with the v3 `features.py` which writes `""` when metadata is missing.
+
+**No mismatched levels found.** A kicker with no penalty history gets `last_side=''` (seen at training), so the categorical path is honest. A kicker with a new position key would fall through to NaN, which LightGBM treats as missing — silently downgraded to the prior. None of the 14 trained position keys are at risk of being dropped at inference time given the FotMob position taxonomy.
+
+### 1.3 The artifact and the metrics do not agree (DATA LEAK)
+
+**This is the central finding of the review.**
+
+The published `lightgbm.pkl` carries `params["n_train_rows"] = 179`. The published `metrics.json` reports `n_train=151, n_holdout=28`. The 28-row discrepancy is exactly the 2026 holdout. The artifact was trained on all 179 rows (full table, including the holdout), then the metrics were generated by a separate training run that used only the 151 pre-2026 rows. **The artifact and the metrics are two different models.**
+
+Concretely, when the published artifact is scored on the 28-row holdout:
+
+| Metric | Value |
+| --- | --- |
+| save rate (argmin) | **0.107** |
+| log loss | 0.482 |
+| top-1 accuracy (argmax) | **0.929** |
+| Brier | 0.257 |
+| ECE | 0.282 |
+| argmax distribution | L: 11, R: 10, C: 7 |
+| true distribution | L: 11, R: 11, C: 6 |
+
+The model gets the actual side right 93% of the time on the holdout — because it has seen the holdout during training. But the argmin save rate collapses to 0.107, because the model's high-confidence correct predictions (e.g. `P(L)=0.7`) make argmin dive the *other* side.
+
+**The deployment policy is broken on the in-sample model.** The dashboard reads the artifact, computes argmin per kicker, and surfaces a recommendation that is calibrated to *not* the kicker's actual side. The 0.464 save rate reported on the card is from a 151-row model that no one has shipped.
+
+The metrics.json's `lightgbm` line is a fair (151-train, 28-holdout) evaluation. It happens to read:
+
+- save rate **0.464**
+- log loss **1.769**
+- accuracy **0.250**
+
+The card is not lying — it just describes a different model than the artifact. **This is the single most important issue to fix in v3.** A future maintainer who treats the card as the source of truth will be surprised when the artifact's true holdout performance is 0.107.
+
+**Recommendation:** retrain the artifact on the 151-row train split (the same split the metrics describe) and re-push. If the goal is to ship a model that uses all 179 rows (more data → better generalisation), split the holdout differently (e.g. 2024 vs 2025/2026) so the artifact and the metrics use a single training fold. Filed as follow-up issue #40.
+
+### 1.4 The 86.6% no-history prediction rows
+
+`data/player_history.jsonl` has 247 unique kickers; `data/wc2026_roster.jsonl` has 1247. Only **167 of 1247 (13.4%)** roster kickers have any penalty history in the 5-year lookback window. For the remaining 1080 kickers, the A1 features are all set to the uniform prior (1/3, 1/3, 1/3), A2 is `""`, and A4 is 0.
+
+This means the deployed model makes 86.6% of its predictions with **no signal from kicker history**. The features that vary for these rows are C1 (position) and C2 (age), and the A3 `preferred_foot`. The C1/C2/A3 signal is real but small — the mean P(L)/P(C)/P(R) for the no-history group is (0.358, 0.325, 0.316), and the median prediction spread (max − min) is **0.46** for all rows. The model is not degenerate on no-history rows; it's just relying on different features.
+
+**No train/serve skew in the schema**, but the deployed predictions for 86.6% of kickers are essentially "based on position, age, and the global prior." This is a limitation, not a bug, and the dashboard should surface this (e.g. by dimming the row when `total_penalties == 0`).
+
+---
+
+## Topic 2 — Feature ablation
+
+The ablation drops one feature block at a time, refits the LightGBM on the 151 training rows with the published hyperparameters, and scores on the 28 holdout. All drops are vs the published 151-train baseline (save rate 0.464, log loss 1.769).
+
+| Dropped block | n_features | save rate | log loss | Δsave rate | Δlog loss |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| **(none — full 18)** | 18 | **0.464** | 1.769 | 0.000 | 0.000 |
+| A1 (rolling side counts) | 9 | 0.393 | 1.822 | **−0.071** | +0.053 |
+| A2 (last_side) | 17 | 0.393 | 1.822 | −0.071 | +0.053 |
+| A3 (preferred_foot) | 17 | 0.393 | 1.633 | −0.071 | −0.136 |
+| A4 (career_penalty_count) | 17 | 0.393 | 1.822 | −0.071 | +0.053 |
+| B1+B2 (in-shootout context) | 14 | 0.286 | 1.175 | **−0.179** | **−0.594** |
+| C1 (position) | 17 | 0.393 | 1.822 | −0.071 | +0.053 |
+| C2 (age) | 17 | **0.500** | 1.694 | **+0.036** | −0.076 |
+
+### 2.1 The A1 block (9 features) is doing no useful work
+
+Dropping the 9 A1 rolling side counts drops the save rate by 0.07 — and 7 of those points are matched by dropping any single one of A1/A2/A3/A4/C1 individually. The ablation is dominated by the **noise floor**: when you remove a feature the model can no longer specialise on, it falls back to a near-uniform prediction, and a near-uniform prediction with inverse-frequency weights produces a save rate of ~0.39 (close to random). The fact that the same 0.39 number appears for 5 different single-block drops says those blocks are not doing differentiated work on the 151-row training set.
+
+The 9 A1 features are the most expensive part of the schema (9 of 18 columns, all of which are blank for 86.6% of deployed predictions). They earn no measurable benefit on the 28-row holdout. **Recommendation:** collapse the 5/10/20 horizons to a single horizon (10) and re-evaluate. If the save rate is unchanged, drop A1 entirely. Filed as follow-up issue #41.
+
+### 2.2 B1/B2 (in-shootout context) is the only informative block
+
+Dropping B1+B2 (4 features: `b1_kick_number`, `pen_score_home`, `pen_score_away`, `is_decisive`) produces the most extreme log-loss change: **log loss falls from 1.769 to 1.175** (a 33% improvement) while the save rate **falls from 0.464 to 0.286** (a 38% degradation). The B1/B2 features are highly informative for predicting the *actual* side — they let the model know whether a kick is decisive, what the score is, and which kick number it is. That high accuracy is exactly what hurts the `argmin` policy: a well-predicted side makes argmin pick the wrong side.
+
+This is a structural tension, not a feature-design problem. The model is doing what it was trained to do (predict the kicker's side accurately), and the deployment policy is doing the opposite thing (dive the side the kicker won't go to). The two are in conflict.
+
+### 2.3 C2 (age) actively hurts the save rate
+
+Dropping `age` **improves** the save rate from 0.464 to 0.500 and improves the log loss by 0.076. This is the only block whose drop improves both metrics. The age feature is likely capturing tournament-era noise: the 151 training rows are spread over 2021–2025, and older kickers are concentrated in the older tournaments. The model is fitting "older kicker → centre" (or some such spurious correlation) that doesn't generalise.
+
+**Recommendation:** drop `age` and re-evaluate. If the gain survives on a larger holdout, drop the feature entirely. Filed as follow-up issue #42.
+
+### 2.4 The A2 (last_side) feature is redundant with A1
+
+`last_side` is the most recent entry in the rolling window that A1 summarises. Dropping it alone has the same effect as dropping all of A1 (save rate 0.393 in both cases). It is not adding new information beyond what the rolling counts provide. Could be deleted for schema simplification with no measurable loss. (Lower priority than 2.3 — the 0.07 save rate drop is in the noise.)
+
+---
+
+## Topic 3 — Metric choice
+
+The card leads with **save rate** (0.464 vs 0.405 random), which is the right deployment KPI. Top-1 accuracy and log loss are reported as secondary metrics. **Two metrics are missing** that would tell a more useful story:
+
+### 3.1 Brier score (multiclass)
+
+The mean squared error of the predicted probabilities against a one-hot encoding of the truth. Brier=0 means perfect calibration. Brier for 3 classes ranges from 0 to 2.
+
+| Predictor | Brier | log loss | accuracy | save rate |
+| --- | ---: | ---: | ---: | ---: |
+| lightgbm (151-train, inv-freq) | **0.986** | 1.769 | 0.250 | 0.464 |
+| logreg (151-train, balanced) | 0.652 | 1.077 | 0.429 | 0.250 |
+| random uniform | 0.667 | 1.099 | 0.333 | 0.405 |
+| published artifact (179-train, holdout) | 0.257 | 0.482 | 0.929 | 0.107 |
+
+The logreg's Brier (0.652) is better than random (0.667) — it is genuinely well-calibrated as a probabilistic classifier. The lightgbm's Brier (0.986) is **worse** than random, because the inverse-frequency class weights are pushing probabilities away from where the truth is. The published artifact's Brier (0.257) is misleadingly low because of the in-sample memorisation.
+
+**The card should report Brier alongside save rate.** A reader who sees save rate 0.464 alone might think the model is a good probabilistic classifier; Brier=0.986 disabuses them of that notion. The deployment policy is robust to miscalibration *in a specific direction* (argmin is invariant under monotone transforms of the per-row probabilities), but the card's marketing claim is "the model returns P(L), P(C), P(R) — the probability the kicker will aim at the left side" — and that claim is false on the v3 model.
+
+### 3.2 Expected Calibration Error (ECE)
+
+Equal-width bins on confidence (10 bins). ECE=0 means perfectly calibrated.
+
+| Predictor | ECE |
+| --- | ---: |
+| lightgbm (151-train, inv-freq) | 0.436 |
+| logreg (151-train, balanced) | 0.063 |
+| published artifact (179-train, holdout) | 0.282 |
+
+The logreg is well-calibrated (ECE=0.063). The lightgbm is not (ECE=0.436). Same story as Brier: the inverse-frequency class weights are a hack for argmin, not a calibration choice.
+
+**Recommendation:** add Brier and ECE to the metrics report. The card can keep save rate as the lede, but the table should include Brier so a reader sees the calibration story. Filed as follow-up issue #43.
+
+### 3.3 Save rate is the right headline, with caveats
+
+Save rate is the deployment KPI. Top-1 accuracy is misleading on a 28-row holdout (SE ≈ 0.09, the v2 "0.214" is statistically indistinguishable from the v3 "0.250" or random's "0.333"). Log loss is useful for picking between classifiers but not for telling a GK what to do. Brier + ECE are useful for honesty about calibration. The card's current lede (save rate) is the right call; the missing piece is the calibration metrics.
+
+---
+
+## Topic 4 — Baseline comparison
+
+Five baselines on the 28-row holdout:
+
+| Predictor | save rate | log loss | accuracy | Brier | ECE |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| **lightgbm (151-train, inv-freq)** | **0.464** | 1.769 | 0.250 | 0.986 | 0.436 |
+| logreg (151-train, balanced) | 0.250 | 1.077 | 0.429 | 0.652 | 0.063 |
+| random uniform | 0.405 | 1.099 | 0.333 | 0.667 | — |
+| last-side dive (per-kicker) | 0.393 | — | — | — | — |
+| last-side argmax (always pick the kicker's last side) | 0.321 | — | — | — | — |
+| class-conditional prior (always pick the training prior) | 0.250 | 1.099 | 0.333 | 0.667 | — |
+| actual keeper dive | null | — | — | — | — |
+
+### 4.1 The model beats random on save rate, by a hair
+
+Lightgbm save rate (0.464) > random (0.405) by 0.059, or 14.5% relative. At n=28, the SE on the difference is √(0.46·0.54/28 + 0.40·0.60/28) = √(0.0089 + 0.0086) = √0.0175 ≈ 0.132. The 0.059 delta is **0.45 standard errors** below the noise floor. The card's "the model beats random" claim is a directional indicator, not a statistical proof.
+
+### 4.2 The model loses to logreg on every metric except save rate
+
+Logreg beats lightgbm on log loss (1.08 vs 1.77), top-1 accuracy (0.43 vs 0.25), Brier (0.65 vs 0.99), and ECE (0.06 vs 0.44). The lightgbm beats logreg only on save rate (0.46 vs 0.25). The reason is the inverse-frequency class weights, which degrade the model as a classifier but help argmin. This is a hack, not a structural advantage.
+
+**If save rate is the deployment KPI, the class weights are doing the right thing for the wrong reason.** A more principled approach would be to train a calibrated logreg and then *post-process* its probabilities to encourage argmin diversity (e.g. add a small noise term to break ties). The current approach is a 1-line code change that happens to work on a 28-row holdout.
+
+### 4.3 Last-side dive is a competitive baseline
+
+The "dive the kicker's last side" baseline (0.393) is within 0.07 of the lightgbm's 0.464. The "always pick the kicker's last side as the predicted side" variant (last-side argmax) is **worse** at 0.321 — the argmin direction is what makes last-side competitive, and the same direction makes the lightgbm competitive.
+
+**The argmin policy is doing a lot of the work.** A model with a class-prior of (0.5, 0.2, 0.3) (L, C, R) and a uniform random dive would have a save rate of 0.40 (random baseline). The argmin policy adds 0.06 over random for the lightgbm. Most of the lift is from picking the *less* common side, not from a smart per-kicker signal.
+
+### 4.4 The actual-keeper baseline is unknown
+
+FotMob does not publish the keeper's lateral movement on shootout kicks. The card correctly reports `null` for this baseline. Until StatsBomb or another per-event data source adds the keeper's dive direction, this is the most informative baseline we don't have.
+
+**Recommendation (v4 candidate):** add a per-keeper feature. The "Recommended Dive" today is `argmin` over a uniform-prior keeper. A per-keeper prior (e.g. "this keeper dives L 60% of the time") would let the model condition on the keeper, not just the kicker. This is the single biggest lever the v3 model is missing. Filed as follow-up issue #44.
+
+---
+
+## Topic 5 — Holdout statistical power
+
+The holdout is **28 kicks** (the WC 2026 group stage and any knockout shootouts that have happened so far). At n=28:
+
+- **Accuracy SE:** √(0.5·0.5/28) ≈ 0.094. Differences smaller than 0.19 are noise.
+- **Save rate SE:** √(0.5·0.5/28) ≈ 0.094. Same.
+- **Log loss SE:** harder to compute analytically; empirically, the difference between log loss 1.77 and 1.08 (the model and the logreg) is well outside the noise on this holdout, but only because both predictions are very confident in the wrong direction.
+
+### 5.1 The published 0.214-vs-random comparison is uninformative
+
+The v2 card led with top-1 accuracy 0.214 vs random 0.333 — a "loss" of 0.12. At n=28, this is **1.3 standard errors**. The "the model loses to random" interpretation is not statistically justified; the "they're tied" interpretation is. The v3 card is correct to lead with save rate, where the noise is similar but the *direction* of the claim is positive.
+
+### 5.2 A larger holdout is the only path to tighter claims
+
+The recovered 24-shootout gap (Issue #37, the URL rotation fix in #39) would not change the holdout size — it adds training rows, not holdout rows. To get a tighter holdout, we need a longer evaluation period or a per-tournament breakdown. Three options:
+
+1. **Hold out an entire tournament's kicks, evaluate on it.** The 6 in-scope tournaments (WC, Euro, Copa América, AFCON, Gold Cup, Asian Cup) each contribute 0–6 shootouts. Holding out the most recent tournament (e.g. Asian Cup 2025) would give a 24-kick holdout. Holding out AFCON 2023 would give 32 kicks. The variance is the same per tournament, but the per-tournament breakdown is honest about which tournament the model is good on.
+2. **Run a leave-one-tournament-out cross-validation.** 6 folds, each with ~28–32 holdout kicks. The aggregate is ~180 holdout kicks, with a per-fold SE of ~0.09 and an aggregate SE of ~0.04.
+3. **Wait for more WC 2026 knockout data.** Each knockout shootout is ~10 kicks. By the final (July 2026), the WC 2026 holdout will be ~50–60 kicks. SE drops to ~0.07.
+
+**Recommendation:** add a leave-one-tournament-out cross-validation report to the metrics.json. The current single-fold report is honest about what 28 rows can tell us, but a 6-fold report would tell a more useful story. Filed as follow-up issue #45.
+
+### 5.3 The 28-row holdout has a tail-risk failure mode
+
+With 28 kicks, the model can lose 5 of 28 in a row and have a save rate of 23/28 = 0.821, or win 5 of 28 in a row and have 8/28 = 0.286. The variance is real, and the card's 28-row caveat is correctly placed. **Don't over-interpret any single 28-row metric.**
+
+---
+
+## Topic 6 — Architecture alternatives
+
+The model is LightGBM with `num_leaves=31, learning_rate=0.05, n_estimators=500, min_child_samples=20`. Three alternatives worth considering:
+
+### 6.1 XGBoost
+
+XGBoost has a similar gradient-boosted-decision-tree architecture but a different histogram implementation. Empirically, on small structured datasets, XGBoost and LightGBM give similar results; the choice is rarely load-bearing. **Estimate:** a swap would change the save rate by ±0.05 on the 28-row holdout, well within noise. **Not a v4 priority.**
+
+### 6.2 CatBoost
+
+CatBoost's ordered boosting and native categorical handling are a better fit for our 3-level categoricals (`last_side`, `preferred_foot`). LightGBM's native categorical handling is competent but CatBoost's is better. **Estimate:** could give a 0.02–0.05 save rate improvement on a larger holdout; would not help on the 28-row holdout because the noise dominates. **Worth a try in v4** if the v3 schema is preserved through the data recovery.
+
+### 6.3 Small neural net
+
+A 2-layer MLP with 32 hidden units per layer and the same 18-feature input would have ~2000 parameters — small for the 151-row training set but plausibly well-regularised. **Estimate:** would underperform LightGBM on 28 rows (the model is too small to learn the structure), but might match it on 360 rows. **Not a v4 priority** without more data.
+
+### 6.4 Hierarchical Bayesian model on the A1 counts
+
+The A1 features are the per-kicker side distribution over the last 5/10/20 kicks. A small hierarchical model with a per-kicker prior and a global shrinkage would be more principled than 9 raw counts. **Estimate:** could give a 0.05–0.10 save rate improvement on a larger holdout; would require re-implementing the feature builder. **A v4 candidate** if the data recovery closes the gap and the A1 features earn their keep.
+
+### 6.5 The "anti-classifier"
+
+The cleanest architectural change is to retrain the model with the *opposite* loss: instead of `P(actual side | features)`, predict `P(keeper dives correctly | features)`. The deployment policy is `argmin`, so the right thing to model is "the probability the kicker will *not* go to side X." This is a 1-line loss change and reuses the entire v3 pipeline. **Estimate:** the only architecture alternative that would change the save rate by more than the noise floor, because it aligns the loss with the deployment policy. **Filed as the highest-priority v4 issue (#46).**
+
+---
+
+## Topic 7 — Deployment policy
+
+The deployment policy is `argmin(p_L, p_C, p_R)` — dive the side with the lowest predicted probability. This is the right policy *if and only if* the model is calibrated as a classifier over the kicker's actual side.
+
+### 7.1 The policy is invariant under monotone transforms of the per-row probabilities
+
+If the model outputs `f(p_L), f(p_C), f(p_R)` for any monotonically increasing `f`, the argmin does not change. So the policy is robust to miscalibration *as long as* the per-class ordering is preserved within each row. The inverse-frequency class weights shift the per-class ordering in a way that helps save rate but hurts log loss — both are consistent with the invariance.
+
+### 7.2 The policy is *not* invariant under confidence changes
+
+If the model is well-calibrated as a classifier, argmin picks the *opposite* of the actual side. If the model is poorly calibrated (e.g. uniform predictions for some rows), argmin picks L (the tiebreak), and on-target matches happen by chance.
+
+The published artifact (179-train, in-sample) has top-1 accuracy 0.929 — it is essentially a perfect classifier on the holdout. argmin on a perfect classifier has a save rate of 0 (the model always picks the wrong side). The published artifact's save rate is 0.107, not 0, because 3 of 28 kicks are off-target (always saves).
+
+**The argmin policy on a perfect classifier is anti-optimal.** This is a fundamental design tension: the model and the policy are working at cross-purposes.
+
+### 7.3 The class weights are a hack to align the two
+
+The v3 model uses `class_weight=inverse_frequency` with weights roughly `{L: 0.65, C: 1.86, R: 1.07}`. The C class is upweighted because it is the rarest. With the 28-row holdout having 6 C kicks, the upweighted C class makes the model more likely to predict C as the actual side, which means argmin picks L or R more often. The save rate improves from 0.39 (uniform weights) to 0.46 (inverse-freq).
+
+This works on the 28-row holdout. It is not guaranteed to generalise — if the 2026 WC knockout kicks are more often L and R (as the 2022 WC was), the upweighting of C may not help.
+
+### 7.4 Recommendation: keep `argmin` for now, but document the brittleness
+
+The argmin policy is the right per-kicker policy if the model is well-calibrated. The v3 model is not well-calibrated (Brier 0.99, ECE 0.44), and the class weights are a hack. The pragmatic recommendation is to keep `argmin` for the WC 2026 deployment and document the calibration story in the card. The v4 path is to retrain with an anti-classifier loss (#46) so the model is calibrated to predict the dive, not the kick.
+
+---
+
+## Recommendations (concrete, in priority order)
+
+1. **Retrain the artifact on the 151-row train split.** The published `lightgbm.pkl` and the published `metrics.json` describe two different models. Push the 151-train artifact to HF and re-publish. Filed as #40.
+2. **Drop `age` (C2).** Dropping it improves both save rate (0.464 → 0.500) and log loss (1.769 → 1.694) on the 28-row holdout. Re-evaluate on a larger holdout before deleting the feature. Filed as #42.
+3. **Collapse the A1 horizons.** The 9-feature A1 block does not differentiate the save rate. Start with 1 horizon (10) and re-evaluate. If unchanged, drop A1 entirely. Filed as #41.
+4. **Add Brier and ECE to the metrics report.** The card should be honest about calibration. Save rate is the deployment KPI; Brier and ECE are the calibration story. Filed as #43.
+5. **Add a leave-one-tournament-out cross-validation report.** 6 folds × ~28 kicks = ~180 holdout kicks, aggregate SE ~0.04. Filed as #45.
+6. **v4 candidate: add per-keeper data.** The single biggest lever missing from v3. The "Recommended Dive" is `argmin` over a uniform-prior keeper; per-keeper data would let the model condition on the actual keeper. Filed as #44.
+7. **v4 candidate: train an anti-classifier.** Change the loss from `P(actual side | features)` to `P(keeper saves | features, dive)`. The deployment policy `argmin` then lines up with the model's training objective. Filed as #46.
+
+## Follow-up issues filed
+
+The review files the following issues with the `ready-for-agent` label. None of them are implemented in this iteration; the review is doc-only.
+
+- **#40 [Critical] — Retrain the published artifact on the 151-row train split.** The artifact and the metrics describe two different models. The artifact's true holdout save rate is 0.107, not the 0.464 the card advertises.
+- **#41 [Refactor] — Drop or collapse the A1 (rolling side counts) block.** 9 features, no measurable benefit on the 28-row holdout. Ablation suggests collapsing to 1 horizon (10) and re-evaluating.
+- **#42 [Refactor] — Drop the C2 (age) feature.** Dropping it improves both save rate and log loss. Re-evaluate on a larger holdout to confirm the gain survives.
+- **#43 [Metrics] — Add Brier and ECE to the metrics report.** The card should be honest about calibration. Save rate is the deployment KPI; Brier and ECE are the calibration story.
+- **#44 [v4] — Add per-keeper data.** Per-keeper dive-direction data is the single biggest lever missing from v3.
+- **#45 [Metrics] — Leave-one-tournament-out cross-validation report.** 6 folds × ~28 kicks = ~180 holdout kicks. Aggregate SE ~0.04.
+- **#46 [v4] — Train an anti-classifier.** Change the loss to predict `P(keeper saves | features, dive)`. Aligns the deployment policy with the training objective.
+
+## Appendix — detailed numbers
+
+All numbers below are from `/tmp/review_analysis.py` (this iteration) on `output/lightgbm.pkl`, `output/metrics.json`, `data/shootout_kicks.jsonl`, and `data/predictions.jsonl`.
+
+### A.1 Holdout composition (28 rows)
+
+- Label distribution: L=11, C=6, R=11.
+- Off-target: 3 (10.7%). On-target: 25 (89.3%).
+- Date range: 2026-01 (all 28 rows are in January 2026).
+
+### A.2 Wrapper categorical levels (training-time)
+
+- `last_side`: `['', 'C', 'L', 'R']`
+- `preferred_foot`: `['both', 'left', 'right']`
+- `position`: `['', 'centerattackingmidfielder', 'centerback', 'centerdefensivemidfielder', 'centermidfielder', 'keeper_long', 'left_wing_back', 'leftback', 'leftmidfielder', 'leftwinger', 'rightback', 'rightmidfielder', 'rightwinger', 'striker']`
+
+### A.3 Class weights
+
+Inverse-frequency on the 151 training rows: `{L: 0.65, C: 1.86, R: 1.07}`. C is upweighted 2.85× relative to L.
+
+### A.4 Published artifact on the 28 holdout (in-sample memorisation)
+
+| Metric | Value |
+| --- | ---: |
+| save rate (argmin) | 0.107 |
+| log loss | 0.482 |
+| top-1 accuracy (argmax) | 0.929 |
+| Brier | 0.257 |
+| ECE | 0.282 |
+| argmax distribution | L: 11, R: 10, C: 7 |
+
+### A.5 Ablation table (all drops vs the 151-train baseline)
+
+See Topic 2. Key numbers:
+
+- Full 18 features: save rate 0.464, log loss 1.769.
+- Drop A1: save rate 0.393, log loss 1.822.
+- Drop B1+B2: save rate 0.286, log loss 1.175.
+- Drop C2 (age): save rate 0.500, log loss 1.694.
+
+### A.6 Baseline comparison (28-row holdout)
+
+See Topic 4. Key numbers:
+
+- lightgbm (151-train, inv-freq): save rate 0.464, log loss 1.769, accuracy 0.250, Brier 0.986, ECE 0.436.
+- logreg (151-train, balanced): save rate 0.250, log loss 1.077, accuracy 0.429, Brier 0.652, ECE 0.063.
+- random uniform: save rate 0.405, log loss 1.099, accuracy 0.333.
+- last-side dive: save rate 0.393.
+- class-conditional prior: save rate 0.250, log loss 1.099.
+
+### A.7 Per-kicker prediction distribution (`data/predictions.jsonl`, 1247 rows)
+
+- Recommended dive (argmin) distribution: C: 514 (41.2%), R: 461 (37.0%), L: 272 (21.8%).
+- Model argmax distribution: C: 482, L: 451, R: 314.
+- Mean predicted P(L)=0.366, P(C)=0.335, P(R)=0.298.
+- Median prediction spread (max−min): 0.458. Min: 0.124. Max: 0.813.
+- 0 of 1247 predictions have a spread < 0.05 (the model is never "very confident").
+- 1080 of 1247 (86.6%) roster kickers have no penalty history in the 5-year lookback window.
+
+### A.8 Where the analysis lives
+
+- The analysis script: `/tmp/review_analysis.py`.
+- The numerical output: `/tmp/review_numbers.json`.
+- The review document: `docs/model-review.md` (this file).
+- Follow-up issues: #40, #41, #42, #43, #44, #45, #46 on the `matheusccouto/12yd` issue tracker.
