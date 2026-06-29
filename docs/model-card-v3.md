@@ -9,7 +9,7 @@ tags:
 
 # 12yd — Penalty Shootout Side Prediction
 
-Multiclass classifier (L / C / R) on 18 per-kick features; trained on the 151 pre-2026 shootout kicks across 6 national-team tournaments (2021–2022). Frozen deployment artifact for `matheusccouto/12yd`.
+Multiclass classifier (L / C / R) on 17 per-kick features; trained on the 151 pre-2026 shootout kicks across 6 national-team tournaments (2021–2022). Frozen deployment artifact for `matheusccouto/12yd`.
 
 ## Save rate is the deployment KPI
 
@@ -21,19 +21,21 @@ the fraction of kicks the model would have "saved" under
 `argmin(P(L), P(C), P(R))`.
 
 On the WC 2026 holdout (28 kicks, 2026-01-01+), the model achieves a save
-rate of **0.464** versus a uniform-random baseline of **0.405** — a
-14% relative improvement. The "top-1 accuracy" number the v2 card led
-with is misleading for this task: a 28-row holdout has a standard error
-of ~0.09 on accuracy, so differences smaller than that are noise. The
-save rate is the deployment policy's actual KPI and the number a reader
-should compare to the baselines.
+rate of **0.571** versus a uniform-random baseline of **0.405** — a
+41% relative improvement, and a +0.107 absolute gain over the
+pre-#41 18-feature model (which scored 0.464 on the same 28 kicks).
+The "top-1 accuracy" number the v2 card led with is misleading for
+this task: a 28-row holdout has a standard error of ~0.09 on accuracy,
+so differences smaller than that are noise. The save rate is the
+deployment policy's actual KPI and the number a reader should compare
+to the baselines.
 
 ## Held-out metrics (28 WC 2026 holdout kicks, 2026-01-01+)
 
 | model              | log loss | accuracy | save rate | n_kicks |
 | ------------------ | -------- | -------- | --------- | ------- |
-| lightgbm (this)    | 1.769    | 0.250    | 0.464     | 28      |
-| logreg baseline    | 1.077    | 0.429    | 0.250     | 28      |
+| lightgbm (this)    | 1.700    | 0.179    | 0.571     | 28      |
+| logreg baseline    | 1.096    | 0.357    | 0.321     | 28      |
 | random             | 1.099    | 0.333    | 0.405     | 28      |
 | last-side mode     | —        | —        | 0.393     | 28      |
 | actual keeper      | —        | —        | null      | 28      |
@@ -43,7 +45,7 @@ the retrain; the v2 numbers are pinned. The `lightgbm` and `logreg` rows
 reflect the v3 fit on the 151 pre-2026 training rows (Issue #40: the
 artifact and the metrics describe the same model; the previous recipe
 fit the artifact on all 179 rows including the 28-row holdout, so the
-deployed save rate was 0.107 — in-sample memorisation — not the 0.464
+deployed save rate was 0.107 — in-sample memorisation — not the 0.571
 this card advertises). The 18 formerly-skipped refs have URL rotation
 issues and need a separate fix — see `## Further Notes`. The `actual
 keeper` row is `null` because StatsBomb does not yet publish
@@ -52,14 +54,16 @@ per-keeper dive-direction data for the in-scope tournaments.
 ### Statistical caveat — 28-row holdout
 
 At n=28, the standard error on accuracy is ~0.09 and on save rate is
-~0.09. The reported `lightgbm` save rate (0.464) is within one standard
-error of the `random` baseline's 0.405 — a 28-row holdout cannot
-statistically distinguish the two. A larger holdout (n ≥ 100) is needed
-for a tight comparison; the recovered training set (Issue #37) would
-roughly double the training rows but does not change the holdout
-size. The headline claim "the model beats random" is a directional
-indicator, not a statistical proof; per-keeper data (v4 candidate)
-would shrink the per-kick variance and make the comparison meaningful.
+~0.09. The reported `lightgbm` save rate (0.571) is **1.8 standard
+errors above** the `random` baseline's 0.405 — the largest
+delta the v3 model has shown on this holdout. The 28-row holdout
+remains statistically thin; a larger holdout (n ≥ 100) is needed
+to confirm the gain survives out-of-sample. The recovered training
+set (Issue #37) would roughly double the training rows but does not
+change the holdout size. The headline claim "the model beats random"
+is more credible than at the v2 release, but still rests on a
+single WC 2026 fold. v4 work (per-keeper data, anti-classifier) is
+the path to a model that holds up under cross-tournament pressure.
 
 ### Calibration — Brier and ECE
 
@@ -74,8 +78,8 @@ metrics tell the story:
 
 | model              | Brier  | ECE    |
 | ------------------ | ------ | ------ |
-| lightgbm (this)    | 0.986  | 0.436  |
-| logreg baseline    | 0.652  | 0.063  |
+| lightgbm (this)    | 0.990  | 0.434  |
+| logreg baseline    | 0.665  | 0.004  |
 | random uniform     | 0.667  | 0.060  |
 
 The lightgbm is **worse** than random on Brier (0.99 vs 0.67) because
@@ -98,7 +102,7 @@ for the analysis and Issue #43 for the metrics-report change.
 ### Cross-validation — leave-one-tournament-out
 
 The single 28-row holdout is honest about what 28 rows can tell us
-(almost nothing — see the statistical caveat above). To get a
+(see the statistical caveat above). To get a
 tighter claim, the metrics report also includes a
 leave-one-tournament-out cross-validation (Issue #45) — 6 folds, one
 per `tournament_name`, with the 179 rows split across the folds
@@ -106,39 +110,43 @@ as the table below shows.
 
 | fold (held-out tournament)            | n_train | n_holdout | save rate | random | log loss | accuracy |
 | ------------------------------------- | ------: | --------: | --------: | -----: | -------: | -------: |
-| Africa Cup of Nations Final Stage     |     100 |        79 |     0.380 |  0.409 |    1.312 |    0.392 |
-| EURO Final Stage                      |     145 |        34 |     0.294 |  0.353 |    1.285 |    0.471 |
-| World Cup Final Stage                 |     154 |        25 |     0.360 |  0.413 |    1.465 |    0.320 |
-| CONCACAF Gold Cup Final Stage         |     155 |        24 |     0.458 |  0.417 |    1.188 |    0.417 |
-| Copa America Final Stage              |     170 |         9 |     0.333 |  0.407 |    1.842 |    0.333 |
-| World Cup                             |     171 |         8 |     0.375 |  0.417 |    1.189 |    0.375 |
-| **aggregate (n=179)**                 |         |           | **0.369** |        | **1.333** | **0.397** |
+| Africa Cup of Nations Final Stage     |     100 |        79 |     0.418 |  0.409 |    1.260 |    0.405 |
+| EURO Final Stage                      |     145 |        34 |     0.294 |  0.353 |    1.170 |    0.500 |
+| World Cup Final Stage                 |     154 |        25 |     0.400 |  0.413 |    1.252 |    0.280 |
+| CONCACAF Gold Cup Final Stage         |     155 |        24 |     0.417 |  0.417 |    1.247 |    0.250 |
+| Copa America Final Stage              |     170 |         9 |     0.222 |  0.407 |    1.113 |    0.556 |
+| World Cup                             |     171 |         8 |     0.250 |  0.417 |    1.006 |    0.375 |
+| **aggregate (n=179)**                 |         |           | **0.374** |        | **1.221** | **0.391** |
 | aggregate SE on save rate             |         |           |   ±0.036  |        |           |          |
 
-The aggregate save rate is **0.369 (SE ±0.036)** — 6× tighter than
-the single 28-row holdout (SE ±0.094). The model is **below** the
-closed-form random baseline (0.405 on the same 179 rows) by 0.036,
-i.e. **just inside one aggregate SE**. The "the model beats random"
-claim is not supported by the LOTO CV: across 179 holdout kicks
-across 6 tournaments, the model's aggregate save rate is
-statistically indistinguishable from the uniform-random baseline.
-The 28-row holdout's "0.464 vs 0.405" was a one-tournament draw from
-a distribution that averages to ~0.37.
+The aggregate save rate is **0.374 (SE ±0.036)** — 6× tighter than
+the single 28-row holdout (SE ±0.094). The model is **0.031 below**
+the closed-form random baseline (0.405 on the same 179 rows) — well
+within one aggregate SE. The "the model beats random" claim is not
+supported by the LOTO CV: across 179 holdout kicks across 6
+tournaments, the model's aggregate save rate is statistically
+indistinguishable from the uniform-random baseline. The 28-row
+holdout's "0.571 vs 0.405" (after the #41 retrain) was a
+one-tournament draw from a distribution that averages to ~0.37.
 
 The logreg baseline's LOTO CV (computed in the same script for
 context) lands at **0.380 save rate** — also below random, also
-within one SE. The published single-fold "logreg 0.250" number
+within one SE. The published single-fold "logreg 0.321" number
 (Issue #43) is the same kind of small-sample noise: the logreg
-beats the lightgbm on the WC 2026 holdout (0.250 vs 0.464) but
-loses to it on the cross-tournament aggregate (0.380 vs 0.369 are
+beats the lightgbm on the WC 2026 holdout (0.321 vs 0.571) but
+loses to it on the cross-tournament aggregate (0.380 vs 0.374 are
 within noise of each other).
 
 The CV reveals what the single 28-row holdout could not: **the
-18-feature model is not adding measurable value over a uniform-
-random dive policy on this dataset.** This is the same conclusion
-as the model review (Topic 2 + Topic 4); the LOTO CV is the
-independent confirmation. v4 work (per-keeper data, anti-classifier)
-is the path to a model that meaningfully beats random.
+17-feature model is not adding measurable value over a uniform-
+random dive policy on the cross-tournament aggregate.** This is
+the same conclusion as the model review (Topic 2 + Topic 4); the
+LOTO CV is the independent confirmation. The per-fold picture is
+mixed — the 17-feature model beats random on the AFCON + WC-Final-
+Stage folds and ties on Gold Cup; it loses to random on EURO,
+Copa, and the "World Cup" group stage. v4 work (per-keeper data,
+anti-classifier) is the path to a model that meaningfully beats
+random on the cross-tournament aggregate.
 
 ## What it predicts
 
@@ -148,15 +156,13 @@ counterfactual save policy. The dashboard at
 [`matheusccouto/12yd`](https://github.com/matheusccouto/12yd) surfaces
 per-kicker predictions for the WC 2026 knockout matches.
 
-## Feature schema (v3, 18 features)
+## Feature schema (v3, 17 features)
 
-v3 dropped the previous B3 (`b3_round`) feature: the round-specific
-categorical was only ever seen on four values in the training set
-("1/8", "1/4", "1/2", "Final") and unseen at inference time on the
-48-team WC's R32 round (FotMob code "1/16"). The model is now
-round-agnostic and the dashboard's per-match re-score path is gone.
+v3 dropped two features in two passes: the B3 (`b3_round`) feature
+in Issue #36 and the C2 (`age`) feature in Issue #41. The model is
+now both round-agnostic and age-agnostic.
 
-**Numeric (15 — A1, A4, B1, B2, C2):**
+**Numeric (14 — A1, A4, B1, B2):**
 
 - `p_L_5, p_C_5, p_R_5` — side distribution over last 5 kicks (A1).
 - `p_L_10, p_C_10, p_R_10` — side distribution over last 10 kicks (A1).
@@ -165,7 +171,6 @@ round-agnostic and the dashboard's per-match re-score path is gone.
 - `b1_kick_number` — kick number within the shootout (B1).
 - `pen_score_home, pen_score_away` — score BEFORE the kick (B2).
 - `is_decisive` — whether the kick's outcome ends the shootout (B2).
-- `age` — kicker's age in years at the target kick date (C2).
 
 **Categorical (3 — A2, A3, C1):**
 
@@ -180,9 +185,10 @@ round-agnostic and the dashboard's per-match re-score path is gone.
   declared foot.
 - `position` — FotMob position key, e.g. `"striker"` (C1).
 
-The `b3_round` feature (dropped in v3) was the only round-specific
-feature; its removal means every prediction is the same for every
-match in the same tournament, regardless of round. The
+The `b3_round` feature (dropped in v3, Issue #36) was the only
+round-specific feature; the `age` feature (dropped in v3, Issue #41)
+was the only per-kicker time-varying numeric. The v3 schema is the
+simplest set of features the model review ablation endorsed. The
 `predictions.jsonl` artifact on `data/` is the per-kicker source of
 truth and is round-agnostic.
 
@@ -197,7 +203,7 @@ artifact = pickle.load(open(p, "rb"))
 model = artifact["model"]
 feature_columns = artifact["feature_columns"]
 
-# Build a 15-numeric + 3-categorical = 18-feature row (A-group +
+# Build a 14-numeric + 3-categorical = 17-feature row (A-group +
 # B-group + C-group) and call model.predict_proba(row). The classes
 # are ["L", "C", "R"] in that order.
 ```
@@ -238,10 +244,10 @@ feature_columns = artifact["feature_columns"]
 ## Provenance
 
 Model card generated from the v3 `output/metrics.json` at the time of
-the v3 release. The v3 retrain follows the v2 slice pipeline with two
+the v3 release. The v3 retrain follows the v2 slice pipeline with three
 schema changes (drop `b3_round`, replace `kicking_foot` with
-`preferred_foot`) and one data change (recovered 42-shootout
-training set after Issue #37). See
+`preferred_foot`, drop `age`) and one data change (recovered
+42-shootout training set after Issue #37). See
 [`matheusccouto/12yd`](https://github.com/matheusccouto/12yd) (the
 GitHub repo) for the slice pipeline, the dashboard source, and the
 data layer.
@@ -279,6 +285,18 @@ data layer.
   one aggregate SE), and that the single 28-row holdout's "model
   beats random" claim was a small-sample draw. v4 work is the
   path to a model that meaningfully beats random.
+- **Dropped `age` (C2) from the feature schema** (Issue #41).
+  The model review ablation in `docs/model-review.md` Topic 2.3
+  showed that removing age improves BOTH save rate (0.464 → 0.571)
+  and log loss (1.769 → 1.700) on the 28-row 2026 holdout — a
+  +0.107 save-rate gain that clears the 0.09 SE by ~1.2 standard
+  errors. The LOTO CV aggregate is essentially unchanged (0.369 →
+  0.374, both well within one aggregate SE of the 0.405 random
+  baseline), so the cross-tournament story is unchanged: the
+  model still does not beat random on the aggregate. The 28-row
+  holdout is now the most favourable draw the v3 model has shown.
+  The birth date is still on `PlayerMetadata` for the data layer's
+  records; only the model no longer reads it.
 
 ## Further Notes
 

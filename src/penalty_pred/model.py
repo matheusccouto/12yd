@@ -6,10 +6,10 @@ Issue #23); the deployed model is LightGBM (slice #8, Issue #24). Both
 consume the same `output/training_table.jsonl` and the same feature
 schema defined here.
 
-Feature schema (15 numeric + 3 categorical; one-hot encoded at fit time
+Feature schema (14 numeric + 3 categorical; one-hot encoded at fit time
 for the baseline; native categorical for LightGBM):
 
-Numeric (A1, A4, B1, B2, C2):
+Numeric (A1, A4, B1, B2):
 - `p_L_5, p_C_5, p_R_5` — side distribution over last 5 kicks (A1).
 - `p_L_10, p_C_10, p_R_10` — side distribution over last 10 kicks (A1).
 - `p_L_20, p_C_20, p_R_20` — side distribution over last 20 kicks (A1).
@@ -17,7 +17,6 @@ Numeric (A1, A4, B1, B2, C2):
 - `b1_kick_number` — kick number within the shootout (B1).
 - `pen_score_home, pen_score_away` — score BEFORE the kick (B2).
 - `is_decisive` — whether the kick's outcome ends the shootout (B2).
-- `age` — kicker's age in years at the target kick date (C2).
 
 Categorical (A2, A3, C1):
 - `last_side` — "L" / "C" / "R" / "" (A2; "" = no history).
@@ -28,8 +27,13 @@ Categorical (A2, A3, C1):
 v3 (Issue #36) dropped the B3 (`b3_round`) feature: the round-specific
 categorical was only ever seen on four values in the training set
 ("1/8", "1/4", "1/2", "Final") and unseen at inference time on the
-48-team WC's R32 round (FotMob code "1/16"). The model is now
-round-agnostic and the dashboard re-score path is gone.
+48-team WC's R32 round (FotMob code "1/16"). v3 (Issue #41) dropped
+the C2 (`age`) feature: the ablation in `docs/model-review.md` Topic
+2.3 showed that removing age improves both save rate (0.464 → 0.500)
+and log loss (1.769 → 1.694) on the 28-row 2026 holdout, and the LOTO
+CV (Issue #45) confirmed the gain on the cross-tournament aggregate.
+The model is now round-agnostic and age-agnostic; the dashboard
+re-score path is gone.
 
 The artifact format is a pickle dict with three keys:
 - `model` — the fitted classifier (sklearn Pipeline or LightGBM Booster).
@@ -123,8 +127,6 @@ NUMERIC_FEATURES: tuple[str, ...] = (
     "pen_score_home",
     "pen_score_away",
     "is_decisive",
-    # C2
-    "age",
 )
 CATEGORICAL_FEATURES: tuple[str, ...] = (
     # A2
@@ -227,10 +229,6 @@ def load_training_table(
 ) -> list[TrainingRow]:
     """Read `output/training_table.jsonl` into a list of `TrainingRow`.
 
-    Missing `age` (the C2 feature) is allowed: the JSONL emits `null`,
-    which becomes Python `None` here. The baseline's `SimpleImputer`
-    fills `None` with the column median at fit time.
-
     `is_on_target` is NOT in the training table (slice #22 dropped it
     to keep the schema focused on the model features). The caller is
     expected to pass the lookup from `is_on_target_by_key(shootout_kicks)`;
@@ -239,6 +237,12 @@ def load_training_table(
     The data layer's directory layout is no longer leaked into the
     model layer — the join is the caller's responsibility, not the
     loader's.
+
+    Issue #41: the C2 (`age`) column is no longer in the schema. The
+    loader no longer reads it; pre-#41 JSONL files with an `age` field
+    are read as long as the field is allowed on the dataclass, but
+    re-writing the file via `art.write_training_table` produces a
+    17-feature row (no `age`).
     """
     on_target_by_key = is_on_target_by_key or {}
 
@@ -281,7 +285,6 @@ def load_training_table(
                     pen_score_away=int(row["pen_score_away"]),
                     is_decisive=bool(row["is_decisive"]),
                     position=str(row["position"]),
-                    age=math.nan if row.get("age") is None else float(row["age"]),
                 )
             )
     return out
@@ -502,11 +505,15 @@ def feature_columns_of(artifact: dict[str, Any]) -> list[str]:
 def is_numeric_nan(value: Any) -> bool:
     """True iff `value` should be treated as a missing numeric value.
 
-    The training table writes `None` for missing ages; some callers
-    pass `float("nan")` from numpy. The baseline's `SimpleImputer` only
-    recognises `None` as the missing marker (the column dtype is
-    `object`), so callers that produce `nan` should convert it via
-    this helper first.
+    The training table writes `None` for any column whose source value
+    is missing (e.g. a kicker with no `position` is written as `""`,
+    not `None`; the numeric columns are all `int | float` and have no
+    missing values in the v3 schema, since the `age` column was
+    dropped in Issue #41). The helper is kept for any future numeric
+    column that needs missing-value handling: the baseline's
+    `SimpleImputer` only recognises `None` as the missing marker
+    (the column dtype is `object`), so callers that produce `nan`
+    should convert it via this helper first.
     """
     if value is None:
         return True

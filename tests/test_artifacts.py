@@ -2,10 +2,11 @@
 
 The adapter owns the on-disk layout — paths, JSONL shape, model pickle,
 metrics JSON. These tests pin the contract: the path accessors point at
-the canonical filenames, the read/write methods round-trip, NaN ages
-are emitted as `null` (not `NaN`), the metrics report survives a
-`to_dict` → JSON → `from_dict` round-trip, and the `fotmob_client`
-factory returns a `FotMobClient` rooted at the configured cache_dir.
+the canonical filenames, the read/write methods round-trip, the v3
+17-feature schema has no `age` column (Issue #41), the metrics report
+survives a `to_dict` → JSON → `from_dict` round-trip, and the
+`fotmob_client` factory returns a `FotMobClient` rooted at the
+configured cache_dir.
 """
 
 from __future__ import annotations
@@ -134,18 +135,20 @@ def test_predictions_round_trip(tmp_path: Path) -> None:
     assert art.read_predictions() == rows
 
 
-def test_training_table_round_trip_with_nan_age(tmp_path: Path) -> None:
-    """`write_training_table` emits NaN ages as JSON `null` (strict
-    JSON, not `NaN`); `read_training_table` recovers them as `None`."""
+def test_training_table_round_trip_v3_schema(tmp_path: Path) -> None:
+    """`write_training_table` writes the v3 17-feature schema (no
+    `age` column, per Issue #41). The roundtrip preserves every
+    field; the JSONL has no `NaN` literals and no `null` for the
+    dropped column."""
     art = Artifacts(root=tmp_path)
-    rows = [make_training_row(age=math.nan)]
+    rows = [make_training_row()]
     n = art.write_training_table(rows, path=art.training_table)
     assert n == 1
     raw = art.training_table.read_text(encoding="utf-8")
-    assert '"age": null' in raw
+    assert "age" not in raw, "v3 schema should not write an `age` field"
     assert "NaN" not in raw
     back = art.read_training_table()
-    assert back[0].age is None  # NaN → null → None
+    assert back[0] == rows[0]
 
 
 # ---------------------------------------------------------------------------
@@ -282,19 +285,21 @@ def test_serialize_row_matches_write_shape(tmp_path: Path) -> None:
     assert art.read_shootout_kicks(path=out) == [kick]
 
 
-def test_serialize_row_emits_nan_as_null() -> None:
-    """`serialize_row(nan_to_null=True)` emits NaN ages as JSON `null`
-    (strict JSON), matching `write_training_table`'s per-row shape."""
+def test_serialize_row_v3_no_age_key() -> None:
+    """`serialize_row` writes the v3 17-feature schema (no `age`
+    column, per Issue #41). The `nan_to_null` kwarg is a no-op
+    on the v3 row type (no NaN-valued fields) but is kept for
+    backwards compatibility with pre-#41 callers."""
     art = Artifacts()
-    row = make_training_row(age=math.nan)
+    row = make_training_row()
     text = art.serialize_row(row, nan_to_null=True)
     payload = json.loads(text)
-    assert payload["age"] is None
+    assert "age" not in payload, "v3 schema should not serialise an `age` field"
     # The bare `serialize_row(row)` (without nan_to_null) is the
     # non-strict path used for the rest of the dataclasses.
     text2 = art.serialize_row(row)
     payload2 = json.loads(text2)
-    assert math.isnan(payload2["age"])
+    assert "age" not in payload2
 
 
 # ---------------------------------------------------------------------------

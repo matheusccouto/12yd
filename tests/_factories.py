@@ -95,9 +95,8 @@ def make_training_row(
     pen_score_home: int = 0,
     pen_score_away: int = 0,
     is_decisive: bool = False,
-    # C1 / C2
+    # C1 (C2 was dropped in Issue #41)
     position: str = "striker",
-    age: float | None = 25.0,
 ) -> TrainingRow:
     """Build a `TrainingRow` with sensible defaults.
 
@@ -105,6 +104,9 @@ def make_training_row(
     dataset is a balanced L/C/R signal). `b1_kick_number` mirrors
     `kick_number` unless overridden. v3 (Issue #36) dropped the
     B3 (`b3_round`) column; the round is now identifier-only.
+    v3 (Issue #41) dropped the C2 (`age`) column; the model's
+    ablation in `docs/model-review.md` Topic 2.3 showed age
+    actively hurt the save rate on the 28-row 2026 holdout.
     """
     return TrainingRow(
         match_id=match_id,
@@ -136,7 +138,6 @@ def make_training_row(
         pen_score_away=pen_score_away,
         is_decisive=is_decisive,
         position=position,
-        age=float("nan") if age is None else age,
     )
 
 

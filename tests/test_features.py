@@ -1,26 +1,28 @@
-"""Tests for the feature builder (slice #6, Issue #22; refined #36).
+"""Tests for the feature builder (slice #6, Issue #22; refined #36, #41).
 
 The tests cover five layers:
 
 1. **Pure helpers** — `side_distribution`, `is_decisive_kick`,
-   `age_in_years`, `filter_history`, `index_kicks_done`. No network,
-   no I/O. v3 (Issue #36) dropped the `mode_kicking_foot` helper —
-   the A3 feature now reads from `PlayerMetadata.preferred_foot`
-   instead of the per-penalty `shot_type` mode.
+   `age_in_years` (kept for backwards compatibility; the model no
+   longer uses it after Issue #41), `filter_history`,
+   `index_kicks_done`. No network, no I/O. v3 (Issue #36) dropped
+   the `mode_kicking_foot` helper — the A3 feature now reads from
+   `PlayerMetadata.preferred_foot` instead of the per-penalty
+   `shot_type` mode.
 
 2. **Per-kick feature builder** — `build_features` (the packaging
    function) and `compute_features` (the A-group/C-group
    computation) against a constructed `ShootoutKick` and a
    constructed `PlayerPenalty` history. Verifies the
-   A1/A2/A3/A4/B1/B2/C1/C2 features and the no-history fallback.
-   v3 dropped B3 (`b3_round`).
+   A1/A2/A3/A4/B1/B2/C1 features and the no-history fallback.
+   v3 dropped B3 (`b3_round`, Issue #36) and C2 (`age`, Issue #41).
 
 3. **Orchestration** — `build_training_table` against a stubbed
    `MetadataFetcher` that returns canned metadata per kicker. Verifies
    the row count, the sort order, and the JSONL roundtrip.
 
-4. **JSONL helpers** — `Artifacts.write_training_table` roundtrip; NaN
-   age is emitted as `null`.
+4. **JSONL helpers** — `Artifacts.write_training_table` roundtrip; no
+   NaN handling needed (the v3 row has no NaN-valued fields).
 
 5. **Live smoke test** — `output/training_table.jsonl` (skipped if
    absent): schema, row count matches the live shootout kicks file,
@@ -174,6 +176,15 @@ def test_is_decisive_elimination_in_both_branches() -> None:
 
 # ---------------------------------------------------------------------------
 # age_in_years
+#
+# Issue #41: the model no longer reads the kicker's age (the C2
+# feature was dropped; the ablation in `docs/model-review.md` Topic
+# 2.3 showed age actively hurt the save rate on the 28-row 2026
+# holdout). The `age_in_years` helper is kept in `features.py` for
+# backwards compatibility with downstream consumers and so a future
+# re-introduction of the feature can lift the helper into
+# `compute_features` without re-deriving the date math. The tests
+# below pin the helper's behaviour.
 # ---------------------------------------------------------------------------
 
 
@@ -437,9 +448,13 @@ def test_build_features_a1_horizons_nest() -> None:
     assert row.p_L_20 == 1.0
 
 
-def test_build_features_c1_c2_from_metadata() -> None:
-    """Position and age come from the metadata. C1 = position key, C2
-    = age in years at the target date."""
+def test_build_features_c1_from_metadata() -> None:
+    """Position (C1) comes from the metadata. Issue #41 dropped the
+    C2 (`age`) feature, so the model no longer reads the kicker's
+    birth date. The birth date is still on `PlayerMetadata` for
+    the data layer's records (and `age_in_years` is still tested
+    directly), but the model's `PredictionTarget` no longer carries
+    an `age` field."""
     target = _target()
     features = compute_features(
         history=[],
@@ -474,12 +489,14 @@ def test_build_features_c1_c2_from_metadata() -> None:
         is_on_target=target.is_on_target,
     )
     assert row.position == "centreback"
-    # Target 2022-12-18, born 1995-05-01 → 27 years (had 27th birthday in May 2022).
-    assert row.age == 27.0
+    # Issue #41: no `age` attribute on the unified row type.
+    assert not hasattr(row, "age")
 
 
-def test_build_features_c1_c2_handle_missing_metadata() -> None:
-    """`metadata=None` → C1 = "" and C2 = NaN (serialised as null in JSONL)."""
+def test_build_features_c1_handles_missing_metadata() -> None:
+    """`metadata=None` → C1 = "" (no position known). The C2 (`age`)
+    feature is gone; the test asserts position is the empty string
+    and the row has no `age` attribute."""
     target = _target()
     features = compute_features(
         history=[],
@@ -509,7 +526,7 @@ def test_build_features_c1_c2_handle_missing_metadata() -> None:
         is_on_target=target.is_on_target,
     )
     assert row.position == ""
-    assert math.isnan(row.age)
+    assert not hasattr(row, "age")
 
 
 def test_build_features_b1_b2_pass_through() -> None:
@@ -717,19 +734,19 @@ def test_build_training_table_idempotent() -> None:
 
 
 def asdict_payload(r: TrainingRow) -> dict[str, object]:
-    """`asdict` for the row, with NaN ages normalised to None for JSONL
-    compatibility."""
-    payload = {
-        f: getattr(r, f) for f in r.__dataclass_fields__
-    }  # type: ignore[union-attr]
-    if math.isnan(float(payload["age"])):  # type: ignore[arg-type]
-        payload["age"] = None
-    return payload  # type: ignore[return-value]
+    """`asdict` for the row, with no field-level normalisation.
+
+    Issue #41 dropped the `age` column (the only field whose value
+    could be `NaN`); the v3 row has no NaN-valued fields, so the
+    payload is the raw `dataclasses.asdict(r)` minus nothing.
+    """
+    return {f: getattr(r, f) for f in r.__dataclass_fields__}  # type: ignore[union-attr]
 
 
 def test_write_training_table_roundtrip(tmp_path: Path) -> None:
-    """Writing and reading the JSONL preserves the schema. NaN ages
-    are emitted as `null` (strict JSON), not `NaN`."""
+    """Writing and reading the JSONL preserves the v3 17-feature
+    schema. No NaN handling is needed (Issue #41 dropped the `age`
+    column; all v3 fields are int / float / str / bool)."""
     row = TrainingRow(
         match_id=1,
         kick_number=1,
@@ -760,7 +777,6 @@ def test_write_training_table_roundtrip(tmp_path: Path) -> None:
         pen_score_away=0,
         is_decisive=False,
         position="striker",
-        age=math.nan,
     )
     out = tmp_path / "tt.jsonl"
     art = Artifacts(root=tmp_path)
@@ -768,11 +784,14 @@ def test_write_training_table_roundtrip(tmp_path: Path) -> None:
     assert n == 1
     with out.open(encoding="utf-8") as f:
         text = f.read()
-    # NaN was emitted as null, not the invalid JSON token "NaN".
-    assert '"age": null' in text
+    # Issue #41: no NaN handling needed; the JSON has no `null` fields.
+    assert "null" not in text
     assert "NaN" not in text
     loaded = json.loads(text)
-    assert loaded["age"] is None
+    # v3 17-feature schema: no `age` key.
+    assert "age" not in loaded
+    assert loaded["position"] == "striker"
+    assert loaded["preferred_foot"] == "right"
 
 
 def test_write_training_table_empty(tmp_path: Path) -> None:
@@ -804,12 +823,11 @@ def test_training_table_jsonl_schema_smoke() -> None:
        `dataclasses.fields(TrainingRow)` in `tests._factories`).
     2. Row count equals the count in `shootout_kicks.jsonl`.
     3. A1 sums to 1.0 (within 1e-6) for every row.
-    4. `age` is either a number ≥ 0 or `null` (no NaN literals, no
-       negatives).
-    5. `label` is in {L, C, R}.
-    6. `is_decisive` is a bool.
-    7. Every training kicker (from `shootout_kicks.jsonl`) has at
+    4. `label` is in {L, C, R}.
+    5. `is_decisive` is a bool.
+    6. Every training kicker (from `shootout_kicks.jsonl`) has at
        least one row (sanity: no kickers dropped).
+    7. No `age` key (Issue #41 dropped the column from the v3 schema).
     """
     art = Artifacts()
     n_target = 0
@@ -846,10 +864,8 @@ def test_training_table_jsonl_schema_smoke() -> None:
             assert abs(row["p_L_5"] + row["p_C_5"] + row["p_R_5"] - 1.0) < 1e-6, (
                 f"A1 last-5 doesn't sum to 1: {row['p_L_5']} + {row['p_C_5']} + {row['p_R_5']}"
             )
-            # age: either a number ≥ 0, or null.
-            assert row["age"] is None or (
-                isinstance(row["age"], (int, float)) and row["age"] >= 0
-            ), f"bad age: {row['age']!r}"
+            # Issue #41: no `age` key in the v3 JSONL.
+            assert "age" not in row, "v3 schema should not carry an `age` field"
             n_rows += 1
             kickers.add(int(row["kicker_id"]))
 

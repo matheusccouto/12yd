@@ -76,8 +76,10 @@ def test_build_prediction_features_no_history_uses_prior() -> None:
     """No history → A1 = (1/3, 1/3, 1/3), A2 = "", A3 = "Unknown", A4 = 0.
 
     The B-group values are the neutral defaults (kick_number=1,
-    pen_score=0-0, is_decisive=False, round=""). The C-group values
-    come from the metadata (C1=position, C2=age at target_date).
+    pen_score=0-0, is_decisive=False, round=""). The C1 value
+    (position) comes from the metadata. Issue #41 dropped the C2
+    (`age`) feature, so the model no longer reads the kicker's
+    birth date.
     """
     row = build_prediction_features(
         kicker=_roster_player(player_id=1),
@@ -96,12 +98,11 @@ def test_build_prediction_features_no_history_uses_prior() -> None:
     assert row.pen_score_home == 0
     assert row.pen_score_away == 0
     assert row.is_decisive is False
-    # v3: no b3_round column on the unified row.
-    # C-group from metadata
+    # v3 (Issue #36): no b3_round column on the unified row.
+    # v3 (Issue #41): no age column on the unified row.
+    # C1 from metadata
     assert row.position == "striker"
-    # Born 1995-01-01, target 2026-12-31: 2026 - 1995 = 31 (had 31st
-    # birthday on 2026-01-01).
-    assert row.age == pytest.approx(31.0)
+    assert not hasattr(row, "age")
 
 
 def test_build_prediction_features_with_history_computes_a1_a2_a3_a4() -> None:
@@ -129,10 +130,11 @@ def test_build_prediction_features_with_history_computes_a1_a2_a3_a4() -> None:
     assert row.career_penalty_count == 5
 
 
-def test_build_prediction_features_no_metadata_handles_missing_c1_c2() -> None:
-    """`metadata=None` → C1 = "" and C2 = NaN (the model's
-    `SimpleImputer` and the LightGBM wrapper's missing-value handling
-    both treat NaN as missing)."""
+def test_build_prediction_features_no_metadata_handles_missing_c1() -> None:
+    """`metadata=None` → C1 = "" (the LightGBM wrapper's
+    missing-value handling treats an empty string as a missing
+    category). Issue #41 dropped the C2 (`age`) feature, so the row
+    has no `age` attribute."""
     row = build_prediction_features(
         kicker=_roster_player(player_id=1),
         history=[],
@@ -140,7 +142,7 @@ def test_build_prediction_features_no_metadata_handles_missing_c1_c2() -> None:
         target_date=TARGET_DATE,
     )
     assert row.position == ""
-    assert math.isnan(row.age)
+    assert not hasattr(row, "age")
 
 
 def test_build_prediction_features_filters_history_to_before_target() -> None:
@@ -377,8 +379,9 @@ def test_predict_roster_looks_up_per_kicker_metadata() -> None:
 
 def test_predict_roster_handles_metadata_fetch_failure() -> None:
     """A metadata fetcher that returns None for some players does not
-    abort the run — those kickers just get `position=""`,
-    `age=NaN`, and `preferred_foot=""`."""
+    abort the run — those kickers just get `position=""` and
+    `preferred_foot=""`. Issue #41 dropped the C2 (`age`) feature,
+    so the model no longer reads the kicker's birth date."""
     roster = [
         _roster_player(player_id=1, player_name="A"),
         _roster_player(player_id=2, player_name="B"),

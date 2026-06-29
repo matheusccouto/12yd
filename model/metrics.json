@@ -1,9 +1,9 @@
 {
   "model": {
     "name": "model",
-    "log_loss": 1.769495061378782,
-    "accuracy": 0.25,
-    "save_rate": 0.4642857142857143,
+    "log_loss": 1.6998048908952765,
+    "accuracy": 0.17857142857142858,
+    "save_rate": 0.5714285714285714,
     "n_kicks": 28
   },
   "random_baseline": {
@@ -32,20 +32,20 @@
   "holdout_cutoff_date": "2026-01-01",
   "baseline": {
     "name": "baseline",
-    "log_loss": 1.0765762100728204,
-    "accuracy": 0.42857142857142855,
-    "save_rate": 0.25,
+    "log_loss": 1.096362928924036,
+    "accuracy": 0.35714285714285715,
+    "save_rate": 0.32142857142857145,
     "n_kicks": 28
   },
   "calibration": {
     "model": {
-      "brier": 0.9857764337158023,
-      "ece": 0.43590157612737196,
+      "brier": 0.9898666054995109,
+      "ece": 0.4344265470149048,
       "n_bins": 10
     },
     "baseline": {
-      "brier": 0.6523626757063434,
-      "ece": 0.06324291346486668,
+      "brier": 0.6652020081464299,
+      "ece": 0.00403015730850842,
       "n_bins": 10
     },
     "random": {
@@ -60,9 +60,9 @@
         "name": "Africa Cup of Nations Final Stage",
         "n_train": 100,
         "n_holdout": 79,
-        "save_rate": 0.379746835443038,
-        "log_loss": 1.3120497848411505,
-        "accuracy": 0.3924050632911392,
+        "save_rate": 0.4177215189873418,
+        "log_loss": 1.2598285560145963,
+        "accuracy": 0.4050632911392405,
         "random_save_rate": 0.40928270042194087
       },
       {
@@ -70,53 +70,53 @@
         "n_train": 145,
         "n_holdout": 34,
         "save_rate": 0.29411764705882354,
-        "log_loss": 1.2847427133565703,
-        "accuracy": 0.47058823529411764,
+        "log_loss": 1.169722189044519,
+        "accuracy": 0.5,
         "random_save_rate": 0.3529411764705882
       },
       {
         "name": "World Cup Final Stage",
         "n_train": 154,
         "n_holdout": 25,
-        "save_rate": 0.36,
-        "log_loss": 1.4645257591837524,
-        "accuracy": 0.32,
+        "save_rate": 0.4,
+        "log_loss": 1.2515884906125796,
+        "accuracy": 0.28,
         "random_save_rate": 0.41333333333333333
       },
       {
         "name": "CONCACAF Gold Cup Final Stage",
         "n_train": 155,
         "n_holdout": 24,
-        "save_rate": 0.4583333333333333,
-        "log_loss": 1.1879464583298596,
-        "accuracy": 0.4166666666666667,
+        "save_rate": 0.4166666666666667,
+        "log_loss": 1.2469468234593384,
+        "accuracy": 0.25,
         "random_save_rate": 0.41666666666666663
       },
       {
         "name": "Copa America Final Stage",
         "n_train": 170,
         "n_holdout": 9,
-        "save_rate": 0.3333333333333333,
-        "log_loss": 1.8423687219918676,
-        "accuracy": 0.3333333333333333,
+        "save_rate": 0.2222222222222222,
+        "log_loss": 1.1131880041883089,
+        "accuracy": 0.5555555555555556,
         "random_save_rate": 0.4074074074074074
       },
       {
         "name": "World Cup",
         "n_train": 171,
         "n_holdout": 8,
-        "save_rate": 0.375,
-        "log_loss": 1.189245126057108,
+        "save_rate": 0.25,
+        "log_loss": 1.0056806802631304,
         "accuracy": 0.375,
         "random_save_rate": 0.41666666666666663
       }
     ],
     "aggregate": {
-      "save_rate": 0.3687150837988827,
-      "log_loss": 1.3326945460473094,
-      "accuracy": 0.39664804469273746,
+      "save_rate": 0.3743016759776536,
+      "log_loss": 1.2211038204514257,
+      "accuracy": 0.39106145251396646,
       "n_total": 179,
-      "se_save_rate": 0.036060491602667666
+      "se_save_rate": 0.036171528923746296
     },
     "group_by": "tournament_name",
     "skipped": {}
@@ -142,7 +142,6 @@
     "pen_score_home",
     "pen_score_away",
     "is_decisive",
-    "age",
     "last_side",
     "preferred_foot",
     "position"

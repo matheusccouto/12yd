@@ -154,14 +154,19 @@ def test_fit_lightgbm_predicts_valid_distribution() -> None:
     assert np.allclose(probs.sum(axis=1), 1.0)
 
 
-def test_fit_lightgbm_handles_none_age() -> None:
-    """A row with `age=None` flows through the wrapper without error
-    and the predictions remain a valid distribution. LightGBM handles
-    NaN natively in numeric features."""
-    rows = _toy_dataset() + [_make_row(label="L", age=None)]
+def test_fit_lightgbm_handles_unseen_categorical() -> None:
+    """A row with a categorical value the booster hasn't seen (e.g.
+    a new `position` key) flows through the wrapper without error
+    and the predictions remain a valid distribution. LightGBM treats
+    unseen categorical values as missing (NaN) by default — the
+    `LightGBMClassifierWrapper._categories` snapshot is the test
+    surface that pins this contract.
+    """
+    rows = _toy_dataset() + [_make_row(label="L", position="alien")]
     matrix = build_feature_matrix(rows)
     wrapper = fit_lightgbm(matrix)
     probs = np.asarray(wrapper.predict_proba(matrix.X))
+    assert probs.shape == (len(rows), 3)
     assert np.all(probs >= 0)
     assert np.allclose(probs.sum(axis=1), 1.0)
 

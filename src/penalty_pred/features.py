@@ -1,12 +1,12 @@
 """Feature builder for the penalty shootout model.
 
-PRD: For each Shootout Kick (target), build an 18-feature row from the
+PRD: For each Shootout Kick (target), build a 17-feature row from the
 kicker's penalty history (filtered to before the target kick date) and
-the player's metadata (position, birth date, preferred foot). The
-output is the `training_table.jsonl` artifact — one row per target
-kick — that the model slice (#23, #24) consumes.
+the player's metadata (position, preferred foot). The output is the
+`training_table.jsonl` artifact — one row per target kick — that the
+model slice (#23, #24) consumes.
 
-The 18 features (with their internal column count):
+The 17 features (with their internal column count):
 
 - **A1** — `P(L), P(C), P(R)` over the last 5, 10, and 20 kicks
   (continuous x bucketed; 9 columns: `p_L_5, p_C_5, p_R_5, ...,
@@ -22,13 +22,17 @@ The 18 features (with their internal column count):
   `pen_score_before[1]`) plus an `is_decisive` flag.
 - **C1** — position (from the player page; "" when metadata is
   missing).
-- **C2** — age in years (target_match_date − dateOfBirth; `null` when
-  birth date is missing).
 
 (v3 dropped the previous B3 (`b3_round`) feature — the round-specific
 categorical was only ever seen on four values in the training set and
 unseen at inference time on the 48-team WC's R32 round. The model is
-now round-agnostic and the dashboard re-score path is gone.)
+now round-agnostic and the dashboard re-score path is gone. v3 also
+dropped the C2 (`age`) feature — the ablation in `docs/model-review.md`
+Topic 2.3 showed that removing age improves both save rate (0.464 →
+0.500) and log loss (1.769 → 1.694) on the 28-row 2026 holdout, and
+the LOTO CV (Issue #45) confirms the gain on the cross-tournament
+aggregate. The birth date is still on `PlayerMetadata` for the data
+layer's records, but the model no longer reads it.)
 
 For kickers with no penalty history, A1 falls back to the uniform prior
 (1/3, 1/3, 1/3), A2 is "", and A4 is 0 — the same defaults the model
@@ -38,7 +42,7 @@ through from metadata (empty string when metadata is missing).
 The orchestrator (`build_training_table`) consumes two artifacts:
 `shootout_kicks.jsonl` (the targets) and `player_history.jsonl` (the
 per-kicker history, keyed by `kicker_id`). It also fetches the
-kicker's player page once per unique kicker to recover A3/C1/C2; the
+kicker's player page once per unique kicker to recover A3/C1; the
 fetch is cache-hit-dominated because the player-history slice
 already populated the disk cache for every Initial Set kicker.
 
@@ -48,7 +52,7 @@ training table by `(match_date, match_id, kick_number)` so the
 output order is stable.
 
 Phase 0 (Issue #30): a `PredictionTarget` value object carries only
-the 18 model features (no identifiers, no label). `build_features` is
+the 17 model features (no identifiers, no label). `build_features` is
 a thin packaging function that takes a `PredictionTarget` plus the
 row's identifiers and label, and returns a `TrainingRow`. The
 computation (A-group from history, C-group from metadata, is_decisive
@@ -96,7 +100,7 @@ CLASSES: tuple[str, ...] = ("L", "C", "R")
 
 @dataclass(frozen=True)
 class PredictionTarget:
-    """The 18 model feature inputs for a single prediction target.
+    """The 17 model feature inputs for a single prediction target.
 
     Carries only what the model needs — no identifiers, no label, no
     `is_on_target`. The data layer's `ShootoutKick` is no longer
@@ -135,21 +139,24 @@ class PredictionTarget:
     is_decisive: bool
     # C1: position
     position: str
-    # C2: age in years
-    age: float  # NaN → None in the JSONL (Python json does not emit NaN).
 
 
 @dataclass(frozen=True)
 class TrainingRow:
-    """One training row: a target Shootout Kick plus the 18 features for it.
+    """One training row: a target Shootout Kick plus the 17 features for it.
 
-    The unified row type (Issue #30, refined in #36): the 18 model
-    features are individual fields (not a dict) so the type checker
-    can pin them, and the row carries its own identifiers and label so
-    the on-disk format is self-contained. The previous B3 (`b3_round`)
-    feature was dropped in v3 (Issue #36) — the round-specific
-    categorical was only ever seen on four values in training and
-    unseen at inference time on the 48-team WC's R32 round.
+    The unified row type (Issue #30, refined in #36 + #41): the 17
+    model features are individual fields (not a dict) so the type
+    checker can pin them, and the row carries its own identifiers and
+    label so the on-disk format is self-contained. The previous B3
+    (`b3_round`) feature was dropped in v3 (Issue #36) — the
+    round-specific categorical was only ever seen on four values in
+    training and unseen at inference time on the 48-team WC's R32
+    round. The C2 (`age`) feature was dropped in v3 (Issue #41) — the
+    ablation in `docs/model-review.md` Topic 2.3 showed that removing
+    age improves both save rate and log loss on the 28-row 2026
+    holdout, and the LOTO CV confirms the gain on the cross-tournament
+    aggregate.
 
     Identifier fields are pass-throughs from `shootout_kicks.jsonl` so
     the row is self-contained. `label` is the side the kicker actually
@@ -202,8 +209,6 @@ class TrainingRow:
     is_decisive: bool
     # C1: position
     position: str
-    # C2: age in years
-    age: float  # NaN → None in the JSONL (Python json does not emit NaN).
 
     @property
     def label_index(self) -> int:
@@ -303,6 +308,18 @@ def age_in_years(birth_date_str: str, target_date_str: str) -> float:
     within the year, but in practice the granularity is whole years
     because the scraper stores match dates as ISO 8601 to the second
     and birth dates as dates).
+
+    Issue #41: kept for backwards compatibility with downstream
+    consumers (e.g. a future dashboard widget that wants the kicker's
+    age at the match date), but the model no longer reads the result.
+    The `compute_features` function dropped the C2 call to this helper
+    — the model's `age` feature was retired in Issue #41 because the
+    ablation in `docs/model-review.md` Topic 2.3 showed it actively
+    hurt the save rate on the 28-row 2026 holdout. The test suite
+    still covers this helper directly so a future re-introduction of
+    the age feature (e.g. with a richer `age_at_kick` formulation)
+    can lift the helper into `compute_features` without re-deriving
+    the date math.
     """
     if not birth_date_str:
         return math.nan
@@ -432,13 +449,13 @@ def compute_features(
     b_group: BGroupContext,
     kicks_done: KickIndex,
 ) -> PredictionTarget:
-    """Compute the 18 model features for one prediction target.
+    """Compute the 17 model features for one prediction target.
 
     Pure function. `history` is the kicker's full scraped history;
     this function filters it to before `target_date` and computes the
     A-group (side distribution, last_side, career count). `metadata`
-    may be None if the player page could not be fetched (then A3 is "",
-    C1 is "" and C2 is NaN). `b_group` carries the B-group inputs
+    may be None if the player page could not be fetched (then A3 is
+    "" and C1 is ""). `b_group` carries the B-group inputs
     (kick_number, pen_score, is_home); `kicks_done` is the pre-computed
     index for the `is_decisive` flag.
 
@@ -446,6 +463,12 @@ def compute_features(
     `b_group` comes from a real `ShootoutKick`) and the prediction
     slice (where `b_group = BGroupContext.neutral()`). No `ShootoutKick`
     is constructed in the prediction path.
+
+    Issue #41: the C2 (`age`) feature was removed. The model ablation
+    in `docs/model-review.md` Topic 2.3 showed age actively hurt the
+    save rate on the 28-row 2026 holdout; the LOTO CV confirmed the
+    gain on the cross-tournament aggregate. The birth date is still
+    on `PlayerMetadata` for the data layer's records.
     """
     filtered = filter_history(history, target_date)
     sides = [p.side for p in filtered]
@@ -456,8 +479,6 @@ def compute_features(
 
     preferred_foot = metadata.preferred_foot if metadata is not None else ""
     position = metadata.position_key if metadata is not None else ""
-    birth_date = metadata.birth_date if metadata is not None else ""
-    age = age_in_years(birth_date, target_date)
 
     return PredictionTarget(
         p_L_5=p_L_5,
@@ -483,7 +504,6 @@ def compute_features(
             b_group.is_home,
         ),
         position=position,
-        age=age,
     )
 
 
@@ -505,7 +525,7 @@ def build_features(
 ) -> TrainingRow:
     """Package a `PredictionTarget` into a `TrainingRow`.
 
-    Thin packaging function (Issue #30): takes the 18 model features
+    Thin packaging function (Issue #30): takes the 17 model features
     plus the row's identifiers and label, returns the unified row
     type. The actual feature computation lives in `compute_features`.
 
@@ -546,7 +566,6 @@ def build_features(
         pen_score_away=features.pen_score_away,
         is_decisive=features.is_decisive,
         position=features.position,
-        age=features.age,
     )
 
 

@@ -104,18 +104,19 @@ def build_prediction_features(
     metadata: PlayerMetadata | None,
     target_date: str,
 ) -> TrainingRow:
-    """Build the 18-feature row for one roster player at `target_date`.
+    """Build the 17-feature row for one roster player at `target_date`.
 
     The B-group is the neutral context (kick_number=1, pen_score=0-0,
     is_home=True) so the model's B-group features don't leak
     shootout-state information that doesn't exist for a prediction
     target. The A1 features (side distribution over the last 5/10/20
     kicks) and A2/A3/A4 features come from the player's history and
-    metadata, filtered to before `target_date`. C1 (position) and
-    C2 (age) come from the metadata. For kickers with no history, A1
-    falls back to the prior `(1/3, 1/3, 1/3)`, A2 is "", and A4 is 0.
-    A3 falls through from `metadata.preferred_foot` ("" when metadata
-    is missing or the field is absent).
+    metadata, filtered to before `target_date`. C1 (position) comes
+    from the metadata. For kickers with no history, A1 falls back to
+    the prior `(1/3, 1/3, 1/3)`, A2 is "", and A4 is 0. A3 falls
+    through from `metadata.preferred_foot` ("" when metadata is
+    missing or the field is absent). Issue #41 dropped the C2 (`age`)
+    feature, so the model no longer reads the kicker's birth date.
     """
     features = compute_features(
         history=history,
@@ -158,11 +159,11 @@ def predict_kicker(
 ) -> PredictionRow:
     """Run the model for one kicker and return the `PredictionRow`.
 
-    Builds the 18-feature row, runs the model, and returns the
-    predicted probabilities. The `kicking_foot` is the declared
-    preferred foot from `PlayerMetadata.preferred_foot` (v3: the same
-    value the feature row carries, so the slice doesn't re-read
-    metadata).
+    Builds the 17-feature row (Issue #41 dropped `age` from the
+    schema), runs the model, and returns the predicted probabilities.
+    The `kicking_foot` is the declared preferred foot from
+    `PlayerMetadata.preferred_foot` (v3: the same value the feature
+    row carries, so the slice doesn't re-read metadata).
     """
     row = build_prediction_features(kicker, history, metadata, target_date)
     matrix = build_feature_matrix([row])
@@ -227,8 +228,8 @@ def predict_roster(
     `roster`. The function is pure: same inputs → same outputs. Each
     kicker's prediction is independent — a single bad metadata fetch
     (returns None) does not abort the run; the kicker just gets
-    `position=""` and `age=NaN`, and the model's categorical
-    `position` becomes NaN (LightGBM treats it as missing).
+    `position=""` and the model's categorical `position` becomes NaN
+    (LightGBM treats it as missing).
 
     `metadata_fetcher` is the `MetadataFetcher` callable from
     `features.py` — typically `fetcher_from_client(client)` with the
@@ -238,7 +239,8 @@ def predict_roster(
     v3 (Issue #36): the previous `predict_roster_with_context` /
     `PredictContext(round=...)` round-override entry point is gone.
     The model is round-agnostic; the dashboard reads
-    `predictions.jsonl` directly.
+    `predictions.jsonl` directly. Issue #41 dropped the C2 (`age`)
+    feature, so the model no longer reads the kicker's birth date.
     """
     out: list[PredictionRow] = []
     for kicker in roster:

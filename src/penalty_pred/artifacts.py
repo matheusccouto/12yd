@@ -22,7 +22,8 @@ The on-disk layout (relative to `root`):
 - `player_history.jsonl` — 745 rows of per-kicker penalty history
 - `missing_history.jsonl` — 1063 kickers with zero penalty rows
 - `wc2026_roster.jsonl` — 1243 unique players across 48 teams
-- `training_table.jsonl` — 179 rows of 9-feature rows
+- `training_table.jsonl` — 179 rows of 17-feature rows (v3, Issue #41
+  dropped the `age` column)
 - `predictions.jsonl` — 1243 rows of per-player predictions
 - `lightgbm.pkl` — the frozen LightGBM model
 - `baseline.pkl` — the baseline logreg model
@@ -50,7 +51,6 @@ The default is the instance's path accessor.
 from __future__ import annotations
 
 import json
-import math
 from collections.abc import Iterable
 from dataclasses import asdict
 from pathlib import Path
@@ -86,6 +86,11 @@ def _write_jsonl(
     are emitted as JSON `null` (strict JSON parsers reject `NaN`). The
     caller is expected to use `dataclasses.asdict` for the row; the
     helper only handles the top-level `NaN` fields (not nested ones).
+
+    Issue #41: the v3 `TrainingRow` no longer has an `age` field, so
+    the special-case `NaN → null` rewrite is a no-op. The kwarg is
+    kept so the same write path handles the pre-#41 rows that still
+    carry an `age` field (the reader accepts extra fields).
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     count = 0
@@ -104,12 +109,13 @@ def _serialize_row(row: Any, *, nan_to_null: bool = False) -> str:
     need to write one row at a time to keep the disk copy current on a
     long run. The serialisation is the same as `_write_jsonl`'s per-row
     body, lifted into a public helper.
+
+    Issue #41: the special-case `NaN → null` rewrite for `age` is now
+    a no-op (the v3 row type has no `age` field). The kwarg is kept
+    for callers that may still serialise a pre-#41 row with an
+    `age` key.
     """
     payload = asdict(row)
-    if nan_to_null:
-        age = payload.get("age")
-        if isinstance(age, float) and math.isnan(age):
-            payload["age"] = None
     return json.dumps(payload, ensure_ascii=False, allow_nan=(not nan_to_null))
 
 

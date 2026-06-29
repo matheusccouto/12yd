@@ -62,20 +62,24 @@ _make_row = make_training_row
 
 
 def test_feature_columns_matches_published_schema() -> None:
-    """The canonical feature column list is the 18 v3 features (was 19 in v2).
+    """The canonical feature column list is the 17 v3 features (was 19 in v2).
 
     v3 (Issue #36) dropped the B3 (`b3_round`) feature, so the schema
     goes from 19 columns (15 numeric + 4 categorical) to 18 (15
-    numeric + 3 categorical). The split is 15 + 3 = 18.
+    numeric + 3 categorical). v3 (Issue #41) further dropped the C2
+    (`age`) feature, going from 18 (15 numeric + 3 categorical) to 17
+    (14 numeric + 3 categorical). The split is 14 + 3 = 17.
     """
-    assert len(FEATURE_COLUMNS) == 18
+    assert len(FEATURE_COLUMNS) == 17
     assert set(FEATURE_COLUMNS) == set(NUMERIC_FEATURES) | set(CATEGORICAL_FEATURES)
-    # 15 numeric + 3 categorical = 18.
-    assert len(NUMERIC_FEATURES) == 15
+    # 14 numeric + 3 categorical = 17.
+    assert len(NUMERIC_FEATURES) == 14
     assert len(CATEGORICAL_FEATURES) == 3
-    # v3 removed b3_round from the categorical group.
+    # v3 removed b3_round from the categorical group (Issue #36).
     assert "b3_round" not in FEATURE_COLUMNS
-    # v3 swapped the A3 source: kicking_foot → preferred_foot.
+    # v3 dropped age from the numeric group (Issue #41).
+    assert "age" not in FEATURE_COLUMNS
+    # v3 swapped the A3 source: kicking_foot → preferred_foot (Issue #36).
     assert "preferred_foot" in FEATURE_COLUMNS
     assert "kicking_foot" not in FEATURE_COLUMNS
 
@@ -146,22 +150,14 @@ def test_build_feature_matrix_shape_and_dtypes() -> None:
     assert matrix.X.shape == (3, len(FEATURE_COLUMNS))
     assert list(matrix.X.columns) == list(FEATURE_COLUMNS)
     for col in NUMERIC_FEATURES:
-        # Coerced to a numeric dtype (float, int, or bool). The age
-        # column with `None` becomes NaN (a float). The other numeric
-        # columns are int or bool.
+        # Coerced to a numeric dtype (float, int, or bool). After
+        # Issue #41 dropped the `age` column, every numeric column
+        # is an int or bool (no NaN).
         assert matrix.X[col].dtype.kind in "fiub", (
             f"numeric column {col!r} not coerced to a numeric dtype: {matrix.X[col].dtype}"
         )
     assert matrix.y.tolist() == [0, 2, 1]
     assert matrix.on_target.tolist() == [True, True, True]
-
-
-def test_build_feature_matrix_none_age_becomes_nan() -> None:
-    """A row with `age=None` survives into the DataFrame as NaN so
-    the imputer can fill it."""
-    row = _make_row(label="L", age=None)
-    matrix = build_feature_matrix([row])
-    assert np.isnan(matrix.X["age"].iloc[0])
 
 
 def test_build_feature_matrix_default_columns() -> None:
@@ -236,7 +232,6 @@ def test_load_training_table_reads_live(tmp_path: Path) -> None:
         "pen_score_away": 0,
         "is_decisive": False,
         "position": "striker",
-        "age": 25.0,
     }
     with table_path.open("w", encoding="utf-8") as f:
         f.write(json.dumps(row) + "\n")
@@ -284,7 +279,6 @@ def test_load_training_table_joins_is_on_target(tmp_path: Path) -> None:
         "pen_score_away": 0,
         "is_decisive": False,
         "position": "striker",
-        "age": 25.0,
     }
     with table_path.open("w", encoding="utf-8") as f:
         f.write(json.dumps(table_row) + "\n")
@@ -408,13 +402,17 @@ def test_fit_logistic_regression_predicts_valid_distribution() -> None:
     assert np.allclose(probs.sum(axis=1), 1.0)
 
 
-def test_fit_logistic_regression_handles_none_age() -> None:
-    """A row with `age=None` flows through the imputer without error
-    and the predictions remain a valid distribution."""
-    rows = _toy_dataset() + [_make_row(label="L", age=None)]
+def test_fit_logistic_regression_handles_missing_categorical() -> None:
+    """A row with an unseen categorical value (e.g. an unknown
+    `position` key) flows through the imputer + one-hot encoder
+    without error and the predictions remain a valid distribution.
+    The `handle_unknown="ignore"` policy on the OHE drops the
+    unknown category rather than raising."""
+    rows = _toy_dataset() + [_make_row(label="L", position="alien")]
     matrix = build_feature_matrix(rows)
     pipe = fit_logistic_regression(matrix)
     probs = np.asarray(pipe.predict_proba(matrix.X))
+    assert probs.shape == (len(rows), 3)
     assert np.all(probs >= 0)
     assert np.allclose(probs.sum(axis=1), 1.0)
 
