@@ -31,6 +31,15 @@ Phase 0 (Issue #30): the predict slice no longer constructs a synthetic
 `RosterPlayer` + history + metadata + target_date and returns a
 `TrainingRow` with neutral B-group values via the shared
 `compute_features` / `build_features` path.
+
+Phase 2 (Issue #34): adds `PredictContext` (the B-group override) and
+`predict_roster_with_context`. The dashboard's re-score path uses a
+context whose `round` is the match's actual round (e.g. "Quarter-finals"
+for an R16 match) so the model sees the B3 categorical it was trained
+on. The v1 slice's `predict_roster(roster, history, model, target_date)`
+is now a thin wrapper that calls `predict_roster_with_context` with the
+default (neutral) context — the round-agnostic predictions on disk
+(`predictions.jsonl`) are byte-for-byte the v1 result.
 """
 
 from __future__ import annotations
@@ -86,6 +95,55 @@ class PredictionRow:
 
 
 # ---------------------------------------------------------------------------
+# B-group context (Phase 2: dashboard re-score)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PredictContext:
+    """The B-group override for a single prediction target.
+
+    The default context (`PredictContext()`) is the v1 neutral context:
+    `round=""` (LightGBM treats as missing), `kick_number=1`, the
+    shootout score 0-0. The dashboard's re-score path uses a non-neutral
+    `round` so the model sees the B3 categorical it was trained on
+    ("Round of 16", "Quarter-finals", "Semi-finals", "Final").
+
+    The numeric B-group fields stay at the v1 neutral defaults for both
+    the v1 slice and the dashboard re-score — a real shootout kick has
+    non-zero `kick_number` / `pen_score`, but the model is asked to
+    predict the *first* kick of a hypothetical match, and the per-kick
+    feature row at the model's input carries the B-group as "kick 1 of
+    a 0-0 shootout" for every match. The B3 round is the only field the
+    dashboard overrides because it's the only one that varies across
+    matches in a way the model was trained on.
+    """
+
+    round: str = ""
+    kick_number: int = 1
+    pen_score_home: int = 0
+    pen_score_away: int = 0
+    is_home: bool = True
+
+    def to_b_group(self) -> BGroupContext:
+        """Materialise the value object as the feature builder's B-group."""
+        return BGroupContext(
+            kick_number=self.kick_number,
+            pen_score_home=self.pen_score_home,
+            pen_score_away=self.pen_score_away,
+            is_home=self.is_home,
+            round=self.round,
+        )
+
+
+# Module-level singleton: the neutral context reused as the default for
+# the `context` argument. Using a module-level constant (instead of
+# `PredictContext()` inline) avoids the B008 ruff rule that flags
+# function calls in argument defaults.
+_NEUTRAL_CONTEXT: PredictContext = PredictContext()
+
+
+# ---------------------------------------------------------------------------
 # Feature builder for a single prediction target
 # ---------------------------------------------------------------------------
 
@@ -95,15 +153,15 @@ def build_prediction_features(
     history: Sequence[PlayerPenalty],
     metadata: PlayerMetadata | None,
     target_date: str,
+    context: PredictContext = _NEUTRAL_CONTEXT,
 ) -> TrainingRow:
     """Build the 9-feature row for one roster player at `target_date`.
 
-    The B-group is neutral (kick_number=1, pen_score=0-0, is_decisive=False,
-    round="") so the model's B-group features don't leak shootout-state
-    information that doesn't exist for a prediction target. `round=""`
-    is not in the training categories, so the LightGBM wrapper treats
-    it as missing via the categorical coercion (same behaviour as the
-    training slice's unseen-categorical handling).
+    The B-group is taken from `context`. The default context is neutral
+    (round="", kick_number=1, pen_score=0-0) so the model's B-group
+    features don't leak shootout-state information that doesn't exist
+    for a prediction target. The dashboard re-scores with a non-neutral
+    `round` (e.g. "Quarter-finals") to get round-specific predictions.
 
     The A1 features (side distribution over the last 5/10/20 kicks) and
     A2/A3/A4 features come from the player's history, filtered to
@@ -115,7 +173,7 @@ def build_prediction_features(
         history=history,
         metadata=metadata,
         target_date=target_date,
-        b_group=BGroupContext.neutral(),
+        b_group=context.to_b_group(),
         kicks_done=KickIndex(home_kicks_done=0, away_kicks_done=0),
     )
     return build_features(
@@ -124,15 +182,15 @@ def build_prediction_features(
         # predict time, but the unified row type carries them so the
         # data layer's directory layout is consistent.
         match_id=0,
-        kick_number=1,
+        kick_number=context.kick_number,
         kicker_id=kicker.player_id,
         kicker_name=kicker.player_name,
         match_date=target_date,
         tournament_id=77,  # FotMob WC leagueId
         tournament_name="World Cup",
-        round="",  # neutral; LightGBM treats as missing
+        round=context.round,
         team_id=kicker.team_id,
-        is_home=True,  # doesn't matter — pen_score=0-0, both 0 kicks done → is_decisive=False
+        is_home=context.is_home,
         label="L",  # dummy — unused at predict time
         is_on_target=True,  # dummy — unused at predict time
     )
@@ -149,6 +207,7 @@ def predict_kicker(
     history: Sequence[PlayerPenalty],
     metadata: PlayerMetadata | None,
     target_date: str,
+    context: PredictContext = _NEUTRAL_CONTEXT,
 ) -> PredictionRow:
     """Run the model for one kicker and return the `PredictionRow`.
 
@@ -157,7 +216,7 @@ def predict_kicker(
     player's history `shot_type` — the same value the feature row
     carries (so the slice doesn't re-compute it).
     """
-    row = build_prediction_features(kicker, history, metadata, target_date)
+    row = build_prediction_features(kicker, history, metadata, target_date, context)
     matrix = build_feature_matrix([row])
     probs = np.asarray(model.predict_proba(matrix.X))
     p_L, p_C, p_R = (float(p) for p in probs[0])
@@ -202,14 +261,25 @@ def load_roster(path: Path) -> list[RosterPlayer]:
     return Artifacts().read_roster(path)
 
 
-def predict_roster(
+# ---------------------------------------------------------------------------
+# Per-roster predict (with optional context)
+# ---------------------------------------------------------------------------
+
+
+def predict_roster_with_context(
     model: Any,
     roster: Sequence[RosterPlayer],
     player_history: Mapping[int, Sequence[PlayerPenalty]],
     metadata_fetcher: Any,
     target_date: str,
+    context: PredictContext,
 ) -> list[PredictionRow]:
-    """Run the model for every roster player.
+    """Run the model for every roster player with the given context.
+
+    The full entry point: takes an explicit `context` so the dashboard
+    can re-score with the match's actual round. The v1 round-agnostic
+    `predictions.jsonl` uses `predict_roster(...)`, which is a thin
+    wrapper that calls this with the default (neutral) context.
 
     Returns a list of `PredictionRow` in the same order as the input
     `roster`. The function is pure: same inputs → same outputs. Each
@@ -227,17 +297,47 @@ def predict_roster(
     for kicker in roster:
         history = player_history.get(kicker.player_id, [])
         metadata = metadata_fetcher(kicker.player_id)
-        out.append(predict_kicker(model, kicker, history, metadata, target_date))
+        out.append(predict_kicker(model, kicker, history, metadata, target_date, context))
     return out
+
+
+def predict_roster(
+    model: Any,
+    roster: Sequence[RosterPlayer],
+    player_history: Mapping[int, Sequence[PlayerPenalty]],
+    metadata_fetcher: Any,
+    target_date: str,
+) -> list[PredictionRow]:
+    """Run the model for every roster player with the neutral context.
+
+    Thin wrapper around `predict_roster_with_context` that uses the
+    default (neutral) `PredictContext`. The v1 slice writes
+    `predictions.jsonl` from this function — the round-agnostic
+    predictions on disk are byte-for-byte the v1 result.
+
+    Kept as a separate function (not inlined into the v1 script) so
+    the existing v1 callers don't need to change. The dashboard
+    re-score path calls `predict_roster_with_context` directly.
+    """
+    return predict_roster_with_context(
+        model,
+        roster,
+        player_history,
+        metadata_fetcher,
+        target_date,
+        PredictContext(),
+    )
 
 
 __all__ = [
     "CLASSES",
     "PRIOR_PROB",
+    "PredictContext",
     "PredictionRow",
     "build_prediction_features",
     "load_player_history",
     "load_roster",
     "predict_kicker",
     "predict_roster",
+    "predict_roster_with_context",
 ]
