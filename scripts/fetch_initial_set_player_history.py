@@ -69,10 +69,7 @@ def main() -> int:
         "--missing",
         type=Path,
         default=art.missing_history,
-        help=(
-            "Path to write the missing-kicker JSONL artifact "
-            f"(default: {art.missing_history})."
-        ),
+        help=(f"Path to write the missing-kicker JSONL artifact (default: {art.missing_history})."),
     )
     parser.add_argument(
         "--cache-dir",
@@ -148,7 +145,7 @@ def main() -> int:
         ):
             results.append(result)
             for row in result.rows:
-                out_f.write(art._serialize_row(row))
+                out_f.write(art.serialize_row(row))
                 out_f.write("\n")
                 n_rows_written += 1
             out_f.flush()
