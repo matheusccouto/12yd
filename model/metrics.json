@@ -37,6 +37,90 @@
     "save_rate": 0.25,
     "n_kicks": 28
   },
+  "calibration": {
+    "model": {
+      "brier": 0.9857764337158023,
+      "ece": 0.43590157612737196,
+      "n_bins": 10
+    },
+    "baseline": {
+      "brier": 0.6523626757063434,
+      "ece": 0.06324291346486668,
+      "n_bins": 10
+    },
+    "random": {
+      "brier": 0.6666666666666669,
+      "ece": 0.05952380952380942,
+      "n_bins": 10
+    }
+  },
+  "cv": {
+    "folds": [
+      {
+        "name": "Africa Cup of Nations Final Stage",
+        "n_train": 100,
+        "n_holdout": 79,
+        "save_rate": 0.379746835443038,
+        "log_loss": 1.3120497848411505,
+        "accuracy": 0.3924050632911392,
+        "random_save_rate": 0.40928270042194087
+      },
+      {
+        "name": "EURO Final Stage",
+        "n_train": 145,
+        "n_holdout": 34,
+        "save_rate": 0.29411764705882354,
+        "log_loss": 1.2847427133565703,
+        "accuracy": 0.47058823529411764,
+        "random_save_rate": 0.3529411764705882
+      },
+      {
+        "name": "World Cup Final Stage",
+        "n_train": 154,
+        "n_holdout": 25,
+        "save_rate": 0.36,
+        "log_loss": 1.4645257591837524,
+        "accuracy": 0.32,
+        "random_save_rate": 0.41333333333333333
+      },
+      {
+        "name": "CONCACAF Gold Cup Final Stage",
+        "n_train": 155,
+        "n_holdout": 24,
+        "save_rate": 0.4583333333333333,
+        "log_loss": 1.1879464583298596,
+        "accuracy": 0.4166666666666667,
+        "random_save_rate": 0.41666666666666663
+      },
+      {
+        "name": "Copa America Final Stage",
+        "n_train": 170,
+        "n_holdout": 9,
+        "save_rate": 0.3333333333333333,
+        "log_loss": 1.8423687219918676,
+        "accuracy": 0.3333333333333333,
+        "random_save_rate": 0.4074074074074074
+      },
+      {
+        "name": "World Cup",
+        "n_train": 171,
+        "n_holdout": 8,
+        "save_rate": 0.375,
+        "log_loss": 1.189245126057108,
+        "accuracy": 0.375,
+        "random_save_rate": 0.41666666666666663
+      }
+    ],
+    "aggregate": {
+      "save_rate": 0.3687150837988827,
+      "log_loss": 1.3326945460473094,
+      "accuracy": 0.39664804469273746,
+      "n_total": 179,
+      "se_save_rate": 0.036060491602667666
+    },
+    "group_by": "tournament_name",
+    "skipped": {}
+  },
   "model_kind": "lightgbm",
   "classes": [
     "L",
