@@ -228,3 +228,45 @@ def test_delta_property(tmp_path: Path) -> None:
     assert report.delta == 1  # 1 actual, 0 expected
     assert report.actual == 1
     assert report.expected == 0
+
+
+def test_failed_refs_included_in_discrepancies(
+    tmp_path: Path, rsssf_shootouts: list[object]
+) -> None:
+    """`failed_refs` are serialised in discrepancies.json alongside
+    `skipped_refs` and `no_kicks_refs` so the slice operator can
+    investigate extractor exceptions."""
+    from penalty_pred.match_ref import MatchRef
+
+    kicks = _kicks_for_pairs([("World Cup", 2022, 1)])
+    jsonl = tmp_path / "kicks.jsonl"
+    _write_kicks(jsonl, kicks)
+    disc = tmp_path / "discrepancies.json"
+
+    failed = [
+        MatchRef(
+            match_id=777,
+            seo="g-vs-h",
+            h2h="fff777",
+            round_name="Final",
+            home_team_name="G",
+            away_team_name="H",
+            match_date="2022-12-18T15:00:00Z",
+            score_str="3 - 3",
+        )
+    ]
+    report = validate_shootout_count(
+        jsonl,
+        rsssf_shootouts,
+        LEAGUE_SEASONS_PREDICT_WINDOW,
+        discrepancies_path=disc,
+        failed_refs=failed,
+    )
+    assert report.match is False
+    assert report.failed_refs == failed
+    payload = json.loads(disc.read_text())
+    assert len(payload["failed_refs"]) == 1
+    assert payload["failed_refs"][0]["match_id"] == 777
+    assert payload["failed_refs"][0]["home"] == "G"
+    assert payload["failed_refs"][0]["away"] == "H"
+    assert payload["failed_refs"][0]["round"] == "Final"

@@ -8,7 +8,10 @@ script:
 2. Fetches each league's season fixtures, filters to `penalties_short`.
 3. Fetches each shootout match's full JSON, runs `extract_shootout_kicks`.
 4. Writes a single `shootout_kicks.jsonl` containing every kick.
-5. Loads the RSSSF penaltiestour page, counts in-window shootouts, and writes
+5. Writes `skipped_refs_diagnostics.jsonl` with one record per
+   non-empty skip / no-kicks / failure result, used to diagnose the
+   RSSSF divergence.
+6. Loads the RSSSF penaltiestour page, counts in-window shootouts, and writes
    `discrepancies.json` if the count diverges from what the scraper found.
 
 Re-runs are cache-hit-dominated: the FotMob client serves 304 responses from
@@ -28,6 +31,7 @@ from penalty_pred.rsssf import load_rsssf_html, parse_rsssf_html
 from penalty_pred.shootouts import (
     fetch_all_shootout_kicks_with_skips,
     fetch_all_shootout_match_refs,
+    write_skipped_refs_diagnostics,
 )
 from penalty_pred.tournaments import LEAGUE_SEASONS_PREDICT_WINDOW
 from penalty_pred.validate import validate_shootout_count
@@ -58,6 +62,15 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--diagnostics",
+        type=Path,
+        default=art.diagnostics,
+        help=(
+            "Path to write the per-match diagnostics JSONL "
+            f"(default: {art.diagnostics})."
+        ),
+    )
+    parser.add_argument(
         "--cache-dir",
         type=Path,
         default=art.cache_dir,
@@ -84,18 +97,23 @@ def main() -> int:
     print(f"Discovered {len(refs)} shootout matches across all in-scope tournaments")
 
     # 2. Fetch each match and extract its kicks. The orchestrator returns
-    # per-match results so we can surface skipped (stale-URL) and
-    # processed-but-no-kicks matches in the discrepancies file.
+    # per-match results so we can surface skipped (stale-URL),
+    # processed-but-no-kicks, and extractor-failure matches in the
+    # diagnostics and discrepancies files.
     results = fetch_all_shootout_kicks_with_skips(client, refs)
     all_kicks = [k for r in results for k in r.kicks]
     skipped = [r.ref for r in results if r.skipped]
     no_kicks = [r.ref for r in results if r.no_kicks]
+    failed = [r.ref for r in results if r.failure_mode]
     n_kicks = Artifacts().write_shootout_kicks(all_kicks, path=args.output)
+    n_diag = write_skipped_refs_diagnostics(results, path=args.diagnostics)
     print(
         f"Wrote {n_kicks} shootout kicks to {args.output} "
         f"({len(skipped)} skipped due to stale (seo, h2h) hashes, "
-        f"{len(no_kicks)} processed with no shootout kicks in the shotmap)"
+        f"{len(no_kicks)} processed with no shootout kicks in the shotmap, "
+        f"{len(failed)} failed during extraction)"
     )
+    print(f"Wrote {n_diag} per-match diagnostics rows to {args.diagnostics}")
 
     # 3. Run the RSSSF completeness check.
     if args.skip_rsssf:
@@ -110,13 +128,15 @@ def main() -> int:
         discrepancies_path=args.discrepancies,
         skipped_refs=skipped,
         no_kicks_refs=no_kicks,
+        failed_refs=failed,
     )
-    explained = len(skipped) + len(no_kicks)
+    explained = len(skipped) + len(no_kicks) + len(failed)
     unexplained = -report.delta - explained
     if unexplained == 0:
         status = (
             f"OK (divergence fully explained by {len(skipped)} skipped + "
-            f"{len(no_kicks)} no-kicks matches; see {args.discrepancies})"
+            f"{len(no_kicks)} no-kicks + {len(failed)} failed matches; "
+            f"see {args.discrepancies} and {args.diagnostics})"
         )
     else:
         status = f"DIVERGED (unexplained delta = {unexplained})"

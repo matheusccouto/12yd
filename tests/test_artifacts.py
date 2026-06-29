@@ -57,6 +57,7 @@ def test_default_paths_point_at_canonical_filenames() -> None:
     assert art.baseline_model == Path("output/baseline.pkl")
     assert art.metrics == Path("output/metrics.json")
     assert art.discrepancies == Path("output/discrepancies.json")
+    assert art.diagnostics == Path("output/skipped_refs_diagnostics.jsonl")
 
 
 def test_custom_root_redirects_every_artifact() -> None:
@@ -67,6 +68,7 @@ def test_custom_root_redirects_every_artifact() -> None:
     assert art.shootout_kicks == Path("/tmp/foo/shootout_kicks.jsonl")
     assert art.predictions == Path("/tmp/foo/predictions.jsonl")
     assert art.metrics == Path("/tmp/foo/metrics.json")
+    assert art.diagnostics == Path("/tmp/foo/skipped_refs_diagnostics.jsonl")
     # The cache_dir is independent of `root`.
     assert art.cache_dir == Path("data/fotmob_cache")
 

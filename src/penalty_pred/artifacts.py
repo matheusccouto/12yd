@@ -28,6 +28,9 @@ The on-disk layout (relative to `root`):
 - `baseline.pkl` — the baseline logreg model
 - `metrics.json` — the held-out metrics report
 - `discrepancies.json` — the RSSSF vs. scraper divergence report
+- `skipped_refs_diagnostics.jsonl` — one record per non-empty
+  skip / no-kicks / failure result, with the `failure_mode` discriminator
+  (`stale_hash` | `empty_shotmap` | `ExceptionClass: message`).
 
 The cache directory (separate from `root`):
 
@@ -185,6 +188,10 @@ class Artifacts:
     @property
     def discrepancies(self) -> Path:
         return self.root / "discrepancies.json"
+
+    @property
+    def diagnostics(self) -> Path:
+        return self.root / "skipped_refs_diagnostics.jsonl"
 
     # -------------------------------------------------------------- shootouts
 

@@ -14,9 +14,11 @@ and reuses `extract_shootout_kicks` for each match.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from .client import FotMobClient
@@ -250,19 +252,25 @@ class FetchResult:
     but `extract_shootout_kicks` returned no kicks (e.g. the shotmap is
     empty even though the match is listed as a shootout — a known FotMob
     data quality issue for some AFCON 2021 and Asian Cup 2023 matches).
+    `failure_mode` is a non-empty string when the extractor raised an
+    exception (e.g. shotmap/events count mismatch, missing keys); the
+    string is `f"{ExceptionClass}: {message}"`. A failed match is
+    neither `skipped` (the matchId is correct) nor `no_kicks` (we never
+    finished extracting); the `kicks` list is empty.
     """
 
     ref: MatchRef
     kicks: list[ShootoutKick]
     skipped: bool
     no_kicks: bool = False
+    failure_mode: str = ""
 
 
 def fetch_all_shootout_kicks_with_skips(
     client: FotMobClient,
     match_refs: Iterable[MatchRef],
 ) -> list[FetchResult]:
-    """Yield every ShootoutKick per match, surfacing skipped and no-kicks matches.
+    """Yield every ShootoutKick per match, surfacing skipped, no-kicks, and failed matches.
 
     Each ref is fetched via `client.get` and parsed with
     `extract_shootout_kicks`. Use this when the caller needs to surface
@@ -270,6 +278,13 @@ def fetch_all_shootout_kicks_with_skips(
     JSONL's RSSSF count assertion will fail without this information.
     Iterating one match at a time means a single bad ref does not
     abort the rest of the run.
+
+    `extract_shootout_kicks` can raise `ValueError` (e.g. when the
+    shotmap and `penaltyShootoutEvents` counts disagree, or when a
+    required JSON key is missing). Such exceptions are caught and
+    reported as a `FetchResult` with `failure_mode` set to a short
+    `f"{ExceptionClass}: {message}"` string and empty `kicks`. The
+    caller is expected to surface these in the diagnostics JSONL.
     """
     results: list[FetchResult] = []
     for ref in match_refs:
@@ -278,9 +293,69 @@ def fetch_all_shootout_kicks_with_skips(
         if page_match_id and page_match_id != ref.match_id:
             results.append(FetchResult(ref=ref, kicks=[], skipped=True))
             continue
-        kicks = extract_shootout_kicks(data)
+        try:
+            kicks = extract_shootout_kicks(data)
+        except Exception as exc:  # noqa: BLE001 - we want the message, not a filter
+            results.append(
+                FetchResult(
+                    ref=ref,
+                    kicks=[],
+                    skipped=False,
+                    no_kicks=False,
+                    failure_mode=f"{type(exc).__name__}: {exc}",
+                )
+            )
+            continue
         results.append(FetchResult(ref=ref, kicks=kicks, skipped=False, no_kicks=not kicks))
     return results
+
+
+def write_skipped_refs_diagnostics(
+    results: Iterable[FetchResult],
+    path: Path,
+) -> int:
+    """Write one JSONL row per non-empty skip / no-kicks / failure result.
+
+    The output is a JSONL file with one record per match that did not
+    contribute kicks, used for diagnosing the RSSSF divergence. Each
+    row is a dict with the match identity (`match_id`, `home`, `away`,
+    `round`, `match_date`) and a `failure_mode` field. The field
+    discriminates the three states:
+
+    - `stale_hash` — `(seo, h2h)` resolved to a different matchId
+      (`skipped=True`).
+    - `empty_shotmap` — matchId was correct but the shotmap had no
+      `period == "PenaltyShootout"` entries (`no_kicks=True`).
+    - `f"{ExceptionClass}: {message}"` — the extractor raised.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    count = 0
+    with path.open("w", encoding="utf-8") as f:
+        for r in results:
+            if r.skipped:
+                failure_mode = "stale_hash"
+            elif r.failure_mode:
+                failure_mode = r.failure_mode
+            elif r.no_kicks:
+                failure_mode = "empty_shotmap"
+            else:
+                continue
+            f.write(
+                json.dumps(
+                    {
+                        "match_id": r.ref.match_id,
+                        "home": r.ref.home_team_name,
+                        "away": r.ref.away_team_name,
+                        "round": r.ref.round_name,
+                        "match_date": r.ref.match_date,
+                        "failure_mode": failure_mode,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+            f.write("\n")
+            count += 1
+    return count
 
 
 def predict_window_bounds() -> tuple[datetime, datetime]:

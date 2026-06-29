@@ -33,8 +33,14 @@ class ShootoutCountReport:
     list of (tournament, year) pairs observed in the JSONL, used for
     debugging. `skipped_refs` is the list of match refs whose (seo, h2h)
     hash was stale (FotMob reuses hashes and pointed us at a different
-    match). When the slice reports skipped refs, the actual count is
-    bounded by `expected - len(skipped_refs)`.
+    match). `no_kicks_refs` are match refs where the matchId was correct
+    but `extract_shootout_kicks` returned no kicks. `failed_refs` are
+    match refs where the extractor raised (the orchestrator caught the
+    exception and reported `failure_mode` on the `FetchResult`; the
+    validator only needs the refs, the `failure_mode` is in
+    `skipped_refs_diagnostics.jsonl`). When the slice reports any of
+    these, the actual count is bounded by `expected - len(skipped_refs)
+    - len(no_kicks_refs) - len(failed_refs)`.
     """
 
     actual: int
@@ -42,6 +48,8 @@ class ShootoutCountReport:
     match: bool
     actual_pairs: list[tuple[str, int]]
     skipped_refs: list[MatchRef] = field(default_factory=list)
+    no_kicks_refs: list[MatchRef] = field(default_factory=list)
+    failed_refs: list[MatchRef] = field(default_factory=list)
 
     @property
     def delta(self) -> int:
@@ -79,6 +87,7 @@ def validate_shootout_count(
     discrepancies_path: Path | None = None,
     skipped_refs: Iterable[MatchRef] = (),
     no_kicks_refs: Iterable[MatchRef] = (),
+    failed_refs: Iterable[MatchRef] = (),
     artifacts: Artifacts | None = None,
 ) -> ShootoutCountReport:
     """Compare the count of shootout matches in the JSONL to the RSSSF count.
@@ -92,7 +101,10 @@ def validate_shootout_count(
     (seo, h2h) hashes). `no_kicks_refs` are match refs where the matchId
     was correct but `extract_shootout_kicks` returned no kicks (FotMob has
     `penaltyShootoutEvents` but the shotmap is empty for these matches).
-    Both lists are included in the discrepancies file for debugging.
+    `failed_refs` are match refs where `extract_shootout_kicks` raised an
+    exception; the failure mode is recorded in
+    `skipped_refs_diagnostics.jsonl` by the slice script. All three lists
+    are included in the discrepancies file for debugging.
 
     The JSONL is read through the data layer's reader (`Artifacts.read_shootout_kicks`)
     so the validator stops re-parsing the file format with its own
@@ -107,12 +119,15 @@ def validate_shootout_count(
     actual_pairs = _tournament_year_pairs(shootout_kicks)
     skipped_list = list(skipped_refs)
     no_kicks_list = list(no_kicks_refs)
+    failed_list = list(failed_refs)
     report = ShootoutCountReport(
         actual=actual,
         expected=expected,
         match=actual == expected,
         actual_pairs=actual_pairs,
         skipped_refs=skipped_list,
+        no_kicks_refs=no_kicks_list,
+        failed_refs=failed_list,
     )
     if discrepancies_path is not None and not report.match:
         discrepancies_path.parent.mkdir(parents=True, exist_ok=True)
@@ -125,6 +140,7 @@ def validate_shootout_count(
                     "actual_pairs": [{"tournament": t, "year": y} for t, y in report.actual_pairs],
                     "skipped_refs": [_ref_payload(r) for r in skipped_list],
                     "no_kicks_refs": [_ref_payload(r) for r in no_kicks_list],
+                    "failed_refs": [_ref_payload(r) for r in failed_list],
                 },
                 f,
                 indent=2,

@@ -293,3 +293,182 @@ def test_marks_match_as_no_kicks_when_shotmap_empty(
     assert results[0].skipped is False
     assert results[0].no_kicks is True
     assert results[0].kicks == []
+
+
+# --- exception handling in the orchestrator ---------------------------------
+
+
+def test_extractor_exception_recorded_as_failure_mode(
+    tmp_path: Path, sample_2022_final: dict[str, object], monkeypatch
+) -> None:
+    """When `extract_shootout_kicks` raises (e.g. the shotmap and
+    `penaltyShootoutEvents` counts disagree), the orchestrator catches
+    the exception and reports a `FetchResult` with `failure_mode` set
+    and `kicks` empty. The orchestrator does not crash, so a single
+    bad match does not abort the rest of the run.
+    """
+    import copy
+
+    from penalty_pred.client import FotMobClient
+    from penalty_pred.match_ref import MatchRef
+    from penalty_pred.shootouts import fetch_all_shootout_kicks_with_skips
+
+    # Drop one event from the match — that makes the shotmap/events
+    # counts disagree and `extract_shootout_kicks` raises ValueError.
+    data = copy.deepcopy(sample_2022_final)
+    events = data["pageProps"]["content"]["matchFacts"]["events"]["penaltyShootoutEvents"]
+    data["pageProps"]["content"]["matchFacts"]["events"]["penaltyShootoutEvents"] = events[:-1]
+
+    real_ref = MatchRef(
+        match_id=3370572,
+        seo="argentina-vs-france",
+        h2h="1hox8a",
+        round_name="Final",
+        home_team_name="Argentina",
+        away_team_name="France",
+        match_date="2022-12-18T15:00:00Z",
+        score_str="3 - 3",
+    )
+
+    from penalty_pred import client as client_module
+
+    def fake_get(self, path: str, params: dict | None = None) -> object:
+        return data
+
+    monkeypatch.setattr(client_module.FotMobClient, "get", fake_get)
+    client = FotMobClient(cache_dir=tmp_path)
+    results = fetch_all_shootout_kicks_with_skips(client, [real_ref])
+    assert len(results) == 1
+    r = results[0]
+    assert r.skipped is False
+    assert r.no_kicks is False
+    assert r.failure_mode != ""
+    # The failure mode identifies the exception class.
+    assert "ValueError" in r.failure_mode
+    assert r.kicks == []
+
+
+def test_orchestrator_continues_after_failed_match(
+    tmp_path: Path, sample_2022_final: dict[str, object], monkeypatch
+) -> None:
+    """A failed match does not abort subsequent matches in the run."""
+    import copy
+
+    from penalty_pred.client import FotMobClient
+    from penalty_pred.match_ref import MatchRef
+    from penalty_pred.shootouts import fetch_all_shootout_kicks_with_skips
+
+    good_ref = MatchRef(
+        match_id=3370572,
+        seo="argentina-vs-france",
+        h2h="1hox8a",
+        round_name="Final",
+        home_team_name="Argentina",
+        away_team_name="France",
+        match_date="2022-12-18T15:00:00Z",
+        score_str="3 - 3",
+    )
+    bad_ref = MatchRef(
+        match_id=3370573,
+        seo="croatia-vs-morocco",
+        h2h="2abcde",
+        round_name="3/4",
+        home_team_name="Croatia",
+        away_team_name="Morocco",
+        match_date="2022-12-17T15:00:00Z",
+        score_str="2 - 2",
+    )
+
+    # Good data for the good ref, broken data for the bad ref.
+    good_data = copy.deepcopy(sample_2022_final)
+    bad_data = copy.deepcopy(sample_2022_final)
+    bad_data["pageProps"]["general"]["matchId"] = "3370573"
+    events = bad_data["pageProps"]["content"]["matchFacts"]["events"]["penaltyShootoutEvents"]
+    bad_data["pageProps"]["content"]["matchFacts"]["events"]["penaltyShootoutEvents"] = events[:-1]
+
+    from penalty_pred import client as client_module
+
+    def fake_get(self, path: str, params: dict | None = None) -> object:
+        if "1hox8a" in path:
+            return good_data
+        return bad_data
+
+    monkeypatch.setattr(client_module.FotMobClient, "get", fake_get)
+    client = FotMobClient(cache_dir=tmp_path)
+    results = fetch_all_shootout_kicks_with_skips(client, [bad_ref, good_ref])
+    assert len(results) == 2
+    # The bad ref was reported as failed; the good ref was processed.
+    assert results[0].failure_mode != ""
+    assert results[0].kicks == []
+    assert results[1].failure_mode == ""
+    assert len(results[1].kicks) == 8
+
+
+# --- write_skipped_refs_diagnostics ---------------------------------------
+
+
+def test_write_diagnostics_writes_one_row_per_skip(tmp_path: Path) -> None:
+    """`write_skipped_refs_diagnostics` writes a JSONL row for every
+    `skipped` / `no_kicks` / failed result, with the `failure_mode`
+    discriminator. Successful results are not written.
+    """
+    from penalty_pred.match_ref import MatchRef
+    from penalty_pred.shootouts import FetchResult, write_skipped_refs_diagnostics
+
+    skipped_ref = MatchRef(
+        match_id=1, seo="a", h2h="aa", round_name="QF", match_date="2022-07-01T15:00:00Z"
+    )
+    no_kicks_ref = MatchRef(
+        match_id=2, seo="b", h2h="bb", round_name="SF", match_date="2022-07-02T15:00:00Z"
+    )
+    failed_ref = MatchRef(
+        match_id=3,
+        seo="c",
+        h2h="cc",
+        round_name="F",
+        match_date="2022-07-03T15:00:00Z",
+        home_team_name="C",
+        away_team_name="D",
+    )
+    ok_ref = MatchRef(
+        match_id=4, seo="d", h2h="dd", round_name="2R", match_date="2022-07-04T15:00:00Z"
+    )
+
+    results = [
+        FetchResult(ref=skipped_ref, kicks=[], skipped=True),
+        FetchResult(ref=no_kicks_ref, kicks=[], skipped=False, no_kicks=True),
+        FetchResult(
+            ref=failed_ref, kicks=[], skipped=False, no_kicks=False, failure_mode="ValueError: bad"
+        ),
+        # Successful: 8 kicks (placeholder list, the helper does not inspect them).
+        FetchResult(ref=ok_ref, kicks=[{"match_id": 4}], skipped=False, no_kicks=False),
+    ]
+    path = tmp_path / "diag.jsonl"
+    n = write_skipped_refs_diagnostics(results, path=path)
+    assert n == 3
+    rows = [json.loads(line) for line in path.read_text().splitlines() if line]
+    assert [r["match_id"] for r in rows] == [1, 2, 3]
+    assert rows[0]["failure_mode"] == "stale_hash"
+    assert rows[1]["failure_mode"] == "empty_shotmap"
+    assert rows[2]["failure_mode"] == "ValueError: bad"
+    # Match identity fields are surfaced for debugging.
+    assert rows[2]["home"] == "C"
+    assert rows[2]["away"] == "D"
+    assert rows[2]["round"] == "F"
+    assert rows[2]["match_date"] == "2022-07-03T15:00:00Z"
+
+
+def test_write_diagnostics_creates_parent_dir(tmp_path: Path) -> None:
+    """`write_skipped_refs_diagnostics` creates the parent directory if
+    it does not exist (consistent with the other `Artifacts.write_*`
+    methods)."""
+    from penalty_pred.match_ref import MatchRef
+    from penalty_pred.shootouts import FetchResult, write_skipped_refs_diagnostics
+
+    skipped_ref = MatchRef(match_id=1, seo="a", h2h="aa")
+    path = tmp_path / "nested" / "diag.jsonl"
+    n = write_skipped_refs_diagnostics(
+        [FetchResult(ref=skipped_ref, kicks=[], skipped=True)], path=path
+    )
+    assert n == 1
+    assert path.exists()
