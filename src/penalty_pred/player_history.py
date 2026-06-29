@@ -70,17 +70,23 @@ class PlayerPenalty:
 
 @dataclass(frozen=True)
 class PlayerMetadata:
-    """A subset of the player page that downstream features (C1, C2) need.
+    """A subset of the player page that downstream features (C1, C2, A3) need.
 
     `position_key` is the FotMob position key (e.g. "striker", "centreback")
     from `positionDescription.primaryPosition.key`. `birth_date` is the
     ISO 8601 date (UTC) the player was born, parsed from `birthDate.utcTime`.
+    `preferred_foot` is the declared foot from
+    `pageProps.data.playerInformation[]` (`translationKey="preferred_foot"`,
+    value.key in {"left", "right", "both"}, or "" if missing). Replaces the
+    inferred-from-history A3 source (v3 dropped that path; the declared
+    foot is the cleaner signal).
     """
 
     player_id: int
     player_name: str
     position_key: str  # e.g. "striker"
     birth_date: str  # ISO 8601 date (UTC)
+    preferred_foot: str = ""  # "left" | "right" | "both" | ""
 
 
 # Player page helpers
@@ -106,28 +112,54 @@ def fetch_player_data(client: FotMobClient, player_id: int, slug: str = "") -> M
 
 
 def extract_player_metadata(player_payload: Mapping[str, Any]) -> PlayerMetadata:
-    """Extract the player's name, position, and birth date from the page payload.
+    """Extract the player's name, position, birth date, and preferred foot from the page payload.
 
     Accepts the full `__next/data` payload (the same shape `fetch_player_data`
-    returns). The fields live at `pageProps.data.{id,name,birthDate,positionDescription}`.
+    returns). The fields live at `pageProps.data.{id,name,birthDate,positionDescription,playerInformation}`.
 
     The position comes from `positionDescription.primaryPosition.key`
     (PRD: feature C1). The birth date comes from `birthDate.utcTime`
-    (PRD: feature C2). The PRD originally cited `pageProps.data.playerInformation`
-    for these, but in the live payload they are top-level on `pageProps.data`.
-    We fall back to "" / "Unknown" if either is missing.
+    (PRD: feature C2). The preferred foot (v3: model feature A3)
+    comes from `playerInformation[]` with `translationKey="preferred_foot"`;
+    we read `value.key` ("left" / "right" / "both") and fall back to "" if
+    the field is missing or the key is unknown.
     """
     player_data = (player_payload.get("pageProps") or {}).get("data") or {}
     player_id = coerce_int(player_data.get("id"))
     player_name = str(player_data.get("name", ""))
     position_key = _primary_position_key(player_data)
     birth_date = _parse_birth_date(player_data.get("birthDate"))
+    preferred_foot = _preferred_foot(player_data.get("playerInformation") or [])
     return PlayerMetadata(
         player_id=player_id,
         player_name=player_name,
         position_key=position_key,
         birth_date=birth_date,
+        preferred_foot=preferred_foot,
     )
+
+
+def _preferred_foot(player_information: Iterable[Mapping[str, Any]]) -> str:
+    """Extract the declared foot from `pageProps.data.playerInformation[]`.
+
+    Walks the list looking for the entry whose `translationKey` is
+    `"preferred_foot"`. Returns `value.key` (one of "left", "right",
+    "both") or "" when the field is missing or unrecognised. The
+    caller is expected to have already pulled `pageProps.data`; we
+    accept the inner list to keep the helper testable.
+    """
+    known = {"left", "right", "both"}
+    for item in player_information:
+        if not isinstance(item, Mapping):
+            continue
+        if item.get("translationKey") != "preferred_foot":
+            continue
+        value = item.get("value") or {}
+        key = value.get("key")
+        if isinstance(key, str) and key in known:
+            return key
+        return ""
+    return ""
 
 
 def _primary_position_key(player_data: Mapping[str, Any]) -> str:

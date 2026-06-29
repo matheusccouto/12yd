@@ -1,10 +1,14 @@
-"""Tests for the per-kicker penalty history fetcher (slice #4, Issue #20).
+"""Tests for the per-kicker penalty history fetcher (slice #4, Issue #20; refined #36).
 
 The tests cover three layers:
 
 1. **Pure helpers**: `season_name_to_year`, `compute_lookback_window`,
    `extract_player_metadata`, `iter_career_season_entries`,
    `iter_team_season_lookups`, `filter_fixtures_by_team`. No network.
+   v3 (Issue #36) added `_preferred_foot` (reads from
+   `pageProps.data.playerInformation[]`) and the corresponding
+   `PlayerMetadata.preferred_foot` field; the helper tests pin the
+   four shapes the function must handle.
 
 2. **Per-match extraction**: `extract_player_penalties_from_match` on
    the 2022 WC Final (cached at `docs/samples/match_3370572.json.gz`).
@@ -190,13 +194,92 @@ def test_compute_lookback_window_zero_lookback() -> None:
 
 
 def test_extract_player_metadata_messi(sample_messi_player: Mapping[str, object]) -> None:
-    """The Messi fixture has player_id=30981, position='striker', birth 1987-06-24."""
+    """The Messi fixture has player_id=30981, position='striker', birth 1987-06-24,
+    preferred_foot='left' (v3: read from playerInformation[])."""
     md = extract_player_metadata(sample_messi_player)
     assert isinstance(md, PlayerMetadata)
     assert md.player_id == 30981
     assert md.player_name == "Lionel Messi"
     assert md.position_key == "striker"
     assert md.birth_date == "1987-06-24"
+    assert md.preferred_foot == "left"
+
+
+def test_extract_player_metadata_reads_preferred_foot() -> None:
+    """v3 (Issue #36): the A3 feature is the declared preferred foot,
+    read from `pageProps.data.playerInformation[]` (the cached
+    player-page JSON the scraper already fetches).
+
+    Tests the four shapes we need to handle:
+    - `value.key` in {"left", "right", "both"} → returned
+    - `value.key` unknown → "" (defensive)
+    - entry missing entirely → "" (defensive)
+    - other entries (height, shirt, etc.) ignored
+    """
+    from penalty_pred.player_history import _preferred_foot
+
+    # Standard "left" via the cache's value.key shape.
+    assert (
+        _preferred_foot(
+            [{"translationKey": "preferred_foot", "value": {"key": "left", "fallback": "Left"}}]
+        )
+        == "left"
+    )
+    # "right" and "both" round-trip.
+    assert (
+        _preferred_foot(
+            [{"translationKey": "preferred_foot", "value": {"key": "right", "fallback": "Right"}}]
+        )
+        == "right"
+    )
+    assert (
+        _preferred_foot(
+            [{"translationKey": "preferred_foot", "value": {"key": "both", "fallback": "Both"}}]
+        )
+        == "both"
+    )
+    # Unknown key → "" (defensive; the model treats it as missing).
+    assert (
+        _preferred_foot(
+            [{"translationKey": "preferred_foot", "value": {"key": "switch", "fallback": "?"}}]
+        )
+        == ""
+    )
+    # No preferred_foot entry → "".
+    assert (
+        _preferred_foot(
+            [{"translationKey": "height_sentencecase", "value": {"numberValue": 180}}]
+        )
+        == ""
+    )
+    # Empty list → "".
+    assert _preferred_foot([]) == ""
+
+
+def test_extract_player_metadata_handles_missing_preferred_foot() -> None:
+    """A player page with no `playerInformation[]` (or with the
+    `preferred_foot` entry missing) yields `preferred_foot=""` (not
+    a crash). The other C-group fields (position, birth date) are
+    unaffected."""
+    md = extract_player_metadata(
+        {
+            "pageProps": {
+                "data": {
+                    "id": 42,
+                    "name": "Test",
+                    "positionDescription": {"primaryPosition": {"key": "midfielder"}},
+                    "birthDate": {"utcTime": "1990-01-01T00:00:00.000Z"},
+                    "playerInformation": [
+                        {"translationKey": "height_sentencecase", "value": {"numberValue": 180}},
+                    ],
+                }
+            }
+        }
+    )
+    assert md.player_id == 42
+    assert md.position_key == "midfielder"
+    assert md.birth_date == "1990-01-01"
+    assert md.preferred_foot == ""
 
 
 def test_extract_player_metadata_missing_position() -> None:

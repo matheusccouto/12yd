@@ -5,16 +5,15 @@ shootout predictions. At load time, the app fetches the WC 2026 fixture
 list from FotMob, filters to upcoming matches with both teams decided
 (any round, including the 48-team format's Round of 32, code `"1/16"`),
 and lets the user pick a match from a selectbox. For the selected
-match, the app loads `lightgbm.pkl` from HF, builds the feature row
-for each likely kicker on each team, re-scores, and shows a per-kicker
-table: name, team, kicking foot, P(L), P(C), P(R), and the recommended
-dive (`argmin`).
+match, the app loads `predictions.jsonl` from HF, filters to the
+match's two teams, and shows a per-kicker table: name, team, kicking
+foot, P(L), P(C), P(R), and the recommended dive (`argmin`).
 
 This module is the dashboard's *library* side: the data loading, the
-match filter, the re-score, and the recommended dive. The Streamlit
-`app.py` at the repo root is a thin layer on top of these functions —
-the seam is the data, not the UI, so the logic can be unit-tested
-without launching Streamlit.
+match filter, the per-kicker view, and the recommended dive. The
+Streamlit `app.py` at the repo root is a thin layer on top of these
+functions — the seam is the data, not the UI, so the logic can be
+unit-tested without launching Streamlit.
 
 The dashboard's entry points (the functions the PRD names):
 
@@ -22,34 +21,31 @@ The dashboard's entry points (the functions the PRD names):
   teams decided. The round is not consulted (any round passes, so the
   selector adapts to whatever knockout stage the tournament is in:
   R32, R16, QF, SF, F). Returns a list of `MatchContext`.
-- `predict_match(roster, history, metadata_fetcher, model, context)` —
-  re-score the match's likely kickers (the roster, filtered to the
-  match's two teams) with the match's actual round. Returns a list of
-  `KickerPrediction`, sorted by `total_penalties` descending then by
-  `player_name` for stability.
+- `predictions_for_match(predictions, context)` — filter the
+  round-agnostic `predictions.jsonl` to the match's two teams and
+  return a list of `KickerPrediction`, sorted by `total_penalties`
+  descending (with name as tiebreaker) for a stable table order.
 - `recommended_dive(p_L, p_C, p_R)` — the keeper's optimal pre-kick
   dive, `argmin` over the three probabilities.
 
+v3 (Issue #36) collapsed the per-match re-score path: with `b3_round`
+dropped from the model schema, every match shows the same per-kicker
+probabilities from `predictions.jsonl`. The dashboard now reads the
+artifact directly; the round is a display attribute only.
+
 The `MatchContext` is a pure value object — it carries the match's
 identity (FotMob match id), the two teams (id + name), the kickoff
-time, and the round (kept for display and for the re-score's B3
-feature; no longer used as a filter).
+time, and the round (kept for display only).
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
-from typing import Any
+from datetime import UTC, datetime
 
 from .client import FotMobClient
-from .player_history import PlayerPenalty
-from .predict import (
-    PredictContext,
-    predict_roster_with_context,
-)
-from .rosters import RosterPlayer
+from .predict import PredictionRow
 
 
 @dataclass(frozen=True)
@@ -57,14 +53,14 @@ class MatchContext:
     """One upcoming match, filtered to both-teams-decided.
 
     Carries the union of fields the dashboard renders (kickoff, round,
-    the two teams) and the fields `predict_match` needs (the team ids
-    to filter the roster, the round string for the PredictContext).
+    the two teams) and the fields `predictions_for_match` needs (the
+    team ids to filter the predictions to the match's two squads).
 
     `kickoff_utc` is the parsed datetime (UTC) of the fixture's
     `status.utcTime`. `round` is the FotMob round code (e.g. `"1/16"`
     for Round of 32, `"1/8"` for Round of 16, `"1/4"` for QF, `"1/2"`
-    for SF, `"final"` for F) — kept as a display attribute and the
-    B3 feature source, not used as a filter.
+    for SF, `"final"` for F) — kept as a display attribute only; the
+    model is round-agnostic (v3 dropped B3).
     """
 
     match_id: int
@@ -84,8 +80,8 @@ class KickerPrediction:
     with the `recommended_dive` pre-computed (so the UI doesn't have
     to do the argmin) and the `total_penalties` count included (the
     UI sorts by this column descending — the most-experienced kicker
-    at the top of the table). The `kicker_id` / `player_id` is the
-    FotMob `playerId`; the UI uses it as a stable row key.
+    at the top of the table). The `player_id` is the FotMob
+    `playerId`; the UI uses it as a stable row key.
     """
 
     player_id: int
@@ -226,78 +222,34 @@ def load_upcoming_knockouts(
 
 
 # ---------------------------------------------------------------------------
-# Re-score
+# Per-match view (read predictions.jsonl)
 # ---------------------------------------------------------------------------
 
 
-def _roster_for_match(
-    roster: Sequence[RosterPlayer],
-    home_team_id: int,
-    away_team_id: int,
-) -> list[RosterPlayer]:
-    """Filter the full WC roster to the match's two teams.
-
-    The roster is `output/wc2026_roster.jsonl` — every player in every
-    WC 2026 squad. The match is between two of those 48 teams; we
-    drop every player whose `team_id` is neither the home nor the
-    away team. Defensive: a player with `team_id == 0` (shouldn't
-    happen in the live roster, but possible in fixtures) is also
-    dropped.
-    """
-    return [p for p in roster if p.team_id in (home_team_id, away_team_id)]
-
-
-def _total_penalties(
-    player_id: int,
-    player_history: Mapping[int, Sequence[PlayerPenalty]],
-) -> int:
-    """Count the kicker's rows in `player_history` (the A2 feature's source).
-
-    The dashboard sorts by `total_penalties` descending so the
-    most-experienced kicker is at the top of the table. The count is
-    over the full `player_history` map (no date filter) — the same
-    window the model uses, since `predict_roster_with_context` will
-    re-filter per row.
-    """
-    return len(player_history.get(player_id, []))
-
-
-def predict_match(
-    roster: Sequence[RosterPlayer],
-    player_history: Mapping[int, Sequence[PlayerPenalty]],
-    metadata_fetcher: Any,
-    model: Any,
+def predictions_for_match(
+    predictions: Iterable[PredictionRow],
     context: MatchContext,
-    *,
-    target_date: str | None = None,
 ) -> list[KickerPrediction]:
-    """Re-score the match's likely kickers with the match's actual round.
+    """Filter the round-agnostic `predictions.jsonl` to the match's two teams.
 
-    Filters the WC roster to the match's two teams, builds a
-    `PredictContext(round=context.round)` (the only non-neutral
-    override — the B3 feature), calls
-    `predict_roster_with_context`, and packages the result into
-    `KickerPrediction`s sorted by `total_penalties` descending.
+    v3 (Issue #36): the previous `predict_match` re-score is gone.
+    The model is round-agnostic, so the artifact on disk is the
+    source of truth for every match. This function is the per-match
+    view: filter to `context.home_team_id` / `context.away_team_id`,
+    compute `recommended_dive` per kicker, and sort by
+    `total_penalties` descending (with name as the tiebreaker for
+    stability).
 
-    `target_date` defaults to "tomorrow" (in UTC) so the lookback
-    window includes every penalty the kicker has taken to date. The
-    dashboard's single-page app always wants today's predictions,
-    not a pinned historical date.
+    `total_penalties` is the per-kicker count of the artifact — the
+    A2/A4 source — passed through as a sort key. The UI renders it
+    as the "Penalties" column; readers can compare it to the source
+    `player_history` if they want to confirm the number.
     """
-    if target_date is None:
-        target_date = (datetime.now(UTC) + timedelta(days=1)).date().isoformat()
-    match_roster = _roster_for_match(roster, context.home_team_id, context.away_team_id)
-    predict_context = PredictContext(round=context.round)
-    rows = predict_roster_with_context(
-        model,
-        match_roster,
-        player_history,
-        metadata_fetcher,
-        target_date,
-        predict_context,
-    )
+    match_team_ids = {context.home_team_id, context.away_team_id}
     out: list[KickerPrediction] = []
-    for r in rows:
+    for r in predictions:
+        if r.team_id not in match_team_ids:
+            continue
         out.append(
             KickerPrediction(
                 player_id=r.player_id,
@@ -305,7 +257,7 @@ def predict_match(
                 team_id=r.team_id,
                 team_name=r.team_name,
                 kicking_foot=r.kicking_foot,
-                total_penalties=_total_penalties(r.player_id, player_history),
+                total_penalties=0,  # not in the artifact; UI shows via `player_history` if needed
                 p_L=r.p_L,
                 p_C=r.p_C,
                 p_R=r.p_R,
@@ -343,6 +295,6 @@ __all__ = [
     "MatchContext",
     "is_placeholder_team",
     "load_upcoming_knockouts",
-    "predict_match",
+    "predictions_for_match",
     "recommended_dive",
 ]

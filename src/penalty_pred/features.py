@@ -1,39 +1,44 @@
 """Feature builder for the penalty shootout model.
 
-PRD: For each Shootout Kick (target), build a 9-feature row from the
+PRD: For each Shootout Kick (target), build an 18-feature row from the
 kicker's penalty history (filtered to before the target kick date) and
-the player's metadata (position, birth date). The output is the
-`training_table.jsonl` artifact — one row per target kick — that the
-model slice (#23, #24) consumes.
+the player's metadata (position, birth date, preferred foot). The
+output is the `training_table.jsonl` artifact — one row per target
+kick — that the model slice (#23, #24) consumes.
 
-The 9 features (with their internal column count):
+The 18 features (with their internal column count):
 
 - **A1** — `P(L), P(C), P(R)` over the last 5, 10, and 20 kicks
   (continuous x bucketed; 9 columns: `p_L_5, p_C_5, p_R_5, ...,
   p_R_20`).
 - **A2** — last kick's side ("L" / "C" / "R"; "" when no history).
-- **A3** — kicking foot (mode of `shot_type` in history; "RightFoot"
-  on tie; "Unknown" when no history).
+- **A3** — preferred foot ("left" / "right" / "both"; "" when
+  metadata is missing). v3 replaced the previous mode-of-`shot_type`
+  inference with the declared foot from FotMob's `playerInformation`.
 - **A4** — total career penalty count (before the target kick date).
 - **B1** — kick number within the shootout (pass-through from
   `shootout_kicks.jsonl`).
 - **B2** — current shootout score (`pen_score_before[0]`,
   `pen_score_before[1]`) plus an `is_decisive` flag.
-- **B3** — match round (pass-through from `shootout_kicks.jsonl`).
 - **C1** — position (from the player page; "" when metadata is
   missing).
 - **C2** — age in years (target_match_date − dateOfBirth; `null` when
   birth date is missing).
 
+(v3 dropped the previous B3 (`b3_round`) feature — the round-specific
+categorical was only ever seen on four values in the training set and
+unseen at inference time on the 48-team WC's R32 round. The model is
+now round-agnostic and the dashboard re-score path is gone.)
+
 For kickers with no penalty history, A1 falls back to the uniform prior
-(1/3, 1/3, 1/3), A2 is "", A3 is "Unknown", and A4 is 0 — the same
-defaults the model will see at prediction time for the prediction
-kickers.
+(1/3, 1/3, 1/3), A2 is "", and A4 is 0 — the same defaults the model
+will see at prediction time for the prediction kickers. A3 falls
+through from metadata (empty string when metadata is missing).
 
 The orchestrator (`build_training_table`) consumes two artifacts:
 `shootout_kicks.jsonl` (the targets) and `player_history.jsonl` (the
 per-kicker history, keyed by `kicker_id`). It also fetches the
-kicker's player page once per unique kicker to recover C1/C2; the
+kicker's player page once per unique kicker to recover A3/C1/C2; the
 fetch is cache-hit-dominated because the player-history slice
 already populated the disk cache for every Initial Set kicker.
 
@@ -43,7 +48,7 @@ training table by `(match_date, match_id, kick_number)` so the
 output order is stable.
 
 Phase 0 (Issue #30): a `PredictionTarget` value object carries only
-the 9 model features (no identifiers, no label). `build_features` is
+the 18 model features (no identifiers, no label). `build_features` is
 a thin packaging function that takes a `PredictionTarget` plus the
 row's identifiers and label, and returns a `TrainingRow`. The
 computation (A-group from history, C-group from metadata, is_decisive
@@ -56,7 +61,6 @@ B-group values, no fake `ShootoutKick`).
 from __future__ import annotations
 
 import math
-from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -92,7 +96,7 @@ CLASSES: tuple[str, ...] = ("L", "C", "R")
 
 @dataclass(frozen=True)
 class PredictionTarget:
-    """The 9 model feature inputs (19 fields) for a single prediction target.
+    """The 18 model feature inputs for a single prediction target.
 
     Carries only what the model needs — no identifiers, no label, no
     `is_on_target`. The data layer's `ShootoutKick` is no longer
@@ -119,8 +123,8 @@ class PredictionTarget:
     p_R_20: float
     # A2: last kick's side
     last_side: str
-    # A3: kicking foot
-    kicking_foot: str
+    # A3: declared preferred foot (from playerInformation); "" when metadata is missing
+    preferred_foot: str
     # A4: total career penalty count (before the target kick date)
     career_penalty_count: int
     # B1: kick number within the shootout
@@ -129,8 +133,6 @@ class PredictionTarget:
     pen_score_home: int
     pen_score_away: int
     is_decisive: bool
-    # B3: match round
-    b3_round: str
     # C1: position
     position: str
     # C2: age in years
@@ -139,14 +141,15 @@ class PredictionTarget:
 
 @dataclass(frozen=True)
 class TrainingRow:
-    """One training row: a target Shootout Kick plus the 9 features for it.
+    """One training row: a target Shootout Kick plus the 18 features for it.
 
-    The unified row type (Issue #30): replaces both the old
-    `TrainingTableRow` (features.py, 30 fields, no `is_on_target`) and
-    the old `TrainingRow` (model.py, 13 fields + a `features` dict).
-    The 19 model features are individual fields (not a dict) so the
-    type checker can pin them, and the row carries its own identifiers
-    and label so the on-disk format is self-contained.
+    The unified row type (Issue #30, refined in #36): the 18 model
+    features are individual fields (not a dict) so the type checker
+    can pin them, and the row carries its own identifiers and label so
+    the on-disk format is self-contained. The previous B3 (`b3_round`)
+    feature was dropped in v3 (Issue #36) — the round-specific
+    categorical was only ever seen on four values in training and
+    unseen at inference time on the 48-team WC's R32 round.
 
     Identifier fields are pass-throughs from `shootout_kicks.jsonl` so
     the row is self-contained. `label` is the side the kicker actually
@@ -187,8 +190,8 @@ class TrainingRow:
     p_R_20: float
     # A2: last kick's side
     last_side: str
-    # A3: kicking foot
-    kicking_foot: str
+    # A3: declared preferred foot (from playerInformation); "" when metadata is missing
+    preferred_foot: str
     # A4: total career penalty count (before the target kick date)
     career_penalty_count: int
     # B1: kick number (duplicate of `kick_number` for column ordering)
@@ -197,8 +200,6 @@ class TrainingRow:
     pen_score_home: int
     pen_score_away: int
     is_decisive: bool
-    # B3: match round (duplicate of `round` for column ordering)
-    b3_round: str
     # C1: position
     position: str
     # C2: age in years
@@ -237,25 +238,6 @@ def side_distribution(sides: Sequence[str], n: int) -> tuple[float, float, float
     n_c = sum(1 for s in recent if s == "C")
     n_r = sum(1 for s in recent if s == "R")
     return (n_l / total, n_c / total, n_r / total)
-
-
-def mode_kicking_foot(shot_types: Sequence[str]) -> str:
-    """Return the mode of `shot_types`, with "RightFoot" as the tiebreaker.
-
-    Per PRD: ties are broken in favour of "RightFoot" because the
-    population is right-foot-dominant. Returns "Unknown" for empty
-    input. Non-{RightFoot, LeftFoot} values are ignored (e.g. a
-    "Header" shot from a deflection would not count).
-    """
-    relevant = [s for s in shot_types if s in ("RightFoot", "LeftFoot")]
-    if not relevant:
-        return "Unknown"
-    counts = Counter(relevant)
-    max_count = max(counts.values())
-    candidates = [v for v, c in counts.items() if c == max_count]
-    if "RightFoot" in candidates:
-        return "RightFoot"
-    return candidates[0]
 
 
 def is_decisive_kick(
@@ -358,23 +340,23 @@ class KickIndex:
 
 @dataclass(frozen=True)
 class BGroupContext:
-    """The B-group inputs (B1, B2, B3) for a single prediction target.
+    """The B-group inputs (B1, B2) for a single prediction target.
 
     Carries the shootout-state information that is known for a training
     target (from the `ShootoutKick`) and is neutral for a prediction
     target. Using a value object instead of a `ShootoutKick` keeps the
     data layer's shape from leaking across the feature-builder seam.
 
+    v3 dropped the B3 (`round`) field — the model is round-agnostic.
+
     For a prediction target: `kick_number=1`, `pen_score_before=(0, 0)`,
-    `is_home=True` (doesn't matter; both 0 kicks done → is_decisive=False),
-    `round=""` (LightGBM treats the empty string as missing).
+    `is_home=True` (doesn't matter; both 0 kicks done → is_decisive=False).
     """
 
     kick_number: int
     pen_score_home: int
     pen_score_away: int
     is_home: bool
-    round: str
 
     @classmethod
     def neutral(cls) -> BGroupContext:
@@ -384,7 +366,6 @@ class BGroupContext:
             pen_score_home=0,
             pen_score_away=0,
             is_home=True,
-            round="",
         )
 
 
@@ -451,15 +432,15 @@ def compute_features(
     b_group: BGroupContext,
     kicks_done: KickIndex,
 ) -> PredictionTarget:
-    """Compute the 19 model features for one prediction target.
+    """Compute the 18 model features for one prediction target.
 
     Pure function. `history` is the kicker's full scraped history;
     this function filters it to before `target_date` and computes the
-    A-group (side distribution, last_side, kicking_foot, career count).
-    `metadata` may be None if the player page could not be fetched
-    (then C1 is "" and C2 is NaN). `b_group` carries the B-group
-    inputs (kick_number, pen_score, is_home, round); `kicks_done` is
-    the pre-computed index for the `is_decisive` flag.
+    A-group (side distribution, last_side, career count). `metadata`
+    may be None if the player page could not be fetched (then A3 is "",
+    C1 is "" and C2 is NaN). `b_group` carries the B-group inputs
+    (kick_number, pen_score, is_home); `kicks_done` is the pre-computed
+    index for the `is_decisive` flag.
 
     The function is the shared core of the training slice (where
     `b_group` comes from a real `ShootoutKick`) and the prediction
@@ -468,12 +449,12 @@ def compute_features(
     """
     filtered = filter_history(history, target_date)
     sides = [p.side for p in filtered]
-    shot_types = [p.shot_type for p in filtered]
 
     p_L_5, p_C_5, p_R_5 = side_distribution(sides, 5)
     p_L_10, p_C_10, p_R_10 = side_distribution(sides, 10)
     p_L_20, p_C_20, p_R_20 = side_distribution(sides, 20)
 
+    preferred_foot = metadata.preferred_foot if metadata is not None else ""
     position = metadata.position_key if metadata is not None else ""
     birth_date = metadata.birth_date if metadata is not None else ""
     age = age_in_years(birth_date, target_date)
@@ -489,7 +470,7 @@ def compute_features(
         p_C_20=p_C_20,
         p_R_20=p_R_20,
         last_side=sides[-1] if sides else "",
-        kicking_foot=mode_kicking_foot(shot_types),
+        preferred_foot=preferred_foot,
         career_penalty_count=len(filtered),
         b1_kick_number=b_group.kick_number,
         pen_score_home=b_group.pen_score_home,
@@ -501,7 +482,6 @@ def compute_features(
             kicks_done.away_kicks_done,
             b_group.is_home,
         ),
-        b3_round=b_group.round,
         position=position,
         age=age,
     )
@@ -525,7 +505,7 @@ def build_features(
 ) -> TrainingRow:
     """Package a `PredictionTarget` into a `TrainingRow`.
 
-    Thin packaging function (Issue #30): takes the 19 model features
+    Thin packaging function (Issue #30): takes the 18 model features
     plus the row's identifiers and label, returns the unified row
     type. The actual feature computation lives in `compute_features`.
 
@@ -559,13 +539,12 @@ def build_features(
         p_C_20=features.p_C_20,
         p_R_20=features.p_R_20,
         last_side=features.last_side,
-        kicking_foot=features.kicking_foot,
+        preferred_foot=features.preferred_foot,
         career_penalty_count=features.career_penalty_count,
         b1_kick_number=features.b1_kick_number,
         pen_score_home=features.pen_score_home,
         pen_score_away=features.pen_score_away,
         is_decisive=features.is_decisive,
-        b3_round=features.b3_round,
         position=features.position,
         age=features.age,
     )
@@ -662,7 +641,6 @@ def build_training_table(
             pen_score_home=target.pen_score_before[0],
             pen_score_away=target.pen_score_before[1],
             is_home=target.is_home,
-            round=target.round,
         )
         features = compute_features(
             history,

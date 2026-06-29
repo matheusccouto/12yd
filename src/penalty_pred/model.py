@@ -6,7 +6,7 @@ Issue #23); the deployed model is LightGBM (slice #8, Issue #24). Both
 consume the same `output/training_table.jsonl` and the same feature
 schema defined here.
 
-Feature schema (15 numeric + 4 categorical; one-hot encoded at fit time
+Feature schema (15 numeric + 3 categorical; one-hot encoded at fit time
 for the baseline; native categorical for LightGBM):
 
 Numeric (A1, A4, B1, B2, C2):
@@ -19,11 +19,17 @@ Numeric (A1, A4, B1, B2, C2):
 - `is_decisive` — whether the kick's outcome ends the shootout (B2).
 - `age` — kicker's age in years at the target kick date (C2).
 
-Categorical (A2, A3, B3, C1):
+Categorical (A2, A3, C1):
 - `last_side` — "L" / "C" / "R" / "" (A2; "" = no history).
-- `kicking_foot` — "RightFoot" / "LeftFoot" / "Unknown" (A3).
-- `b3_round` — match round label, e.g. "1/8", "Final" (B3).
+- `preferred_foot` — "left" / "right" / "both" / "" (A3; declared foot
+  from FotMob `playerInformation[]`).
 - `position` — FotMob position key, e.g. "striker" (C1).
+
+v3 (Issue #36) dropped the B3 (`b3_round`) feature: the round-specific
+categorical was only ever seen on four values in the training set
+("1/8", "1/4", "1/2", "Final") and unseen at inference time on the
+48-team WC's R32 round (FotMob code "1/16"). The model is now
+round-agnostic and the dashboard re-score path is gone.
 
 The artifact format is a pickle dict with three keys:
 - `model` — the fitted classifier (sklearn Pipeline or LightGBM Booster).
@@ -124,9 +130,7 @@ CATEGORICAL_FEATURES: tuple[str, ...] = (
     # A2
     "last_side",
     # A3
-    "kicking_foot",
-    # B3
-    "b3_round",
+    "preferred_foot",
     # C1
     "position",
 )
@@ -270,13 +274,12 @@ def load_training_table(
                     p_C_20=float(row["p_C_20"]),
                     p_R_20=float(row["p_R_20"]),
                     last_side=str(row["last_side"]),
-                    kicking_foot=str(row["kicking_foot"]),
+                    preferred_foot=str(row["preferred_foot"]),
                     career_penalty_count=int(row["career_penalty_count"]),
                     b1_kick_number=int(row["b1_kick_number"]),
                     pen_score_home=int(row["pen_score_home"]),
                     pen_score_away=int(row["pen_score_away"]),
                     is_decisive=bool(row["is_decisive"]),
-                    b3_round=str(row["b3_round"]),
                     position=str(row["position"]),
                     age=math.nan if row.get("age") is None else float(row["age"]),
                 )

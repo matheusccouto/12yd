@@ -4,14 +4,17 @@ A single-page app on Streamlit Cloud that surfaces live shootout
 predictions. At load time, the app fetches the WC 2026 fixture list
 from FotMob, filters to upcoming matches with both teams decided
 (any round — R32, R16, QF, SF, F), and lets the user pick a match
-from a selectbox. For the selected match, the app loads the frozen
-LightGBM from Hugging Face, re-scores each likely kicker with the
-match's actual round, and shows a per-kicker table: name, team,
-kicking foot, P(L), P(C), P(R), and the recommended dive (`argmin`).
+from a selectbox. For the selected match, the app loads
+`predictions.jsonl` from Hugging Face, filters to the match's two
+teams, and shows a per-kicker table: name, team, kicking foot, P(L),
+P(C), P(R), and the recommended dive (`argmin`).
 
-The data + re-score logic lives in `penalty_pred.dashboard` — this
-file is a thin Streamlit layer over the library, so the same code
-can be unit-tested (the library) and exercised end-to-end (the app).
+The data + match-filter logic lives in `penalty_pred.dashboard` —
+this file is a thin Streamlit layer over the library, so the same
+code can be unit-tested (the library) and exercised end-to-end (the
+app). v3 (Issue #36) collapsed the per-match re-score path: the
+model is round-agnostic and `predictions.jsonl` is the source of
+truth for every match.
 
 Deployment: Streamlit Cloud via the GitHub repo. The default entry
 point at the repo root is what Streamlit Cloud's "deploy from repo"
@@ -20,7 +23,6 @@ wizard expects.
 
 from __future__ import annotations
 
-import pickle
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -34,10 +36,8 @@ from penalty_pred.dashboard import (
     KickerPrediction,
     MatchContext,
     load_upcoming_knockouts,
-    predict_match,
+    predictions_for_match,
 )
-from penalty_pred.features import fetcher_from_client
-from penalty_pred.rosters import RosterPlayer
 
 HF_REPO_ID: str = "couto/12yd"
 
@@ -47,17 +47,18 @@ HF_REPO_ID: str = "couto/12yd"
 # ---------------------------------------------------------------------------
 
 
-@st.cache_resource(show_spinner="Loading model from Hugging Face…")
-def load_model() -> dict:
-    """Download `model/lightgbm.pkl` from HF and unpickle it.
+@st.cache_data(show_spinner="Loading predictions from Hugging Face…")
+def load_predictions_from_hf() -> list:
+    """Download `data/predictions.jsonl` from HF and parse it.
 
-    `st.cache_resource` keeps the unpickled dict in process memory for
-    the lifetime of the Streamlit process — a re-load would be a
-    multi-MB download + pickle parse for no reason.
+    v3 (Issue #36): the dashboard reads the artifact directly instead
+    of re-scoring on the fly. The model is round-agnostic, so the
+    per-kicker probabilities on disk are the same for every match.
+    `st.cache_data` keeps the parsed list in memory for the lifetime
+    of the Streamlit process.
     """
-    path = hf_hub_download(HF_REPO_ID, "model/lightgbm.pkl")
-    with Path(path).open("rb") as f:
-        return pickle.load(f)
+    path = hf_hub_download(HF_REPO_ID, "data/predictions.jsonl")
+    return Artifacts().read_predictions(path=Path(path))
 
 
 @st.cache_resource
@@ -72,53 +73,21 @@ def build_fotmob_client() -> FotMobClient:
     return Artifacts().fotmob_client()
 
 
-@st.cache_data(show_spinner="Loading roster from Hugging Face…")
-def load_roster_from_hf() -> list[RosterPlayer]:
-    """Download `data/wc2026_roster.jsonl` from HF and parse it."""
-    path = hf_hub_download(HF_REPO_ID, "data/wc2026_roster.jsonl")
-    return Artifacts().read_roster(path=Path(path))
-
-
-@st.cache_data(show_spinner="Loading player history from Hugging Face…")
-def load_history_from_hf() -> dict[int, list]:
-    """Download `data/player_history.jsonl` from HF and parse it.
-
-    Returns a dict keyed by `kicker_id`; each value is the kicker's
-    unsorted list of `PlayerPenalty` rows (the dashboard's re-score
-    re-filters per row by `target_date`).
-    """
-    from penalty_pred.features import load_player_history
-
-    path = hf_hub_download(HF_REPO_ID, "data/player_history.jsonl")
-    return load_player_history(Path(path))
-
-
 # ---------------------------------------------------------------------------
-# Sidebar: model + data summary
+# Sidebar: data summary
 # ---------------------------------------------------------------------------
 
 
 def render_sidebar() -> None:
-    """Render the model + data summary in the sidebar."""
+    """Render the data summary in the sidebar."""
     st.sidebar.header("12yd — penalty shootout side prediction")
     st.sidebar.markdown(
         "Predicts P(L) / P(C) / P(R) for each kicker, so the goalkeeper "
         "can pick the lowest-probability side to dive."
     )
-    artifact = load_model()
-    st.sidebar.markdown(
-        f"**Model:** {artifact.get('model_kind', 'lightgbm').title()} "
-        f"({len(artifact.get('feature_columns', []))} features)"
-    )
-    st.sidebar.caption(f"Loaded from `{HF_REPO_ID}/model/`")
-
-    roster = load_roster_from_hf()
-    history = load_history_from_hf()
-    st.sidebar.markdown(f"**Roster:** {len(roster)} WC 2026 players")
-    st.sidebar.markdown(
-        f"**History:** {sum(len(v) for v in history.values())} penalty rows "
-        f"across {len(history)} kickers"
-    )
+    predictions = load_predictions_from_hf()
+    st.sidebar.markdown(f"**Predictions:** {len(predictions)} WC 2026 players")
+    st.sidebar.caption(f"Loaded from `{HF_REPO_ID}/data/predictions.jsonl`")
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +116,7 @@ def render_match_selector() -> MatchContext | None:
         index=0,
     )
     selected = matches[index]
-    st.caption(f"Re-scoring with the match's actual round: **{_round_label(selected.round)}**")
+    st.caption(f"Match round: **{_round_label(selected.round)}**")
     return selected
 
 
@@ -174,21 +143,9 @@ def _round_label(round_code: str) -> str:
 
 
 def render_predictions_table(context: MatchContext) -> None:
-    """Re-score the match and render the per-kicker table."""
-    artifact = load_model()
-    model = artifact["model"]
-    roster = load_roster_from_hf()
-    history = load_history_from_hf()
-    client = build_fotmob_client()
-    metadata_fetcher = fetcher_from_client(client)
-
-    kickers = predict_match(
-        roster=roster,
-        player_history=history,
-        metadata_fetcher=metadata_fetcher,
-        model=model,
-        context=context,
-    )
+    """Filter predictions.jsonl to the match's teams and render the per-kicker table."""
+    predictions = load_predictions_from_hf()
+    kickers = predictions_for_match(predictions, context)
     if not kickers:
         st.warning(
             "No roster players found for either team in this match. "
@@ -213,7 +170,6 @@ def render_predictions_table(context: MatchContext) -> None:
         },
     )
     st.caption(
-        "Sorted by total career penalties (most-experienced kicker first). "
         "The **Recommended Dive** is `argmin` over P(L), P(C), P(R) — the side "
         "the model says the kicker is least likely to use."
     )
@@ -226,7 +182,6 @@ def _kickers_to_dataframe(kickers: list[KickerPrediction]) -> pd.DataFrame:
             "Kicker": [k.player_name for k in kickers],
             "Team": [k.team_name for k in kickers],
             "Foot": [k.kicking_foot for k in kickers],
-            "Penalties": [k.total_penalties for k in kickers],
             "P(L)": [k.p_L for k in kickers],
             "P(C)": [k.p_C for k in kickers],
             "P(R)": [k.p_R for k in kickers],
@@ -261,7 +216,7 @@ def main() -> None:
 
     st.caption(
         f"Last loaded: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')} · "
-        f"Model: `{HF_REPO_ID}/model/lightgbm.pkl`"
+        f"Data: `{HF_REPO_ID}/data/predictions.jsonl`"
     )
 
 

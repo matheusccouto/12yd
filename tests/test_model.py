@@ -62,12 +62,22 @@ _make_row = make_training_row
 
 
 def test_feature_columns_matches_published_schema() -> None:
-    """The canonical feature column list is the 16 PRD features."""
-    assert len(FEATURE_COLUMNS) == 19
+    """The canonical feature column list is the 18 v3 features (was 19 in v2).
+
+    v3 (Issue #36) dropped the B3 (`b3_round`) feature, so the schema
+    goes from 19 columns (15 numeric + 4 categorical) to 18 (15
+    numeric + 3 categorical). The split is 15 + 3 = 18.
+    """
+    assert len(FEATURE_COLUMNS) == 18
     assert set(FEATURE_COLUMNS) == set(NUMERIC_FEATURES) | set(CATEGORICAL_FEATURES)
-    # 15 numeric + 4 categorical = 19.
+    # 15 numeric + 3 categorical = 18.
     assert len(NUMERIC_FEATURES) == 15
-    assert len(CATEGORICAL_FEATURES) == 4
+    assert len(CATEGORICAL_FEATURES) == 3
+    # v3 removed b3_round from the categorical group.
+    assert "b3_round" not in FEATURE_COLUMNS
+    # v3 swapped the A3 source: kicking_foot → preferred_foot.
+    assert "preferred_foot" in FEATURE_COLUMNS
+    assert "kicking_foot" not in FEATURE_COLUMNS
 
 
 def test_classes_order_is_lcr() -> None:
@@ -219,13 +229,12 @@ def test_load_training_table_reads_live(tmp_path: Path) -> None:
         "p_C_20": 0.3,
         "p_R_20": 0.2,
         "last_side": "L",
-        "kicking_foot": "RightFoot",
+        "preferred_foot": "right",
         "career_penalty_count": 5,
         "b1_kick_number": 1,
         "pen_score_home": 0,
         "pen_score_away": 0,
         "is_decisive": False,
-        "b3_round": "1/8",
         "position": "striker",
         "age": 25.0,
     }
@@ -268,13 +277,12 @@ def test_load_training_table_joins_is_on_target(tmp_path: Path) -> None:
         "p_C_20": 0.3,
         "p_R_20": 0.2,
         "last_side": "L",
-        "kicking_foot": "RightFoot",
+        "preferred_foot": "right",
         "career_penalty_count": 5,
         "b1_kick_number": 1,
         "pen_score_home": 0,
         "pen_score_away": 0,
         "is_decisive": False,
-        "b3_round": "1/8",
         "position": "striker",
         "age": 25.0,
     }
@@ -367,7 +375,13 @@ def test_make_logistic_regression_override_params() -> None:
 
 
 def _toy_dataset(n_per_class: int = 30) -> list[TrainingRow]:
-    """Build a balanced toy dataset of 90 rows (30 L, 30 C, 30 R)."""
+    """Build a balanced toy dataset of 90 rows (30 L, 30 C, 30 R).
+
+    v3 (Issue #36): the A3 feature is `preferred_foot` (declared),
+    not `kicking_foot` (inferred from history). The toy dataset
+    varies the declared foot per class so the model has a
+    discriminative signal on the column.
+    """
     rows: list[TrainingRow] = []
     for label in ("L", "C", "R"):
         for i in range(n_per_class):
@@ -376,7 +390,7 @@ def _toy_dataset(n_per_class: int = 30) -> list[TrainingRow]:
                     label=label,
                     kicker_id=hash((label, i)) & 0xFFFF,
                     position={"L": "striker", "C": "midfielder", "R": "defender"}[label],
-                    kicking_foot={"L": "RightFoot", "C": "RightFoot", "R": "LeftFoot"}[label],
+                    preferred_foot={"L": "right", "C": "right", "R": "left"}[label],
                 )
             )
     return rows

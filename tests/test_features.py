@@ -1,16 +1,19 @@
-"""Tests for the feature builder (slice #6, Issue #22).
+"""Tests for the feature builder (slice #6, Issue #22; refined #36).
 
 The tests cover five layers:
 
-1. **Pure helpers** — `side_distribution`, `last_side`,
-   `mode_kicking_foot`, `is_decisive_kick`, `age_in_years`,
-   `filter_history`, `index_kicks_done`. No network, no I/O.
+1. **Pure helpers** — `side_distribution`, `is_decisive_kick`,
+   `age_in_years`, `filter_history`, `index_kicks_done`. No network,
+   no I/O. v3 (Issue #36) dropped the `mode_kicking_foot` helper —
+   the A3 feature now reads from `PlayerMetadata.preferred_foot`
+   instead of the per-penalty `shot_type` mode.
 
 2. **Per-kick feature builder** — `build_features` (the packaging
    function) and `compute_features` (the A-group/C-group
    computation) against a constructed `ShootoutKick` and a
    constructed `PlayerPenalty` history. Verifies the
-   A1/A2/A3/A4/B1/B2/B3/C1/C2 features and the no-history fallback.
+   A1/A2/A3/A4/B1/B2/C1/C2 features and the no-history fallback.
+   v3 dropped B3 (`b3_round`).
 
 3. **Orchestration** — `build_training_table` against a stubbed
    `MetadataFetcher` that returns canned metadata per kicker. Verifies
@@ -47,7 +50,6 @@ from penalty_pred.features import (
     index_kicks_done,
     is_decisive_kick,
     load_player_history,
-    mode_kicking_foot,
     side_distribution,
 )
 from penalty_pred.player_history import PlayerMetadata
@@ -115,35 +117,6 @@ def test_side_distribution_handles_only_relevant_values() -> None:
     to have bucketed via `coordinates.side`."""
     p_L, p_C, p_R = side_distribution(["L", "X", "L"], 5)
     assert (p_L, p_C, p_R) == (2 / 3, 0.0, 0.0)
-
-
-# ---------------------------------------------------------------------------
-# mode_kicking_foot
-# ---------------------------------------------------------------------------
-
-
-def test_mode_kicking_foot_empty_returns_unknown() -> None:
-    assert mode_kicking_foot([]) == "Unknown"
-
-
-def test_mode_kicking_foot_picks_mode() -> None:
-    assert mode_kicking_foot(["RightFoot", "RightFoot", "LeftFoot"]) == "RightFoot"
-    assert mode_kicking_foot(["LeftFoot", "LeftFoot", "RightFoot"]) == "LeftFoot"
-
-
-def test_mode_kicking_foot_tie_breaks_to_right_foot() -> None:
-    """PRD: ties are broken in favour of "RightFoot" (population is
-    right-foot-dominant)."""
-    assert mode_kicking_foot(["RightFoot", "LeftFoot"]) == "RightFoot"
-    assert mode_kicking_foot(["LeftFoot", "RightFoot", "RightFoot", "LeftFoot"]) == "RightFoot"
-
-
-def test_mode_kicking_foot_ignores_non_foot_values() -> None:
-    """A "Header" (or any other value not in {RightFoot, LeftFoot}) is
-    excluded from the count."""
-    assert mode_kicking_foot(["Header", "RightFoot", "RightFoot"]) == "RightFoot"
-    # If everything is non-foot, the result is "Unknown".
-    assert mode_kicking_foot(["Header"]) == "Unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -319,8 +292,16 @@ def _target(
 
 
 def test_build_features_with_no_history_uses_prior() -> None:
-    """No history → A1 = (1/3, 1/3, 1/3), A2 = "", A3 = "Unknown",
-    A4 = 0."""
+    """No history → A1 = (1/3, 1/3, 1/3), A2 = "", A3 = "" (no metadata),
+    A4 = 0.
+
+    v3 (Issue #36): A3 (`preferred_foot`) comes from `PlayerMetadata`
+    directly, not the per-penalty `shot_type` mode. With the default
+    `PlayerMetadata(preferred_foot="")`, A3 is the empty string — not
+    the historical "Unknown" sentinel. (The PredictionRow keeps
+    `kicking_foot=""` for kickers with no metadata, so the dashboard
+    renders an empty cell rather than "Unknown".)
+    """
     target = _target(kicker_id=1, side="L")
     features = compute_features(
         history=[],
@@ -331,7 +312,6 @@ def test_build_features_with_no_history_uses_prior() -> None:
             pen_score_home=target.pen_score_before[0],
             pen_score_away=target.pen_score_before[1],
             is_home=target.is_home,
-            round=target.round,
         ),
         kicks_done=KickIndex(0, 0),
     )
@@ -355,13 +335,16 @@ def test_build_features_with_no_history_uses_prior() -> None:
     assert (row.p_L_10, row.p_C_10, row.p_R_10) == PRIOR_PROB
     assert (row.p_L_20, row.p_C_20, row.p_R_20) == PRIOR_PROB
     assert row.last_side == ""
-    assert row.kicking_foot == "Unknown"
+    assert row.preferred_foot == ""
     assert row.career_penalty_count == 0
 
 
 def test_build_features_with_history_computes_a1_a2_a3_a4() -> None:
-    """A 5-kick history of 3L + 2R, all RightFoot: A1 over last 5 =
-    (0.6, 0.0, 0.4); A2 = "R"; A3 = "RightFoot"; A4 = 5."""
+    """A 5-kick history: A1 over last 5 = (0.6, 0.0, 0.4); A2 = "R";
+    A4 = 5. A3 (`preferred_foot`) comes from metadata, not the
+    per-penalty mode — the test metadata passes `preferred_foot="right"`,
+    so the row carries the declared foot regardless of the per-penalty
+    `shot_type` history."""
     history = [
         _penalty(1, "2022-01-01T00:00:00+00:00", side="L"),
         _penalty(2, "2022-02-01T00:00:00+00:00", side="L"),
@@ -372,14 +355,19 @@ def test_build_features_with_history_computes_a1_a2_a3_a4() -> None:
     target = _target(kicker_id=1, side="L")
     features = compute_features(
         history=history,
-        metadata=PlayerMetadata(player_id=1, player_name="X", position_key="striker", birth_date="1990-01-01"),
+        metadata=PlayerMetadata(
+            player_id=1,
+            player_name="X",
+            position_key="striker",
+            birth_date="1990-01-01",
+            preferred_foot="right",
+        ),
         target_date=target.match_date,
         b_group=BGroupContext(
             kick_number=target.kick_number,
             pen_score_home=target.pen_score_before[0],
             pen_score_away=target.pen_score_before[1],
             is_home=target.is_home,
-            round=target.round,
         ),
         kicks_done=KickIndex(0, 0),
     )
@@ -400,7 +388,7 @@ def test_build_features_with_history_computes_a1_a2_a3_a4() -> None:
     )
     assert (row.p_L_5, row.p_C_5, row.p_R_5) == (0.6, 0.0, 0.4)
     assert row.last_side == "R"
-    assert row.kicking_foot == "RightFoot"
+    assert row.preferred_foot == "right"
     assert row.career_penalty_count == 5
 
 
@@ -424,7 +412,6 @@ def test_build_features_a1_horizons_nest() -> None:
             pen_score_home=target.pen_score_before[0],
             pen_score_away=target.pen_score_before[1],
             is_home=target.is_home,
-            round=target.round,
         ),
         kicks_done=KickIndex(0, 0),
     )
@@ -468,7 +455,6 @@ def test_build_features_c1_c2_from_metadata() -> None:
             pen_score_home=target.pen_score_before[0],
             pen_score_away=target.pen_score_before[1],
             is_home=target.is_home,
-            round=target.round,
         ),
         kicks_done=KickIndex(0, 0),
     )
@@ -504,7 +490,6 @@ def test_build_features_c1_c2_handle_missing_metadata() -> None:
             pen_score_home=target.pen_score_before[0],
             pen_score_away=target.pen_score_before[1],
             is_home=target.is_home,
-            round=target.round,
         ),
         kicks_done=KickIndex(0, 0),
     )
@@ -527,9 +512,13 @@ def test_build_features_c1_c2_handle_missing_metadata() -> None:
     assert math.isnan(row.age)
 
 
-def test_build_features_b1_b2_b3_pass_through() -> None:
-    """B1 = kick_number, B2 = pen_score_before + is_decisive,
-    B3 = round."""
+def test_build_features_b1_b2_pass_through() -> None:
+    """B1 = kick_number, B2 = pen_score_before + is_decisive.
+
+    v3 (Issue #36) dropped B3 (`b3_round`) from the feature schema;
+    the `round` field on `ShootoutKick` is identifier-only (kept in
+    the `TrainingRow` for traceability but not in the model matrix).
+    """
     target = ShootoutKick(
         match_id=99,
         match_date="2024-07-15T20:00:00+00:00",
@@ -559,7 +548,6 @@ def test_build_features_b1_b2_b3_pass_through() -> None:
             pen_score_home=target.pen_score_before[0],
             pen_score_away=target.pen_score_before[1],
             is_home=target.is_home,
-            round=target.round,
         ),
         # Before kick 7: home 3 done, away 3 done. Score 2-3.
         # Scoring (3-3) → not clinched, not eliminated. Missing (2-3) → not clinched, not eliminated. Not decisive.
@@ -584,14 +572,15 @@ def test_build_features_b1_b2_b3_pass_through() -> None:
     assert row.pen_score_home == 2
     assert row.pen_score_away == 3
     assert row.is_decisive is False
-    assert row.b3_round == "Quarter-finals"
+    # The round is identifier-only; no model column.
+    assert row.round == "Quarter-finals"
 
 
 def test_compute_features_returns_prediction_target() -> None:
     """`compute_features` returns a `PredictionTarget` (not a `TrainingRow`).
 
-    The new split (Issue #30) separates the computation from the
-    packaging: `compute_features` produces the 19 model features; the
+    The split (Issue #30) separates the computation from the
+    packaging: `compute_features` produces the 18 model features; the
     caller wraps them in a `TrainingRow` via `build_features`. The
     `PredictionTarget` is the value object the prediction slice uses
     directly, with no synthetic `ShootoutKick`.
@@ -611,32 +600,32 @@ def test_compute_features_returns_prediction_target() -> None:
             pen_score_home=target.pen_score_before[0],
             pen_score_away=target.pen_score_before[1],
             is_home=target.is_home,
-            round=target.round,
         ),
         kicks_done=KickIndex(0, 0),
     )
     assert isinstance(features, PredictionTarget)
     assert (features.p_L_5, features.p_C_5, features.p_R_5) == PRIOR_PROB
     assert features.last_side == ""
-    assert features.kicking_foot == "Unknown"
+    assert features.preferred_foot == ""  # no metadata
     assert features.b1_kick_number == target.kick_number
-    assert features.b3_round == target.round
+    # v3: no b3_round column (B3 was dropped).
 
 
 def test_b_group_context_neutral_has_neutral_b_group() -> None:
     """`BGroupContext.neutral()` produces the values the prediction
-    slice uses: kick_number=1, score=0-0, is_decisive=False, round="".
+    slice uses: kick_number=1, score=0-0, is_decisive=False.
 
     This is what the prediction slice feeds to `compute_features` so
     the model's B-group features don't leak shootout-state info that
-    doesn't exist for a prediction target.
+    doesn't exist for a prediction target. v3 dropped the `round`
+    field — the model is round-agnostic.
     """
     ctx = BGroupContext.neutral()
     assert ctx.kick_number == 1
     assert ctx.pen_score_home == 0
     assert ctx.pen_score_away == 0
     assert ctx.is_home is True
-    assert ctx.round == ""
+    # v3: no `round` attribute on BGroupContext.
 
 
 # ---------------------------------------------------------------------------
@@ -764,13 +753,12 @@ def test_write_training_table_roundtrip(tmp_path: Path) -> None:
         p_C_20=0.0,
         p_R_20=0.0,
         last_side="R",
-        kicking_foot="RightFoot",
+        preferred_foot="right",
         career_penalty_count=5,
         b1_kick_number=1,
         pen_score_home=0,
         pen_score_away=0,
         is_decisive=False,
-        b3_round="Final",
         position="striker",
         age=math.nan,
     )

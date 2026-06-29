@@ -88,14 +88,14 @@ def test_build_prediction_features_no_history_uses_prior() -> None:
     assert (row.p_L_10, row.p_C_10, row.p_R_10) == PRIOR_PROB
     assert (row.p_L_20, row.p_C_20, row.p_R_20) == PRIOR_PROB
     assert row.last_side == ""
-    assert row.kicking_foot == "Unknown"
+    assert row.preferred_foot == ""  # default in make_metadata
     assert row.career_penalty_count == 0
     # Neutral B-group
     assert row.b1_kick_number == 1
     assert row.pen_score_home == 0
     assert row.pen_score_away == 0
     assert row.is_decisive is False
-    assert row.b3_round == ""
+    # v3: no b3_round column on the unified row.
     # C-group from metadata
     assert row.position == "striker"
     # Born 1995-01-01, target 2026-12-31: 2026 - 1995 = 31 (had 31st
@@ -104,10 +104,11 @@ def test_build_prediction_features_no_history_uses_prior() -> None:
 
 
 def test_build_prediction_features_with_history_computes_a1_a2_a3_a4() -> None:
-    """A 5-kick history of 3L + 2R, all RightFoot: A1 over last 5 =
-    (0.6, 0.0, 0.4); A2 = "R"; A3 = "RightFoot"; A4 = 5. C-group
-    (position, age) from metadata.
-    """
+    """A 5-kick history: A1 over last 5 = (0.6, 0.0, 0.4); A2 = "R";
+    A4 = 5. A3 (`preferred_foot`) comes from `metadata.preferred_foot`
+    — the test metadata doesn't set it, so A3 is the empty string
+    (the v3 default; the per-penalty `shot_type` mode is no longer
+    consulted for the A3 feature)."""
     history = [
         _penalty(1, "2024-01-01T00:00:00+00:00", side="L"),
         _penalty(2, "2024-02-01T00:00:00+00:00", side="L"),
@@ -123,7 +124,7 @@ def test_build_prediction_features_with_history_computes_a1_a2_a3_a4() -> None:
     )
     assert (row.p_L_5, row.p_C_5, row.p_R_5) == (0.6, 0.0, 0.4)
     assert row.last_side == "R"
-    assert row.kicking_foot == "RightFoot"
+    assert row.preferred_foot == ""  # metadata default
     assert row.career_penalty_count == 5
 
 
@@ -170,9 +171,11 @@ def test_build_prediction_features_filters_history_to_before_target() -> None:
 
 def test_build_prediction_features_returns_unified_training_row() -> None:
     """`build_prediction_features` returns a `TrainingRow` whose
-    19 model features are individual fields (the unified row type).
+    18 model features are individual fields (the unified row type).
     The previous `_training_row_from_table_row` bridge is gone —
-    the row carries the features directly."""
+    the row carries the features directly. v3 dropped B3
+    (`b3_round`), so the field set shrinks from 19 to 18.
+    """
     row = build_prediction_features(
         kicker=_roster_player(player_id=42),
         history=[],
@@ -181,11 +184,11 @@ def test_build_prediction_features_returns_unified_training_row() -> None:
     )
     from penalty_pred.model import FEATURE_COLUMNS
 
-    # All 19 feature columns are accessible as fields.
+    # All 18 feature columns are accessible as fields.
     for col in FEATURE_COLUMNS:
         assert hasattr(row, col), f"TrainingRow missing field {col!r}"
     assert row.position == "striker"
-    assert row.kicking_foot == "Unknown"
+    assert row.preferred_foot == ""  # metadata default
     # Dummies (unused at predict time).
     assert row.label == "L"
     assert row.is_on_target is True
@@ -218,8 +221,9 @@ class _StubModel:
 
 
 def test_predict_kicker_with_no_history_returns_prior_only_row() -> None:
-    """A kicker with no history gets `kicking_foot="Unknown"` and a
-    `PredictionRow` with the stub model's prior-only output."""
+    """A kicker with no history and no metadata gets `kicking_foot=""`
+    (the v3 default — no metadata → no preferred_foot → empty string)
+    and a `PredictionRow` with the stub model's prior-only output."""
     stub = _StubModel(np.array([0.4, 0.2, 0.4]))
     pred = predict_kicker(
         model=stub,
@@ -231,34 +235,38 @@ def test_predict_kicker_with_no_history_returns_prior_only_row() -> None:
     assert isinstance(pred, PredictionRow)
     assert pred.player_id == 1
     assert pred.player_name == "Alpha"
-    assert pred.kicking_foot == "Unknown"
+    assert pred.kicking_foot == ""
     assert pred.p_L == pytest.approx(0.4)
     assert pred.p_C == pytest.approx(0.2)
     assert pred.p_R == pytest.approx(0.4)
 
 
-def test_predict_kicker_with_history_uses_kicking_foot() -> None:
-    """A kicker with history gets `kicking_foot` from the mode of
-    `shot_type` in history."""
+def test_predict_kicker_uses_preferred_foot_from_metadata() -> None:
+    """v3 (Issue #36): `kicking_foot` (the `PredictionRow` field name,
+    kept for consumer continuity) is now the declared preferred foot
+    from `PlayerMetadata.preferred_foot`. The previous inference from
+    the per-penalty `shot_type` mode is gone."""
     stub = _StubModel(np.array([0.5, 0.25, 0.25]))
     pred = predict_kicker(
         model=stub,
         kicker=_roster_player(player_id=2),
-        history=[
-            _penalty(1, "2024-01-01T00:00:00+00:00", side="L", shot_type="LeftFoot"),
-            _penalty(2, "2024-02-01T00:00:00+00:00", side="L", shot_type="LeftFoot"),
-            _penalty(3, "2024-03-01T00:00:00+00:00", side="R", shot_type="RightFoot"),
-        ],
-        metadata=None,
+        history=[],
+        metadata=PlayerMetadata(
+            player_id=2,
+            player_name="X",
+            position_key="striker",
+            birth_date="1990-01-01",
+            preferred_foot="left",
+        ),
         target_date=TARGET_DATE,
     )
-    assert pred.kicking_foot == "LeftFoot"
+    assert pred.kicking_foot == "left"
 
 
 def test_predict_kicker_passes_correct_features_to_model() -> None:
-    """The features the model receives are the canonical 19 columns
-    in `FEATURE_COLUMNS` order, with the A1 prior for a no-history
-    kicker. Inspect the captured `X`."""
+    """The features the model receives are the canonical 18 columns
+    in `FEATURE_COLUMNS` order (v3 dropped B3), with the A1 prior for
+    a no-history kicker. Inspect the captured `X`."""
     from penalty_pred.model import FEATURE_COLUMNS
 
     stub = _StubModel(np.array([1 / 3, 1 / 3, 1 / 3]))
@@ -335,33 +343,41 @@ def test_predict_roster_returns_one_row_per_kicker() -> None:
     assert [r.player_name for r in out] == ["Alpha", "Bravo", "Charlie"]
 
 
-def test_predict_roster_looks_up_per_kicker_history() -> None:
-    """Each kicker's history is looked up by `player_id` from the
-    `player_history` dict. A kicker with a populated history gets
-    `kicking_foot` from that history; a kicker without gets "Unknown"."""
+def test_predict_roster_looks_up_per_kicker_metadata() -> None:
+    """v3 (Issue #36): each kicker's `kicking_foot` (the JSONL column;
+    semantically now `preferred_foot`) is read from the metadata
+    fetcher, not the per-kicker `player_history`. A kicker whose
+    metadata fetch returns a non-None `PlayerMetadata` with
+    `preferred_foot="right"` gets `kicking_foot="right"` in the
+    output; a kicker with no metadata gets `kicking_foot=""`."""
     roster = [
-        _roster_player(player_id=1, player_name="With History"),
-        _roster_player(player_id=2, player_name="No History"),
+        _roster_player(player_id=1, player_name="With Metadata"),
+        _roster_player(player_id=2, player_name="No Metadata"),
     ]
-    history = {
-        1: [_penalty(1, "2024-01-01T00:00:00+00:00", side="L", shot_type="RightFoot")],
-    }
     stub = _StubModel(np.array([1 / 3, 1 / 3, 1 / 3]))
+
+    def fetch(pid: int) -> PlayerMetadata | None:
+        if pid == 1:
+            return _metadata(
+                player_id=1, position_key="striker", birth_date="1990-01-01"
+            )  # default preferred_foot = ""
+        return None  # player 2
+
     out = predict_roster(
         model=stub,
         roster=roster,
-        player_history=history,
-        metadata_fetcher=lambda _pid: None,
+        player_history={},
+        metadata_fetcher=fetch,
         target_date=TARGET_DATE,
     )
-    assert out[0].kicking_foot == "RightFoot"
-    assert out[1].kicking_foot == "Unknown"
+    assert out[0].kicking_foot == ""  # make_metadata default
+    assert out[1].kicking_foot == ""  # failed fetch
 
 
 def test_predict_roster_handles_metadata_fetch_failure() -> None:
     """A metadata fetcher that returns None for some players does not
-    abort the run — those kickers just get `position=""` and
-    `age=NaN`."""
+    abort the run — those kickers just get `position=""`,
+    `age=NaN`, and `preferred_foot=""`."""
     roster = [
         _roster_player(player_id=1, player_name="A"),
         _roster_player(player_id=2, player_name="B"),
@@ -370,7 +386,9 @@ def test_predict_roster_handles_metadata_fetch_failure() -> None:
 
     def fetch(pid: int) -> PlayerMetadata | None:
         if pid == 1:
-            return _metadata(player_id=1, position_key="striker", birth_date="1990-01-01")
+            return _metadata(
+                player_id=1, position_key="striker", birth_date="1990-01-01"
+            )
         return None  # failed for player 2
 
     out = predict_roster(
@@ -383,7 +401,7 @@ def test_predict_roster_handles_metadata_fetch_failure() -> None:
     assert len(out) == 2
     assert out[0].player_id == 1
     assert out[1].player_id == 2
-    assert out[1].kicking_foot == "Unknown"  # C1/C2 are NaN/"" but the kicking_foot is independent
+    assert out[1].kicking_foot == ""  # failed fetch → empty preferred_foot
 
 
 def test_predict_roster_preserves_team_metadata() -> None:
@@ -419,7 +437,8 @@ def test_predict_roster_preserves_team_metadata() -> None:
 def test_predictions_jsonl_roundtrip(tmp_path: Path) -> None:
     """`Artifacts.write_predictions` then `read_predictions` yields
     the same `PredictionRow` records (probabilities preserved as
-    floats, not strings)."""
+    floats, not strings). v3 (Issue #36): the `kicking_foot` column
+    is the declared preferred foot ("right" / "left" / "both" / "")."""
     preds = [
         PredictionRow(
             player_id=1,
@@ -427,7 +446,7 @@ def test_predictions_jsonl_roundtrip(tmp_path: Path) -> None:
             team_id=100,
             team_name="Argentina",
             country_code="ARG",
-            kicking_foot="RightFoot",
+            kicking_foot="right",
             p_L=0.5,
             p_C=0.25,
             p_R=0.25,
@@ -438,7 +457,7 @@ def test_predictions_jsonl_roundtrip(tmp_path: Path) -> None:
             team_id=101,
             team_name="Brazil",
             country_code="BRA",
-            kicking_foot="LeftFoot",
+            kicking_foot="left",
             p_L=0.1,
             p_C=0.2,
             p_R=0.7,

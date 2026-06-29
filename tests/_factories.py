@@ -88,14 +88,13 @@ def make_training_row(
     p_R_20: float | None = None,
     # A2 / A3 / A4
     last_side: str = "L",
-    kicking_foot: str = "RightFoot",
+    preferred_foot: str = "right",
     career_penalty_count: int = 5,
-    # B1 / B2 / B3
+    # B1 / B2
     b1_kick_number: int | None = None,
     pen_score_home: int = 0,
     pen_score_away: int = 0,
     is_decisive: bool = False,
-    b3_round: str | None = None,
     # C1 / C2
     position: str = "striker",
     age: float | None = 25.0,
@@ -103,10 +102,9 @@ def make_training_row(
     """Build a `TrainingRow` with sensible defaults.
 
     A1 defaults to a one-hot distribution on `label` (so the toy
-    dataset is a balanced L/C/R signal). `b1_kick_number` and
-    `b3_round` mirror `kick_number` and `round` unless overridden
-    (the unified row carries both spellings; the model layer
-    consumes the b-prefixed names).
+    dataset is a balanced L/C/R signal). `b1_kick_number` mirrors
+    `kick_number` unless overridden. v3 (Issue #36) dropped the
+    B3 (`b3_round`) column; the round is now identifier-only.
     """
     return TrainingRow(
         match_id=match_id,
@@ -131,13 +129,12 @@ def make_training_row(
         p_C_20=1.0 if label == "C" else 0.0 if p_C_20 is None else p_C_20,
         p_R_20=1.0 if label == "R" else 0.0 if p_R_20 is None else p_R_20,
         last_side=last_side,
-        kicking_foot=kicking_foot,
+        preferred_foot=preferred_foot,
         career_penalty_count=career_penalty_count,
         b1_kick_number=kick_number if b1_kick_number is None else b1_kick_number,
         pen_score_home=pen_score_home,
         pen_score_away=pen_score_away,
         is_decisive=is_decisive,
-        b3_round=round if b3_round is None else b3_round,
         position=position,
         age=float("nan") if age is None else age,
     )

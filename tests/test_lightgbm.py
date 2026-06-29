@@ -53,7 +53,13 @@ _make_row = make_training_row
 
 
 def _toy_dataset(n_per_class: int = 30) -> list[TrainingRow]:
-    """Build a balanced toy dataset of 90 rows (30 L, 30 C, 30 R)."""
+    """Build a balanced toy dataset of 90 rows (30 L, 30 C, 30 R).
+
+    v3 (Issue #36): the A3 feature is `preferred_foot` (declared),
+    not `kicking_foot` (inferred from history). The toy dataset
+    varies the declared foot per class so the model has a
+    discriminative signal on the column.
+    """
     rows: list[TrainingRow] = []
     for label in ("L", "C", "R"):
         for i in range(n_per_class):
@@ -62,7 +68,7 @@ def _toy_dataset(n_per_class: int = 30) -> list[TrainingRow]:
                     label=label,
                     kicker_id=hash((label, i)) & 0xFFFF,
                     position={"L": "striker", "C": "midfielder", "R": "defender"}[label],
-                    kicking_foot={"L": "RightFoot", "C": "RightFoot", "R": "LeftFoot"}[label],
+                    preferred_foot={"L": "right", "C": "right", "R": "left"}[label],
                 )
             )
     return rows
@@ -217,13 +223,19 @@ def test_predict_proba_columns_in_class_order() -> None:
 def test_predict_handles_unseen_categorical_values() -> None:
     """A predict-time value that wasn't in training becomes NaN
     (LightGBM treats it as missing) and the model still returns a
-    valid distribution."""
+    valid distribution.
+
+    v3 (Issue #36): the unseen feature is `position` (the toy
+    dataset only knows {striker, midfielder, defender}; we pass
+    "goalkeeper"). The previous b3_round-based test was removed
+    when b3_round was dropped from the schema.
+    """
     rows = _toy_dataset()
     matrix = build_feature_matrix(rows)
     wrapper = fit_lightgbm(matrix)
 
-    # Build a new row with an unseen `b3_round`.
-    new_row = _make_row(label="L", round="NEVER_SEEN_BEFORE")
+    # Build a new row with an unseen `position`.
+    new_row = _make_row(label="L", position="goalkeeper")
     new_matrix = build_feature_matrix([new_row])
     probs = np.asarray(wrapper.predict_proba(new_matrix.X))
     assert probs.shape == (1, 3)
