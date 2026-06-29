@@ -219,6 +219,8 @@ def main() -> int:
     )
 
     art.write_metrics(report, path=args.metrics_output)
+    cal = report.calibration
+    assert cal is not None  # evaluate_predictions always sets it for non-empty holdouts
     print(
         f"Wrote {args.metrics_output} (held-out metrics).\n"
         f"  model (lightgbm): log_loss={report.model.log_loss:.3f} "
@@ -229,7 +231,10 @@ def main() -> int:
         f"acc={report.random_baseline.accuracy:.3f} "
         f"save_rate={report.random_baseline.save_rate:.3f}\n"
         f"  kmf:              save_rate={report.kicker_most_frequent_baseline.save_rate}\n"
-        f"  keeper:           save_rate={report.actual_keeper_baseline.save_rate}"
+        f"  keeper:           save_rate={report.actual_keeper_baseline.save_rate}\n"
+        f"  calibration:      model  brier={cal.model.brier:.3f} ece={cal.model.ece:.3f}\n"
+        f"                    base   brier={cal.baseline.brier:.3f} ece={cal.baseline.ece:.3f}\n"
+        f"                    rndm   brier={cal.random.brier:.3f} ece={cal.random.ece:.3f}"
     )
 
     # Issue #40: freeze the deployment artifact on the same 151-row

@@ -61,6 +61,40 @@ size. The headline claim "the model beats random" is a directional
 indicator, not a statistical proof; per-keeper data (v4 candidate)
 would shrink the per-kick variance and make the comparison meaningful.
 
+### Calibration — Brier and ECE
+
+The model is **miscalibrated** as a probabilistic classifier. Two
+metrics tell the story:
+
+- **Brier score** (multiclass; 0 = perfect, 2 = worst for 3 classes):
+  the mean squared error of `P(L), P(C), P(R)` against a one-hot
+  encoding of the truth.
+- **Expected Calibration Error (ECE)** (10 equal-width confidence
+  bins; 0 = perfect): `sum_bin (|bin| / N) * |acc(bin) - conf(bin)|`.
+
+| model              | Brier  | ECE    |
+| ------------------ | ------ | ------ |
+| lightgbm (this)    | 0.986  | 0.436  |
+| logreg baseline    | 0.652  | 0.063  |
+| random uniform     | 0.667  | 0.060  |
+
+The lightgbm is **worse** than random on Brier (0.99 vs 0.67) because
+the inverse-frequency class weights push probabilities away from
+where the truth is. The logreg is well-calibrated. The card's
+"the model returns P(L), P(C), P(R) — the probability the kicker will
+aim at the left side" claim is **false** on the v3 model: the model
+is miscalibrated as a probabilistic classifier.
+
+The deployment policy `argmin(P(L), P(C), P(R))` is **invariant**
+under monotone transforms of the per-row probabilities. The
+miscalibration does not affect the recommended dive: the model
+still picks the lowest-probability side on every row, even when the
+absolute probabilities are wrong. Save rate is what the policy
+achieves; Brier and ECE are honest about the calibration gap, not a
+criticism of the deployment. See
+[`docs/model-review.md` § Topic 3](../blob/main/docs/model-review.md)
+for the analysis and Issue #43 for the metrics-report change.
+
 ## What it predicts
 
 For any kicker, the model returns P(L), P(C), P(R). The goalkeeper
@@ -129,7 +163,10 @@ feature_columns = artifact["feature_columns"]
   `LightGBMClassifierWrapper`), trained on the 151 pre-2026 training
   fold (the same model the metrics describe; Issue #40 closed the
   artifact-vs-metrics data leak).
-- `model/metrics.json` — the held-out metrics report.
+- `model/metrics.json` — the held-out metrics report. Includes
+  log loss, accuracy, save rate, and the calibration block (Brier
+  + ECE for the model, the logreg baseline, and the uniform random
+  baseline; Issue #43).
 - `data/shootout_kicks.jsonl` — 179 target kicks across 18 shootouts in 6
   national-team tournaments, 2021–2022 (the v2 42-shootout scope minus
   24 shootouts with URL rotation issues; see `## Further Notes`).
@@ -176,6 +213,10 @@ data layer.
 - **Save rate is now the headline metric** in this card; the
   accuracy-led v2 card is replaced. The 28-row holdout caveat
   applies to both metrics at this sample size.
+- **Calibration block added to `model/metrics.json`** (Issue #43):
+  Brier score and ECE (10-bin) for the model, the logreg baseline,
+  and the uniform random baseline. The card has a new "Calibration"
+  section that documents the miscalibration story in plain English.
 
 ## Further Notes
 

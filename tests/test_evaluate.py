@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
@@ -33,10 +34,14 @@ import pytest
 from penalty_pred.artifacts import Artifacts
 from penalty_pred.evaluate import (
     BaselineMetrics,
+    CalibrationMetrics,
+    CalibrationReport,
     MetricsReport,
     accuracy,
     actual_keeper_save_rate,
+    brier_multiclass,
     counterfactual_save_rate,
+    ece,
     evaluate_predictions,
     last_side_save_rate,
     log_loss,
@@ -269,6 +274,195 @@ def test_accuracy_empty() -> None:
 
 
 # ---------------------------------------------------------------------------
+# brier_multiclass
+# ---------------------------------------------------------------------------
+
+
+def test_brier_multiclass_perfect_prediction() -> None:
+    """A one-hot prediction on the true class → Brier = 0."""
+    probs = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+    labels = np.array([0, 1, 2], dtype=np.int64)
+    assert math.isclose(brier_multiclass(probs, labels), 0.0)
+
+
+def test_brier_multiclass_worst_prediction() -> None:
+    """A one-hot prediction on a wrong class → Brier = 2 (per row)."""
+    probs = np.array([[1.0, 0.0, 0.0]])  # predicts L
+    labels = np.array([2], dtype=np.int64)  # truth R
+    # (1-0)^2 + (0-0)^2 + (0-1)^2 = 1 + 0 + 1 = 2
+    assert math.isclose(brier_multiclass(probs, labels), 2.0)
+
+
+def test_brier_multiclass_uniform_equals_two_thirds() -> None:
+    """The uniform predictor (1/3, 1/3, 1/3) has Brier = 2/3
+    regardless of the label distribution."""
+    probs = np.tile(np.array([1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0]), (5, 1))
+    labels = np.array([0, 1, 2, 0, 1], dtype=np.int64)
+    assert math.isclose(brier_multiclass(probs, labels), 2.0 / 3.0)
+
+
+def test_brier_multiclass_half_prediction() -> None:
+    """A specific row: P = (0.5, 0.3, 0.2), label = L (0).
+    Brier for that row = 0.5^2 + 0.3^2 + 0.2^2 = 0.25 + 0.09 + 0.04 = 0.38."""
+    probs = np.array([[0.5, 0.3, 0.2]])
+    labels = np.array([0], dtype=np.int64)
+    assert math.isclose(brier_multiclass(probs, labels), 0.38)
+
+
+def test_brier_multiclass_empty() -> None:
+    """Empty input returns 0.0 without error."""
+    assert brier_multiclass(np.empty((0, 3)), np.empty(0, dtype=np.int64)) == 0.0
+
+
+def test_brier_multiclass_independent_of_label_distribution() -> None:
+    """The uniform predictor's Brier is 2/3 for any label distribution
+    (including a single-class holdout), because the per-row squared
+    error against one-hot is always 1/9 + 1/9 + 4/9 = 6/9 = 2/3."""
+    probs = np.tile(np.array([1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0]), (10, 1))
+    for label in (0, 1, 2):
+        labels = np.full(10, label, dtype=np.int64)
+        assert math.isclose(brier_multiclass(probs, labels), 2.0 / 3.0)
+
+
+# ---------------------------------------------------------------------------
+# ece
+# ---------------------------------------------------------------------------
+
+
+def test_ece_perfect_calibration() -> None:
+    """A perfectly calibrated predictor: the max prob = 1.0 for the
+    predicted class, and the argmax is always correct → ECE = 0."""
+    probs = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+    labels = np.array([0, 1, 2], dtype=np.int64)
+    assert math.isclose(ece(probs, labels, n_bins=10), 0.0)
+
+
+def test_ece_uniform_uniform_labels() -> None:
+    """Uniform probs + uniform labels: every row has the same
+    confidence (1/3) and every row is correct (argmax 0 = label 0 in
+    a 1/3-L/1/3-C/1/3-R holdout). ECE = 0 for balanced labels."""
+    probs = np.tile(np.array([1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0]), (6, 1))
+    labels = np.array([0, 0, 1, 1, 2, 2], dtype=np.int64)
+    assert math.isclose(ece(probs, labels, n_bins=10), 0.0)
+
+
+def test_ece_known_value_for_miscalibrated() -> None:
+    """A small case: 4 rows, model is over-confident (always predicts
+    0.9 on the predicted class) and is wrong on 1 of 4 rows. With
+    n_bins=10, all 4 rows fall in bin 9 (confidence 0.9). Bin
+    accuracy = 3/4, bin confidence = 0.9, ECE = |0.75 - 0.9| = 0.15."""
+    probs = np.array(
+        [
+            [0.9, 0.05, 0.05],  # argmax 0, label 0 → correct
+            [0.9, 0.05, 0.05],  # argmax 0, label 0 → correct
+            [0.9, 0.05, 0.05],  # argmax 0, label 0 → correct
+            [0.05, 0.9, 0.05],  # argmax 1, label 0 → WRONG
+        ]
+    )
+    labels = np.array([0, 0, 0, 0], dtype=np.int64)
+    assert math.isclose(ece(probs, labels, n_bins=10), 0.15)
+
+
+def test_ece_empty() -> None:
+    """Empty input returns 0.0 without error."""
+    assert ece(np.empty((0, 3)), np.empty(0, dtype=np.int64)) == 0.0
+
+
+def test_ece_ignores_empty_bins() -> None:
+    """ECE skips empty bins. A 4-row holdout with predictions spread
+    across two bins: the empty bins contribute 0, so the metric
+    reduces to a weighted average of the populated bins."""
+    probs = np.array(
+        [
+            [0.05, 0.05, 0.9],  # bin 0 (conf 0.9) → wrong (label 0)
+            [0.9, 0.05, 0.05],  # bin 0 (conf 0.9) → right (label 0)
+        ]
+    )
+    labels = np.array([0, 0], dtype=np.int64)
+    val = ece(probs, labels, n_bins=10)
+    # Both rows in bin 9 (0.9-1.0). acc=0.5, conf=0.9 → 1.0 * |0.5 - 0.9| = 0.4
+    assert math.isclose(val, 0.4)
+
+
+# ---------------------------------------------------------------------------
+# CalibrationReport / CalibrationMetrics roundtrip
+# ---------------------------------------------------------------------------
+
+
+def test_calibration_metrics_roundtrip() -> None:
+    """The CalibrationMetrics dataclass roundtrips through asdict()."""
+    m = CalibrationMetrics(brier=0.123, ece=0.456, n_bins=10)
+    payload = asdict(m)
+    assert payload == {"brier": 0.123, "ece": 0.456, "n_bins": 10}
+    assert CalibrationMetrics(**payload) == m
+
+
+def test_calibration_report_roundtrip() -> None:
+    """The CalibrationReport serialises with `baseline` as `None` when
+    the metrics report has no baseline classifier."""
+    model = CalibrationMetrics(brier=0.986, ece=0.436, n_bins=10)
+    baseline = CalibrationMetrics(brier=0.652, ece=0.063, n_bins=10)
+    random = CalibrationMetrics(brier=0.667, ece=0.063, n_bins=10)
+    rep = CalibrationReport(model=model, baseline=baseline, random=random)
+    payload = {
+        "model": asdict(rep.model),
+        "baseline": asdict(rep.baseline),
+        "random": asdict(rep.random),
+    }
+    assert payload["model"] == {"brier": 0.986, "ece": 0.436, "n_bins": 10}
+    assert payload["random"] == {"brier": 0.667, "ece": 0.063, "n_bins": 10}
+    # Roundtrip through the metrics report's from_dict helper.
+    metrics_payload = {
+        "model": {"name": "m", "log_loss": 1.0, "accuracy": 0.5, "save_rate": 0.5, "n_kicks": 4},
+        "random_baseline": {"name": "r", "log_loss": 1.1, "accuracy": 0.33, "save_rate": 0.4, "n_kicks": 4},
+        "kicker_most_frequent_baseline": {"name": "k", "log_loss": None, "accuracy": None, "save_rate": 0.4, "n_kicks": 4},
+        "actual_keeper_baseline": {"name": "a", "log_loss": None, "accuracy": None, "save_rate": None, "n_kicks": 4},
+        "n_train": 151,
+        "n_holdout": 4,
+        "holdout_cutoff_date": "2026-01-01",
+        "calibration": payload,
+    }
+    report = MetricsReport.from_dict(metrics_payload)
+    assert report.calibration is not None
+    assert report.calibration.model.brier == 0.986
+    assert report.calibration.model.ece == 0.436
+    assert report.calibration.baseline is not None
+    assert report.calibration.random.brier == 0.667
+
+
+def test_calibration_report_to_dict_includes_block() -> None:
+    """to_dict emits a `calibration` block when set, with `baseline`
+    as `None` when the metrics report has no baseline classifier."""
+    probs = np.array([[0.5, 0.3, 0.2]] * 4)
+    report = evaluate_predictions(probs, [_make_row("L")] * 4)
+    assert report.calibration is not None
+    payload = report.to_dict()
+    assert "calibration" in payload
+    assert payload["calibration"]["model"]["brier"] >= 0
+    assert payload["calibration"]["model"]["n_bins"] == 10
+    assert payload["calibration"]["random"]["brier"] >= 0
+    # No baseline classifier was provided → `calibration.baseline`
+    # serialises as `null` (not absent).
+    assert payload["calibration"]["baseline"] is None
+
+
+def test_metrics_report_from_dict_handles_missing_calibration() -> None:
+    """Backward compat: a metrics report that pre-dates Issue #43
+    roundtrips with `calibration=None`."""
+    payload = {
+        "model": {"name": "m", "log_loss": 1.0, "accuracy": 0.5, "save_rate": 0.5, "n_kicks": 4},
+        "random_baseline": {"name": "r", "log_loss": 1.1, "accuracy": 0.33, "save_rate": 0.4, "n_kicks": 4},
+        "kicker_most_frequent_baseline": {"name": "k", "log_loss": None, "accuracy": None, "save_rate": 0.4, "n_kicks": 4},
+        "actual_keeper_baseline": {"name": "a", "log_loss": None, "accuracy": None, "save_rate": None, "n_kicks": 4},
+        "n_train": 151,
+        "n_holdout": 4,
+        "holdout_cutoff_date": "2026-01-01",
+    }
+    report = MetricsReport.from_dict(payload)
+    assert report.calibration is None
+
+
+# ---------------------------------------------------------------------------
 # evaluate_predictions
 # ---------------------------------------------------------------------------
 
@@ -299,6 +493,27 @@ def test_evaluate_predictions_returns_full_report() -> None:
     assert report.kicker_most_frequent_baseline.name == "last_side"
     assert report.actual_keeper_baseline.log_loss is None
     assert report.actual_keeper_baseline.save_rate is None
+    # Issue #43: the calibration block is populated for a non-empty
+    # holdout. Model + random are always present; baseline is None
+    # when no `baseline_probs` is passed.
+    assert report.calibration is not None
+    assert report.calibration.model.n_bins == 10
+    assert report.calibration.random.n_bins == 10
+    assert report.calibration.baseline is None
+
+
+def test_evaluate_predictions_includes_baseline_calibration() -> None:
+    """When `baseline_probs` is provided, the calibration block has
+    a `baseline` entry."""
+    probs = np.array([[0.5, 0.3, 0.2]] * 4)
+    baseline_probs = np.array([[0.4, 0.3, 0.3]] * 4)
+    holdout = [_make_row("L"), _make_row("L"), _make_row("L"), _make_row("C")]
+    report = evaluate_predictions(probs, holdout, baseline_probs=baseline_probs)
+    assert report.calibration is not None
+    assert report.calibration.baseline is not None
+    assert report.calibration.baseline.n_bins == 10
+    assert report.calibration.baseline.brier >= 0
+    assert 0 <= report.calibration.baseline.ece <= 1
 
 
 def test_evaluate_predictions_empty() -> None:
@@ -307,6 +522,8 @@ def test_evaluate_predictions_empty() -> None:
     assert report.n_holdout == 0
     assert report.model.n_kicks == 0
     assert report.model.log_loss is None
+    # Empty holdout: calibration is undefined and the block is None.
+    assert report.calibration is None
 
 
 def test_evaluate_predictions_to_dict() -> None:
@@ -363,6 +580,11 @@ def test_live_metrics_json_shape() -> None:
     trade-off). The test does not pin a model log loss; it pins
     the random baseline's value (a property of the uniform
     distribution, not the model).
+
+    Issue #43: the calibration block is in the live metrics, with
+    `model`, `baseline`, and `random` sub-entries, each carrying a
+    `brier` and `ece` and an `n_bins` of 10. The random baseline's
+    Brier is the closed-form 2/3 (uniform probs on 3 classes).
     """
     with Artifacts().metrics.open(encoding="utf-8") as f:
         payload = json.load(f)
@@ -375,3 +597,13 @@ def test_live_metrics_json_shape() -> None:
     assert "holdout_cutoff_date" in payload
     assert math.isclose(payload["random_baseline"]["log_loss"], math.log(3.0))
     assert payload["actual_keeper_baseline"]["save_rate"] is None
+    # Calibration block (Issue #43).
+    assert "calibration" in payload
+    for key in ("model", "baseline", "random"):
+        sub = payload["calibration"][key]
+        if sub is None:
+            continue
+        assert "brier" in sub
+        assert "ece" in sub
+        assert sub["n_bins"] == 10
+    assert math.isclose(payload["calibration"]["random"]["brier"], 2.0 / 3.0)

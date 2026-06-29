@@ -208,6 +208,57 @@ def accuracy(probs: np.ndarray, labels: np.ndarray) -> float:
     return float(np.mean(np.argmax(probs, axis=1) == labels))
 
 
+def brier_multiclass(probs: np.ndarray, labels: np.ndarray) -> float:
+    """Multiclass Brier score: mean squared error against one-hot labels.
+
+    For each row, computes `sum_c (p_c - y_c)^2` where `y` is one-hot
+    in `CLASSES` order. The result is the mean over rows. For 3
+    classes the range is `[0, 2]`: 0 = perfect calibration, 2 = worst
+    possible (the model places zero mass on the true class and unit
+    mass on a wrong one). The uniform predictor `(1/3, 1/3, 1/3)`
+    scores `2/3` on every row, independent of the label distribution.
+    """
+    if probs.shape[0] == 0:
+        return 0.0
+    n = probs.shape[0]
+    one_hot = np.zeros_like(probs)
+    one_hot[np.arange(n), labels] = 1.0
+    return float(np.mean(np.sum((probs - one_hot) ** 2, axis=1)))
+
+
+def ece(probs: np.ndarray, labels: np.ndarray, n_bins: int = 10) -> float:
+    """Expected Calibration Error.
+
+    Bins rows by their max predicted probability (equal-width bins on
+    `[0, 1]`) and computes the weighted mean of
+    `|accuracy(bin) - confidence(bin)|` weighted by bin size. ECE
+    ranges in `[0, 1]`; 0 means perfectly calibrated. Rows whose max
+    probability is exactly 0 fall in the first bin.
+
+    The function ignores empty bins (a bin with zero rows contributes
+    nothing, so the metric is well-defined on small holdouts where
+    some bins are unreached).
+    """
+    if probs.shape[0] == 0:
+        return 0.0
+    confidences = np.max(probs, axis=1)
+    predictions = np.argmax(probs, axis=1)
+    accuracies = (predictions == labels).astype(float)
+    bin_edges = np.linspace(0.0, 1.0, n_bins + 1)
+    # `np.digitize` returns 1..n_bins+1 for points strictly inside
+    # the edges; we want 0..n_bins-1, so subtract 1 and clip.
+    bin_indices = np.clip(np.digitize(confidences, bin_edges) - 1, 0, n_bins - 1)
+    ece_val = 0.0
+    for b in range(n_bins):
+        mask = bin_indices == b
+        if not mask.any():
+            continue
+        bin_conf = float(confidences[mask].mean())
+        bin_acc = float(accuracies[mask].mean())
+        ece_val += (mask.sum() / len(confidences)) * abs(bin_acc - bin_conf)
+    return float(ece_val)
+
+
 # ---------------------------------------------------------------------------
 # Metrics report
 # ---------------------------------------------------------------------------
@@ -230,6 +281,37 @@ class BaselineMetrics:
 
 
 @dataclass(frozen=True)
+class CalibrationMetrics:
+    """Brier score and expected calibration error for one predictor.
+
+    `brier` is the multiclass Brier score in `[0, 2]` (0 = perfect).
+    `ece` is the expected calibration error in `[0, 1]` (0 = perfect),
+    computed on `n_bins` equal-width confidence bins. `n_bins` is
+    recorded on the dataclass so a future re-evaluation can match the
+    binning choice without re-deriving it.
+    """
+
+    brier: float
+    ece: float
+    n_bins: int
+
+
+@dataclass(frozen=True)
+class CalibrationReport:
+    """The calibration block of a metrics report (Issue #43).
+
+    `model` is the deployed classifier (the LightGBM in slice #8).
+    `baseline` is the optional logreg comparison classifier (None
+    when the metrics report has no baseline). `random` is the
+    closed-form uniform baseline `(1/3, 1/3, 1/3)`.
+    """
+
+    model: CalibrationMetrics
+    baseline: CalibrationMetrics | None
+    random: CalibrationMetrics
+
+
+@dataclass(frozen=True)
 class MetricsReport:
     """A full evaluation report on one holdout fold.
 
@@ -240,7 +322,9 @@ class MetricsReport:
     same holdout fold). The three `*_baseline` fields are the
     fixed-strategy baselines for context. `n_train` and `n_holdout`
     are the row counts in each fold. `holdout_cutoff_date` is the ISO
-    8601 cutoff the split used.
+    8601 cutoff the split used. `calibration` is the Brier / ECE
+    block (Issue #43) and is `None` only for an empty holdout
+    (where the metrics are undefined).
     """
 
     model: BaselineMetrics
@@ -251,6 +335,7 @@ class MetricsReport:
     n_holdout: int
     holdout_cutoff_date: str
     baseline: BaselineMetrics | None = None
+    calibration: CalibrationReport | None = None
     extras: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -260,6 +345,9 @@ class MetricsReport:
         report honestly reflects the absence of a metric (rather than
         silently substituting 0.0). The optional `baseline` field
         (the logreg comparison classifier) is serialised when set.
+        The optional `calibration` block (Issue #43) is serialised
+        when set, with `baseline` nested under it as `None` when the
+        metrics report has no baseline classifier.
         """
         payload: dict[str, Any] = {
             "model": asdict(self.model),
@@ -272,6 +360,16 @@ class MetricsReport:
         }
         if self.baseline is not None:
             payload["baseline"] = asdict(self.baseline)
+        if self.calibration is not None:
+            payload["calibration"] = {
+                "model": asdict(self.calibration.model),
+                "baseline": (
+                    asdict(self.calibration.baseline)
+                    if self.calibration.baseline is not None
+                    else None
+                ),
+                "random": asdict(self.calibration.random),
+            }
         payload.update(self.extras)
         return payload
 
@@ -280,10 +378,13 @@ class MetricsReport:
         """Reconstruct a `MetricsReport` from a dict produced by `to_dict`.
 
         The round-trip preserves every field, including the optional
-        `baseline` classifier section and the `extras` dict (which carries
-        the model_kind, classes, feature_columns, and params). Any keys
-        not in the known schema are kept in `extras` so a future report
-        with new metadata is read back intact.
+        `baseline` classifier section, the `calibration` block
+        (Issue #43), and the `extras` dict (which carries the
+        model_kind, classes, feature_columns, and params). Any keys
+        not in the known schema are kept in `extras` so a future
+        report with new metadata is read back intact. The
+        `calibration` block is optional: a metrics report that
+        pre-dates Issue #43 roundtrips with `calibration=None`.
         """
         known = {
             "model",
@@ -291,11 +392,14 @@ class MetricsReport:
             "kicker_most_frequent_baseline",
             "actual_keeper_baseline",
             "baseline",
+            "calibration",
             "n_train",
             "n_holdout",
             "holdout_cutoff_date",
         }
         extras = {k: v for k, v in payload.items() if k not in known}
+        calibration_payload = payload.get("calibration")
+        calibration = _calibration_from_dict(calibration_payload) if calibration_payload else None
         return cls(
             model=BaselineMetrics(**payload["model"]),
             random_baseline=BaselineMetrics(**payload["random_baseline"]),
@@ -306,11 +410,26 @@ class MetricsReport:
             baseline=(
                 BaselineMetrics(**payload["baseline"]) if payload.get("baseline") else None
             ),
+            calibration=calibration,
             n_train=int(payload["n_train"]),
             n_holdout=int(payload["n_holdout"]),
             holdout_cutoff_date=str(payload.get("holdout_cutoff_date", "")),
             extras=extras,
         )
+
+
+def _calibration_from_dict(payload: dict[str, Any]) -> CalibrationReport:
+    """Build a `CalibrationReport` from its JSON-serialised form.
+
+    `baseline` may be `null` in the payload (when the parent
+    `MetricsReport` has no baseline classifier); the field is
+    `None` on the dataclass in that case.
+    """
+    model = CalibrationMetrics(**payload["model"])
+    baseline_payload = payload.get("baseline")
+    baseline = CalibrationMetrics(**baseline_payload) if baseline_payload else None
+    random = CalibrationMetrics(**payload["random"])
+    return CalibrationReport(model=model, baseline=baseline, random=random)
 
 
 def evaluate_predictions(
@@ -329,6 +448,13 @@ def evaluate_predictions(
     can be diffed apples-to-apples against the previous slice on the
     same holdout fold. The baseline's log loss / accuracy / save
     rate are computed the same way as the model's.
+
+    The `calibration` block (Issue #43) is computed for all three
+    probabilistic predictors — the model, the optional baseline, and
+    the closed-form uniform random baseline `(1/3, 1/3, 1/3)`. Brier
+    and ECE are deterministic on the same `probs` and `labels`; the
+    10-bin ECE matches the binning used in `docs/model-review.md`
+    (Topic 3).
     """
     n = len(holdout_rows)
     if n == 0:
@@ -388,6 +514,34 @@ def evaluate_predictions(
             save_rate=b_save,
             n_kicks=b_n,
         )
+
+    # Issue #43: Brier + ECE for all three probabilistic predictors.
+    # The closed-form uniform random baseline is constructed inline
+    # (one row per holdout kick, all three classes at 1/3) so its
+    # calibration is computed on the same `labels` as the others.
+    random_probs = np.full((n, 3), 1.0 / 3.0)
+    calibration = CalibrationReport(
+        model=CalibrationMetrics(
+            brier=brier_multiclass(probs, labels),
+            ece=ece(probs, labels, n_bins=10),
+            n_bins=10,
+        ),
+        baseline=(
+            CalibrationMetrics(
+                brier=brier_multiclass(baseline_probs, labels),
+                ece=ece(baseline_probs, labels, n_bins=10),
+                n_bins=10,
+            )
+            if baseline_probs is not None
+            else None
+        ),
+        random=CalibrationMetrics(
+            brier=brier_multiclass(random_probs, labels),
+            ece=ece(random_probs, labels, n_bins=10),
+            n_bins=10,
+        ),
+    )
+
     return MetricsReport(
         model=model_metrics,
         baseline=baseline_metrics,
@@ -397,6 +551,7 @@ def evaluate_predictions(
         n_train=0,  # filled in by the caller
         n_holdout=n,
         holdout_cutoff_date="",  # filled in by the caller
+        calibration=calibration,
     )
 
 
