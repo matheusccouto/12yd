@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 import math
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -658,7 +659,7 @@ def test_predict_script_accepts_reparameterisation_flags() -> None:
     from subprocess import run
 
     out = run(
-        ["python", "scripts/predict.py", "--help"],
+        [sys.executable, "scripts/predict.py", "--help"],
         capture_output=True,
         text=True,
         check=True,
@@ -678,7 +679,7 @@ def test_predict_script_default_paths() -> None:
     from subprocess import run
 
     out = run(
-        ["python", "scripts/predict.py", "--help"],
+        [sys.executable, "scripts/predict.py", "--help"],
         capture_output=True,
         text=True,
         check=True,
