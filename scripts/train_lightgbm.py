@@ -205,6 +205,16 @@ def main() -> int:
         n_train=len(train_rows),
         holdout_cutoff_date=args.holdout_cutoff,
     )
+    # Issue #45: preserve the LOTO CV block from a prior
+    # `scripts/evaluate_cv.py` run, so re-running the train slice
+    # doesn't silently drop the cross-validation report. The CV is
+    # not recomputed here — `evaluate_cv.py` owns that — but the
+    # artifact is the same per (model, data, recipe) so a re-train
+    # does not invalidate the existing CV.
+    cv_block: object | None = None
+    if art.cv_metrics.exists():
+        cv_block = art.read_cv()
+    report = replace(report, cv=cv_block)
     report = replace(
         report,
         extras={

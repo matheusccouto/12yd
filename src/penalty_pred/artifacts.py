@@ -31,6 +31,10 @@ The on-disk layout (relative to `root`):
 - `skipped_refs_diagnostics.jsonl` — one record per non-empty
   skip / no-kicks / failure result, with the `failure_mode` discriminator
   (`stale_hash` | `empty_shotmap` | `ExceptionClass: message`).
+- `cv_metrics.json` — the leave-one-tournament-out cross-validation
+  report (Issue #45), with per-fold metrics and the aggregate
+  summary. Also embedded as the `cv` block in `metrics.json` so the
+  dashboard's metrics card can render the CV without a separate fetch.
 
 The cache directory (separate from `root`):
 
@@ -53,7 +57,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from .client import FotMobClient
-from .evaluate import MetricsReport
+from .evaluate import CVReport, MetricsReport, _cv_from_dict, _cv_to_dict
 from .features import TrainingRow
 from .initial_set import MissingKicker
 from .model import (
@@ -193,6 +197,10 @@ class Artifacts:
     def diagnostics(self) -> Path:
         return self.root / "skipped_refs_diagnostics.jsonl"
 
+    @property
+    def cv_metrics(self) -> Path:
+        return self.root / "cv_metrics.json"
+
     # -------------------------------------------------------------- shootouts
 
     def read_shootout_kicks(self, path: Path | None = None) -> list[ShootoutKick]:
@@ -262,6 +270,28 @@ class Artifacts:
         target.parent.mkdir(parents=True, exist_ok=True)
         with target.open("w", encoding="utf-8") as f:
             json.dump(report.to_dict(), f, indent=2, ensure_ascii=False)
+        return 1
+
+    # ----------------------------------------------------------------- cv
+
+    def read_cv(self, path: Path | None = None) -> CVReport:
+        """Read the standalone `cv_metrics.json` artifact (Issue #45).
+
+        The artifact stores the full `CVReport` payload (per-fold
+        metrics + aggregate) so the CV can be loaded independently of
+        the main `metrics.json` (e.g. by the dashboard or by a future
+        documentation tool that doesn't need the rest of the metrics
+        report).
+        """
+        with (path or self.cv_metrics).open(encoding="utf-8") as f:
+            return _cv_from_dict(json.load(f))
+
+    def write_cv(self, report: CVReport, path: Path | None = None) -> int:
+        """Write the standalone `cv_metrics.json` artifact (Issue #45)."""
+        target = path or self.cv_metrics
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("w", encoding="utf-8") as f:
+            json.dump(_cv_to_dict(report), f, indent=2, ensure_ascii=False)
         return 1
 
     # ----------------------------------------------------------------- model

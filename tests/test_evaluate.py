@@ -19,6 +19,10 @@ Three layers:
    the model section has a `save_rate` and `log_loss`, the random
    baseline's `log_loss` is `ln(3)`, the keeper baseline's `save_rate`
    is `None`.
+
+6. **Cross-validation** (Issue #45) — `cross_validate`, `CVReport`,
+   `CVFold`, plus the `cv` block on `MetricsReport` (roundtrip and
+   backward compat).
 """
 
 from __future__ import annotations
@@ -36,11 +40,16 @@ from penalty_pred.evaluate import (
     BaselineMetrics,
     CalibrationMetrics,
     CalibrationReport,
+    CVFold,
+    CVReport,
     MetricsReport,
+    _cv_from_dict,
+    _cv_to_dict,
     accuracy,
     actual_keeper_save_rate,
     brier_multiclass,
     counterfactual_save_rate,
+    cross_validate,
     ece,
     evaluate_predictions,
     last_side_save_rate,
@@ -607,3 +616,404 @@ def test_live_metrics_json_shape() -> None:
         assert "ece" in sub
         assert sub["n_bins"] == 10
     assert math.isclose(payload["calibration"]["random"]["brier"], 2.0 / 3.0)
+    # Cross-validation block (Issue #45).
+    assert "cv" in payload
+    assert payload["cv"]["group_by"] == "tournament_name"
+    assert len(payload["cv"]["folds"]) >= 1
+    for fold in payload["cv"]["folds"]:
+        assert "name" in fold
+        assert fold["n_holdout"] > 0
+        assert "save_rate" in fold
+        assert "log_loss" in fold
+        assert "accuracy" in fold
+    assert "aggregate" in payload["cv"]
+    assert "se_save_rate" in payload["cv"]["aggregate"]
+    assert payload["cv"]["aggregate"]["n_total"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# Cross-validation (Issue #45)
+# ---------------------------------------------------------------------------
+
+
+class _PerfectClassifier:
+    """A toy classifier that returns a constant prediction per row.
+
+    `cross_validate` only needs `fit(matrix)` to return an object
+    with `predict_proba(X) -> (n, 3)`. The toy classifier ignores
+    `X` and returns a constant `(n, 3)` array based on the
+    `mode` argument. Use this to test the `cross_validate` plumbing
+    (per-fold fit + score + aggregate) without depending on
+    LightGBM.
+    """
+
+    def __init__(self, mode: str = "uniform") -> None:
+        self.mode = mode
+
+    def fit(self, matrix) -> _PerfectClassifier:  # noqa: ARG002
+        return self
+
+    def predict_proba(self, X) -> np.ndarray:  # noqa: ARG002
+        n = len(X)
+        if self.mode == "uniform":
+            return np.full((n, 3), 1.0 / 3.0)
+        if self.mode == "always_L":
+            out = np.zeros((n, 3))
+            out[:, 0] = 1.0
+            return out
+        if self.mode == "always_C":
+            out = np.zeros((n, 3))
+            out[:, 1] = 1.0
+            return out
+        if self.mode == "always_R":
+            out = np.zeros((n, 3))
+            out[:, 2] = 1.0
+            return out
+        raise ValueError(f"unknown mode: {self.mode}")
+
+
+def _make_uniform_factory(mode: str = "uniform"):
+    """Build a model factory that returns a constant `_PerfectClassifier`."""
+    def factory(matrix):  # noqa: ARG001
+        return _PerfectClassifier(mode=mode).fit(matrix)
+    return factory
+
+
+def test_cross_validate_empty_input() -> None:
+    """An empty `rows` list returns an empty report with zero metrics."""
+    report = cross_validate(_make_uniform_factory(), [], group_by="tournament_name")
+    assert isinstance(report, CVReport)
+    assert report.folds == ()
+    assert report.n_total == 0
+    assert report.aggregate_save_rate == 0.0
+    assert report.skipped == {}
+    assert report.group_by == "tournament_name"
+
+
+def test_cross_validate_three_groups_one_fold_each() -> None:
+    """3 groups, 1 fold each, uniform model. The uniform predictor
+    always dives L (the lowest-index side on a tie), so each
+    fold's save rate is the per-fold fraction of L-or-off-target
+    kicks (deterministic for a given fold's label distribution)."""
+    rows = [
+        _make_row("L", tournament_name="A", match_id=1, kick_number=1),
+        _make_row("C", tournament_name="A", match_id=1, kick_number=2),
+        _make_row("L", tournament_name="B", match_id=2, kick_number=1),
+        _make_row("R", tournament_name="B", match_id=2, kick_number=2),
+        _make_row("C", tournament_name="C", match_id=3, kick_number=1),
+        _make_row("R", tournament_name="C", match_id=3, kick_number=2),
+    ]
+    report = cross_validate(_make_uniform_factory("uniform"), rows)
+    assert len(report.folds) == 3
+    assert report.n_total == 6
+    # The uniform predictor dives L on every row. So the save rate
+    # for each fold is the fold's fraction of L kicks. Group A has
+    # 1 L / 2 → 0.5. Group B has 1 L / 2 → 0.5. Group C has 0 L / 2 → 0.0.
+    expected_per_fold = {"A": 0.5, "B": 0.5, "C": 0.0}
+    for fold in report.folds:
+        assert math.isclose(fold.save_rate, expected_per_fold[fold.name], abs_tol=1e-9)
+    expected_agg = sum(f.save_rate * f.n_holdout for f in report.folds) / 6
+    assert math.isclose(report.aggregate_save_rate, expected_agg)
+
+
+def test_cross_validate_aggregate_save_rate_weighted_correctly() -> None:
+    """The aggregate save rate is the n_holdout-weighted mean across folds.
+
+    4 rows per group, 3 groups. The fold's save rate is whatever
+    the model emits (here uniform). The aggregate is the simple
+    n_holdout-weighted mean (each fold has 4 rows, so the
+    aggregate is the simple mean of the 3 fold save rates).
+    """
+    rows = []
+    for t in ("X", "Y", "Z"):
+        for i in range(4):
+            rows.append(_make_row("L", tournament_name=t, match_id=hash(t) % 1000 + i, kick_number=1))
+    report = cross_validate(_make_uniform_factory("uniform"), rows)
+    assert len(report.folds) == 3
+    assert report.n_total == 12
+    expected = sum(f.save_rate for f in report.folds) / 3
+    assert math.isclose(report.aggregate_save_rate, expected, abs_tol=1e-9)
+
+
+def test_cross_validate_se_is_binomial_on_weighted_total() -> None:
+    """The aggregate SE is the binomial SE on the aggregate total:
+    `sqrt(p * (1 - p) / n_total)` where `p` is the aggregate save
+    rate. The test uses an "always L" model so every fold's save
+    rate is deterministic (the dive is always L, the save rate
+    equals the per-fold fraction of L-or-off-target kicks)."""
+    rows = []
+    for t in ("G1", "G2", "G3", "G4"):
+        for label in ("L", "L", "C", "R", "R"):  # 2 L, 1 C, 2 R per fold
+            rows.append(_make_row(label, tournament_name=t, match_id=hash(t) % 1000 + len(rows), kick_number=1))
+    report = cross_validate(_make_uniform_factory("always_L"), rows)
+    assert report.n_total == 20
+    p = report.aggregate_save_rate
+    expected_se = math.sqrt(p * (1 - p) / 20)
+    assert math.isclose(report.se_save_rate, expected_se, abs_tol=1e-9)
+
+
+def test_cross_validate_min_fold_size_skips_small_folds() -> None:
+    """Folds with fewer than `min_fold_size` rows are skipped and
+    recorded in the `skipped` dict."""
+    rows = [
+        _make_row("L", tournament_name="big", match_id=1, kick_number=1),
+        _make_row("R", tournament_name="big", match_id=1, kick_number=2),
+        _make_row("C", tournament_name="big", match_id=1, kick_number=3),
+        _make_row("L", tournament_name="small", match_id=2, kick_number=1),
+    ]
+    report = cross_validate(_make_uniform_factory("uniform"), rows, min_fold_size=2)
+    assert len(report.folds) == 1
+    assert report.folds[0].name == "big"
+    assert report.n_total == 3
+    assert report.skipped == {"small": 1}
+
+
+def test_cross_validate_min_fold_size_zero_is_rejected() -> None:
+    """`min_fold_size` must be >= 1 (a 0-row fold has no signal to score)."""
+    with pytest.raises(ValueError, match="min_fold_size"):
+        cross_validate(_make_uniform_factory(), [], min_fold_size=0)
+
+
+def test_cross_validate_skipped_fold_kept_when_only_empty_folds() -> None:
+    """If every fold is below `min_fold_size`, the report has 0 folds
+    but the `skipped` dict records the dropped groups."""
+    rows = [
+        _make_row("L", tournament_name="a", match_id=1, kick_number=1),
+        _make_row("R", tournament_name="b", match_id=2, kick_number=1),
+    ]
+    report = cross_validate(_make_uniform_factory("uniform"), rows, min_fold_size=2)
+    assert report.folds == ()
+    assert report.n_total == 0
+    assert set(report.skipped) == {"a", "b"}
+    assert report.skipped["a"] == 1
+    assert report.skipped["b"] == 1
+
+
+def test_cross_validate_fold_order_is_deterministic() -> None:
+    """Folds are sorted by `n_holdout` descending (ties broken by name)
+    so the report is reproducible across runs."""
+    rows = [
+        _make_row("L", tournament_name="z", match_id=1, kick_number=1),
+        _make_row("L", tournament_name="a", match_id=2, kick_number=1),
+        _make_row("L", tournament_name="m", match_id=3, kick_number=1),
+        _make_row("L", tournament_name="m", match_id=3, kick_number=2),
+    ]
+    report = cross_validate(_make_uniform_factory("uniform"), rows)
+    names = [f.name for f in report.folds]
+    assert names == ["m", "a", "z"]
+
+
+def test_cross_validate_deterministic_for_same_input() -> None:
+    """Two runs with the same `rows` and factory produce the same report."""
+    rows = [
+        _make_row("L", tournament_name="A", match_id=1, kick_number=1),
+        _make_row("R", tournament_name="A", match_id=1, kick_number=2),
+        _make_row("C", tournament_name="B", match_id=2, kick_number=1),
+        _make_row("L", tournament_name="B", match_id=2, kick_number=2),
+    ]
+    r1 = cross_validate(_make_uniform_factory("always_L"), rows)
+    r2 = cross_validate(_make_uniform_factory("always_L"), rows)
+    assert r1.aggregate_save_rate == r2.aggregate_save_rate
+    assert r1.aggregate_log_loss == r2.aggregate_log_loss
+    assert r1.aggregate_accuracy == r2.aggregate_accuracy
+    assert r1.se_save_rate == r2.se_save_rate
+    assert [(f.name, f.save_rate) for f in r1.folds] == [(f.name, f.save_rate) for f in r2.folds]
+
+
+# ---------------------------------------------------------------------------
+# CVReport / CVFold roundtrip
+# ---------------------------------------------------------------------------
+
+
+def test_cv_fold_roundtrip() -> None:
+    """A `CVFold` roundtrips through `asdict` (the per-fold payload)."""
+    fold = CVFold(
+        name="X",
+        n_train=100,
+        n_holdout=20,
+        save_rate=0.5,
+        log_loss=1.0,
+        accuracy=0.4,
+        random_save_rate=0.45,
+    )
+    payload = asdict(fold)
+    assert payload == {
+        "name": "X",
+        "n_train": 100,
+        "n_holdout": 20,
+        "save_rate": 0.5,
+        "log_loss": 1.0,
+        "accuracy": 0.4,
+        "random_save_rate": 0.45,
+    }
+    assert CVFold(**payload) == fold
+
+
+def test_cv_report_to_from_dict_roundtrip() -> None:
+    """A `CVReport` roundtrips through `_cv_to_dict` / `_cv_from_dict`
+    without loss. The `skipped` dict is preserved as a plain dict."""
+    fold = CVFold(
+        name="World Cup",
+        n_train=171,
+        n_holdout=8,
+        save_rate=0.375,
+        log_loss=1.2,
+        accuracy=0.4,
+        random_save_rate=0.42,
+    )
+    report = CVReport(
+        folds=(fold,),
+        aggregate_save_rate=0.375,
+        aggregate_log_loss=1.2,
+        aggregate_accuracy=0.4,
+        n_total=8,
+        se_save_rate=math.sqrt(0.375 * 0.625 / 8),
+        group_by="tournament_name",
+        skipped={"Asian Cup": 0},
+    )
+    payload = _cv_to_dict(report)
+    assert payload["group_by"] == "tournament_name"
+    assert payload["skipped"] == {"Asian Cup": 0}
+    assert payload["aggregate"]["n_total"] == 8
+    assert len(payload["folds"]) == 1
+    restored = _cv_from_dict(payload)
+    assert restored == report
+
+
+def test_cv_report_from_dict_default_skipped() -> None:
+    """A `cv` payload without a `skipped` key (older LOTO reports)
+    roundtrips with `skipped={}`."""
+    payload = {
+        "folds": [],
+        "aggregate": {
+            "save_rate": 0.0,
+            "log_loss": 0.0,
+            "accuracy": 0.0,
+            "n_total": 0,
+            "se_save_rate": 0.0,
+        },
+        "group_by": "tournament_name",
+    }
+    report = _cv_from_dict(payload)
+    assert report.skipped == {}
+
+
+def test_cv_report_from_dict_default_group_by() -> None:
+    """A `cv` payload without a `group_by` key defaults to
+    `tournament_name` (the v3 default)."""
+    payload = {"folds": [], "aggregate": {}}
+    report = _cv_from_dict(payload)
+    assert report.group_by == "tournament_name"
+
+
+# ---------------------------------------------------------------------------
+# MetricsReport.cv roundtrip + backward compat (Issue #45)
+# ---------------------------------------------------------------------------
+
+
+def _make_minimal_metrics_payload() -> dict:
+    """Build a minimal `MetricsReport` payload (pre-#45) for the
+    roundtrip tests below. The payload omits `cv` so the backward-
+    compat path can be exercised."""
+    return {
+        "model": {"name": "m", "log_loss": 1.0, "accuracy": 0.5, "save_rate": 0.5, "n_kicks": 4},
+        "random_baseline": {"name": "r", "log_loss": 1.1, "accuracy": 0.33, "save_rate": 0.4, "n_kicks": 4},
+        "kicker_most_frequent_baseline": {"name": "k", "log_loss": None, "accuracy": None, "save_rate": 0.4, "n_kicks": 4},
+        "actual_keeper_baseline": {"name": "a", "log_loss": None, "accuracy": None, "save_rate": None, "n_kicks": 4},
+        "n_train": 4,
+        "n_holdout": 4,
+        "holdout_cutoff_date": "2026-01-01",
+    }
+
+
+def test_metrics_report_to_dict_includes_cv_block() -> None:
+    """A `MetricsReport` with a `cv` block serialises the CV under
+    the `cv` key."""
+    fold = CVFold("X", 4, 4, 0.5, 1.0, 0.4, 0.4)
+    cv = CVReport(
+        folds=(fold,),
+        aggregate_save_rate=0.5,
+        aggregate_log_loss=1.0,
+        aggregate_accuracy=0.4,
+        n_total=4,
+        se_save_rate=math.sqrt(0.5 * 0.5 / 4),
+        group_by="tournament_name",
+        skipped={},
+    )
+    probs = np.array([[0.5, 0.3, 0.2]] * 4)
+    report = evaluate_predictions(probs, [_make_row("L")] * 4)
+    report = type(report)(
+        model=report.model,
+        random_baseline=report.random_baseline,
+        kicker_most_frequent_baseline=report.kicker_most_frequent_baseline,
+        actual_keeper_baseline=report.actual_keeper_baseline,
+        n_train=report.n_train,
+        n_holdout=report.n_holdout,
+        holdout_cutoff_date=report.holdout_cutoff_date,
+        baseline=report.baseline,
+        calibration=report.calibration,
+        cv=cv,
+        extras=report.extras,
+    )
+    payload = report.to_dict()
+    assert "cv" in payload
+    assert payload["cv"]["group_by"] == "tournament_name"
+    assert len(payload["cv"]["folds"]) == 1
+
+
+def test_metrics_report_from_dict_handles_missing_cv() -> None:
+    """Backward compat: a metrics report that pre-dates Issue #45
+    (no `cv` key) roundtrips with `cv=None`."""
+    payload = _make_minimal_metrics_payload()
+    report = MetricsReport.from_dict(payload)
+    assert report.cv is None
+
+
+def test_metrics_report_from_dict_roundtrips_cv_block() -> None:
+    """A `cv` block roundtrips through `from_dict` with all fields
+    preserved (folds, aggregate, group_by, skipped)."""
+    fold = CVFold("Y", 10, 5, 0.6, 0.9, 0.5, 0.42)
+    cv = CVReport(
+        folds=(fold,),
+        aggregate_save_rate=0.6,
+        aggregate_log_loss=0.9,
+        aggregate_accuracy=0.5,
+        n_total=5,
+        se_save_rate=0.2,
+        group_by="tournament_name",
+        skipped={"Asian Cup": 0},
+    )
+    payload = _make_minimal_metrics_payload()
+    payload["cv"] = _cv_to_dict(cv)
+    report = MetricsReport.from_dict(payload)
+    assert report.cv is not None
+    assert report.cv == cv
+
+
+# ---------------------------------------------------------------------------
+# Artifacts.cv_metrics roundtrip (Issue #45)
+# ---------------------------------------------------------------------------
+
+
+def test_artifacts_cv_metrics_roundtrip(tmp_path: Path) -> None:
+    """`Artifacts.read_cv` / `Artifacts.write_cv` roundtrip a `CVReport`
+    through the `cv_metrics.json` artifact without loss."""
+    from penalty_pred.artifacts import Artifacts
+
+    art = Artifacts(root=tmp_path, cache_dir=tmp_path / "cache")
+    fold = CVFold("Test", 4, 4, 0.5, 1.0, 0.4, 0.42)
+    cv = CVReport(
+        folds=(fold,),
+        aggregate_save_rate=0.5,
+        aggregate_log_loss=1.0,
+        aggregate_accuracy=0.4,
+        n_total=4,
+        se_save_rate=0.25,
+        group_by="tournament_name",
+        skipped={},
+    )
+    art.write_cv(cv)
+    assert art.cv_metrics.exists()
+    assert art.cv_metrics.parent == tmp_path
+    restored = art.read_cv()
+    assert restored == cv

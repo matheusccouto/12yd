@@ -29,13 +29,31 @@ The metrics report is a flat dict that serialises to JSON for
 `metrics.json`. The field set is stable across model slices (#23
 baseline and #24 LightGBM) so the same downstream tooling can diff
 the two reports.
+
+v3 additions:
+
+- **Calibration block** (Issue #43): Brier and ECE for the model, the
+  logreg baseline, and the closed-form uniform random baseline. The
+  block is `None` only for an empty holdout (where the metrics are
+  undefined). `from_dict` accepts pre-#43 metrics without the block
+  and sets it to `None`.
+
+- **Cross-validation block** (Issue #45): a leave-one-group-out
+  cross-validation report with per-fold metrics and the aggregate
+  summary. The `group_by` field is the row attribute used for
+  grouping (default `tournament_name`). Folds below `min_fold_size`
+  are skipped (recorded in the `skipped` dict). The aggregate
+  save rate is the weighted mean across folds, weighted by
+  per-fold `n_holdout`. The aggregate SE is the binomial SE on the
+  weighted total. `from_dict` accepts pre-#45 metrics without the
+  block and sets it to `None`.
 """
 
 from __future__ import annotations
 
 import json
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -43,7 +61,7 @@ from typing import Any
 import numpy as np
 
 from .features import CLASSES  # re-exported from .model for backwards-compat
-from .model import TrainingRow
+from .model import FeatureMatrix, TrainingRow, build_feature_matrix
 
 # Class indices (mirrors CLASSES in model.py).
 L: int = 0
@@ -324,7 +342,10 @@ class MetricsReport:
     are the row counts in each fold. `holdout_cutoff_date` is the ISO
     8601 cutoff the split used. `calibration` is the Brier / ECE
     block (Issue #43) and is `None` only for an empty holdout
-    (where the metrics are undefined).
+    (where the metrics are undefined). `cv` is the leave-one-group-out
+    cross-validation report (Issue #45) and is `None` for any metrics
+    report that pre-dates the LOTO CV slice (e.g. a re-run of the
+    train script before the CV slice ran).
     """
 
     model: BaselineMetrics
@@ -336,6 +357,7 @@ class MetricsReport:
     holdout_cutoff_date: str
     baseline: BaselineMetrics | None = None
     calibration: CalibrationReport | None = None
+    cv: CVReport | None = None
     extras: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -347,7 +369,9 @@ class MetricsReport:
         (the logreg comparison classifier) is serialised when set.
         The optional `calibration` block (Issue #43) is serialised
         when set, with `baseline` nested under it as `None` when the
-        metrics report has no baseline classifier.
+        metrics report has no baseline classifier. The optional `cv`
+        block (Issue #45) is serialised when set, with per-fold
+        metrics and the aggregate summary.
         """
         payload: dict[str, Any] = {
             "model": asdict(self.model),
@@ -370,6 +394,8 @@ class MetricsReport:
                 ),
                 "random": asdict(self.calibration.random),
             }
+        if self.cv is not None:
+            payload["cv"] = _cv_to_dict(self.cv)
         payload.update(self.extras)
         return payload
 
@@ -379,12 +405,14 @@ class MetricsReport:
 
         The round-trip preserves every field, including the optional
         `baseline` classifier section, the `calibration` block
-        (Issue #43), and the `extras` dict (which carries the
-        model_kind, classes, feature_columns, and params). Any keys
-        not in the known schema are kept in `extras` so a future
-        report with new metadata is read back intact. The
-        `calibration` block is optional: a metrics report that
-        pre-dates Issue #43 roundtrips with `calibration=None`.
+        (Issue #43), the `cv` block (Issue #45), and the `extras`
+        dict (which carries the model_kind, classes, feature_columns,
+        and params). Any keys not in the known schema are kept in
+        `extras` so a future report with new metadata is read back
+        intact. The `calibration` block is optional: a metrics report
+        that pre-dates Issue #43 roundtrips with `calibration=None`.
+        The `cv` block is optional: a metrics report that pre-dates
+        Issue #45 roundtrips with `cv=None`.
         """
         known = {
             "model",
@@ -393,6 +421,7 @@ class MetricsReport:
             "actual_keeper_baseline",
             "baseline",
             "calibration",
+            "cv",
             "n_train",
             "n_holdout",
             "holdout_cutoff_date",
@@ -400,6 +429,8 @@ class MetricsReport:
         extras = {k: v for k, v in payload.items() if k not in known}
         calibration_payload = payload.get("calibration")
         calibration = _calibration_from_dict(calibration_payload) if calibration_payload else None
+        cv_payload = payload.get("cv")
+        cv = _cv_from_dict(cv_payload) if cv_payload else None
         return cls(
             model=BaselineMetrics(**payload["model"]),
             random_baseline=BaselineMetrics(**payload["random_baseline"]),
@@ -411,6 +442,7 @@ class MetricsReport:
                 BaselineMetrics(**payload["baseline"]) if payload.get("baseline") else None
             ),
             calibration=calibration,
+            cv=cv,
             n_train=int(payload["n_train"]),
             n_holdout=int(payload["n_holdout"]),
             holdout_cutoff_date=str(payload.get("holdout_cutoff_date", "")),
@@ -430,6 +462,50 @@ def _calibration_from_dict(payload: dict[str, Any]) -> CalibrationReport:
     baseline = CalibrationMetrics(**baseline_payload) if baseline_payload else None
     random = CalibrationMetrics(**payload["random"])
     return CalibrationReport(model=model, baseline=baseline, random=random)
+
+
+def _cv_to_dict(report: CVReport) -> dict[str, Any]:
+    """Serialise a `CVReport` to a JSON-friendly dict.
+
+    The block has four top-level keys: `folds` (per-fold metrics),
+    `aggregate` (the n_holdout-weighted summary), `group_by` (the
+    row attribute used for grouping), and `skipped` (groups below
+    `min_fold_size` with their row counts).
+    """
+    return {
+        "folds": [asdict(f) for f in report.folds],
+        "aggregate": {
+            "save_rate": report.aggregate_save_rate,
+            "log_loss": report.aggregate_log_loss,
+            "accuracy": report.aggregate_accuracy,
+            "n_total": report.n_total,
+            "se_save_rate": report.se_save_rate,
+        },
+        "group_by": report.group_by,
+        "skipped": dict(report.skipped),
+    }
+
+
+def _cv_from_dict(payload: dict[str, Any]) -> CVReport:
+    """Build a `CVReport` from its JSON-serialised form.
+
+    Folds are reconstructed as `CVFold` dataclasses. The aggregate
+    is read from the `aggregate` sub-dict. `skipped` defaults to an
+    empty dict when absent (older LOTO reports do not have it).
+    """
+    folds_payload = payload.get("folds", [])
+    folds = tuple(CVFold(**f) for f in folds_payload)
+    agg = payload.get("aggregate", {})
+    return CVReport(
+        folds=folds,
+        aggregate_save_rate=float(agg.get("save_rate", 0.0)),
+        aggregate_log_loss=float(agg.get("log_loss", 0.0)),
+        aggregate_accuracy=float(agg.get("accuracy", 0.0)),
+        n_total=int(agg.get("n_total", 0)),
+        se_save_rate=float(agg.get("se_save_rate", 0.0)),
+        group_by=str(payload.get("group_by", "tournament_name")),
+        skipped=dict(payload.get("skipped", {})),
+    )
 
 
 def evaluate_predictions(
@@ -560,3 +636,220 @@ def write_metrics_json(path: Path, report: MetricsReport) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         json.dump(report.to_dict(), f, indent=2, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------------
+# Cross-validation (Issue #45)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CVFold:
+    """The metrics for one leave-one-group-out fold.
+
+    `name` is the group label (e.g. "World Cup Final Stage" for the
+    `tournament_name` group). `n_train` and `n_holdout` are the
+    per-fold row counts. `save_rate`, `log_loss`, and `accuracy` are
+    the model's metrics on the holdout fold. `random_save_rate` is
+    the closed-form uniform random baseline on the same holdout, for
+    context.
+    """
+
+    name: str
+    n_train: int
+    n_holdout: int
+    save_rate: float
+    log_loss: float
+    accuracy: float
+    random_save_rate: float
+
+
+@dataclass(frozen=True)
+class CVReport:
+    """The aggregate LOTO CV report (Issue #45).
+
+    `folds` is the per-fold list, in the order produced by the
+    `cross_validate` helper (largest fold first, ties broken by name).
+    `aggregate_save_rate`, `aggregate_log_loss`, and
+    `aggregate_accuracy` are the n_holdout-weighted means across
+    folds. `n_total` is the sum of per-fold `n_holdout` (the aggregate
+    holdout size). `se_save_rate` is the binomial standard error
+    `sqrt(p * (1 - p) / n_total)` on the aggregate save rate, where
+    `p` is `aggregate_save_rate`. `group_by` is the row attribute
+    used for grouping (e.g. `"tournament_name"`). `skipped` is a
+    `{group_name: n_rows}` map of groups that were skipped because
+    they had fewer than `min_fold_size` rows; the report is still
+    valid when this is non-empty (an empty group has no signal to
+    contribute and no fold to score).
+    """
+
+    folds: tuple[CVFold, ...]
+    aggregate_save_rate: float
+    aggregate_log_loss: float
+    aggregate_accuracy: float
+    n_total: int
+    se_save_rate: float
+    group_by: str
+    skipped: dict[str, int] = field(default_factory=dict)
+
+
+def _score_fold(
+    probs: np.ndarray, holdout_rows: Sequence[TrainingRow]
+) -> tuple[float, float, float, float]:
+    """Score one fold: (save_rate, log_loss, accuracy, random_save_rate).
+
+    `probs` is the model's (n, 3) prediction array in `CLASSES` order.
+    `holdout_rows` is the list of `TrainingRow` for the fold. The
+    random save rate is the closed-form uniform baseline on the same
+    labels (the function delegates to `random_save_rate`).
+    """
+    labels = np.array([CLASSES.index(r.label) for r in holdout_rows], dtype=np.int64)
+    on_target = np.array([r.is_on_target for r in holdout_rows], dtype=bool)
+    save_rate, _ = counterfactual_save_rate(probs, labels, on_target)
+    rand_save, _ = random_save_rate(labels, on_target)
+    return (
+        float(save_rate),
+        float(log_loss(probs, labels)),
+        float(accuracy(probs, labels)),
+        float(rand_save),
+    )
+
+
+def cross_validate(
+    model_factory: Callable[[FeatureMatrix], Any],
+    rows: Sequence[TrainingRow],
+    group_by: str = "tournament_name",
+    min_fold_size: int = 1,
+) -> CVReport:
+    """Leave-one-group-out cross-validation (Issue #45).
+
+    Groups `rows` by `getattr(row, group_by)`. For each non-empty
+    group G, fits a fresh model on the rows NOT in G via
+    `model_factory(train_matrix)`, then evaluates on the rows in G.
+    Returns a `CVReport` with the per-fold metrics and the aggregate
+    summary.
+
+    Parameters
+    ----------
+    model_factory
+        A callable that takes a `FeatureMatrix` (the training fold)
+        and returns a fitted model with a `predict_proba(X) -> (n, 3)`
+        method. The wrapper does not know about a specific model
+        type; `scripts/evaluate_cv.py` passes
+        `lambda matrix: fit_lightgbm(matrix)` and
+        `lambda matrix: fit_logistic_regression(matrix)` for the
+        LightGBM and logreg respectively.
+    rows
+        The list of `TrainingRow` to CV over. The caller is expected
+        to pass the same rows the model was originally trained on
+        (i.e. the full training table, not a single train/holdout
+        split).
+    group_by
+        The row attribute to group on. Default `"tournament_name"`
+        gives a leave-one-tournament-out CV. Any attribute on
+        `TrainingRow` works.
+    min_fold_size
+        Folds with fewer than this many rows are skipped. The
+        skipped groups are recorded in the `CVReport.skipped` dict
+        so a future maintainer can see why a fold was dropped (e.g.
+        Asian Cup has 0 rows in the current data). Default `1`
+        (only skip truly empty folds).
+
+    Notes
+    -----
+    The aggregate save rate is the `n_holdout`-weighted mean across
+    folds. The aggregate SE is the binomial SE on the weighted
+    total: `sqrt(p * (1 - p) / n_total)` where `p` is the aggregate
+    save rate. This is a standard simplification; the exact LOTO SE
+    depends on within-fold correlation and is rarely reported in
+    practice.
+
+    The function is deterministic for the same `model_factory` +
+    `rows` + `group_by` + `min_fold_size`. The fit step is
+    deterministic for both sklearn and LightGBM at fixed random
+    seed (`RANDOM_SEED` in `model.py`).
+    """
+    if min_fold_size < 1:
+        raise ValueError(f"min_fold_size must be >= 1, got {min_fold_size}")
+    if not rows:
+        return CVReport(
+            folds=(),
+            aggregate_save_rate=0.0,
+            aggregate_log_loss=0.0,
+            aggregate_accuracy=0.0,
+            n_total=0,
+            se_save_rate=0.0,
+            group_by=group_by,
+            skipped={},
+        )
+
+    # Group rows by the `group_by` attribute. `defaultdict` keeps the
+    # insertion order (Python 3.7+ guarantee) so the fold order is
+    # deterministic for the same input.
+    groups: dict[str, list[TrainingRow]] = {}
+    for row in rows:
+        key = str(getattr(row, group_by))
+        groups.setdefault(key, []).append(row)
+
+    folds: list[CVFold] = []
+    skipped: dict[str, int] = {}
+    for name, fold_rows in sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        if len(fold_rows) < min_fold_size:
+            skipped[name] = len(fold_rows)
+            continue
+        train_rows = [r for r in rows if getattr(r, group_by) != getattr(fold_rows[0], group_by)]
+        train_matrix = build_feature_matrix(train_rows)
+        holdout_matrix = build_feature_matrix(fold_rows)
+        model = model_factory(train_matrix)
+        probs = np.asarray(model.predict_proba(holdout_matrix.X))
+        save_rate, ll, acc, rand_save = _score_fold(probs, fold_rows)
+        folds.append(
+            CVFold(
+                name=name,
+                n_train=len(train_rows),
+                n_holdout=len(fold_rows),
+                save_rate=save_rate,
+                log_loss=ll,
+                accuracy=acc,
+                random_save_rate=rand_save,
+            )
+        )
+
+    if not folds:
+        return CVReport(
+            folds=(),
+            aggregate_save_rate=0.0,
+            aggregate_log_loss=0.0,
+            aggregate_accuracy=0.0,
+            n_total=0,
+            se_save_rate=0.0,
+            group_by=group_by,
+            skipped=skipped,
+        )
+
+    n_total = sum(f.n_holdout for f in folds)
+    if n_total == 0:
+        return CVReport(
+            folds=tuple(folds),
+            aggregate_save_rate=0.0,
+            aggregate_log_loss=0.0,
+            aggregate_accuracy=0.0,
+            n_total=0,
+            se_save_rate=0.0,
+            group_by=group_by,
+            skipped=skipped,
+        )
+    agg_save = sum(f.save_rate * f.n_holdout for f in folds) / n_total
+    agg_ll = sum(f.log_loss * f.n_holdout for f in folds) / n_total
+    agg_acc = sum(f.accuracy * f.n_holdout for f in folds) / n_total
+    se = math.sqrt(agg_save * (1.0 - agg_save) / n_total) if 0.0 < agg_save < 1.0 else 0.0
+    return CVReport(
+        folds=tuple(folds),
+        aggregate_save_rate=agg_save,
+        aggregate_log_loss=agg_ll,
+        aggregate_accuracy=agg_acc,
+        n_total=n_total,
+        se_save_rate=se,
+        group_by=group_by,
+        skipped=skipped,
+    )

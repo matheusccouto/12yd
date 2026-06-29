@@ -95,6 +95,51 @@ criticism of the deployment. See
 [`docs/model-review.md` § Topic 3](../blob/main/docs/model-review.md)
 for the analysis and Issue #43 for the metrics-report change.
 
+### Cross-validation — leave-one-tournament-out
+
+The single 28-row holdout is honest about what 28 rows can tell us
+(almost nothing — see the statistical caveat above). To get a
+tighter claim, the metrics report also includes a
+leave-one-tournament-out cross-validation (Issue #45) — 6 folds, one
+per `tournament_name`, with the 179 rows split across the folds
+as the table below shows.
+
+| fold (held-out tournament)            | n_train | n_holdout | save rate | random | log loss | accuracy |
+| ------------------------------------- | ------: | --------: | --------: | -----: | -------: | -------: |
+| Africa Cup of Nations Final Stage     |     100 |        79 |     0.380 |  0.409 |    1.312 |    0.392 |
+| EURO Final Stage                      |     145 |        34 |     0.294 |  0.353 |    1.285 |    0.471 |
+| World Cup Final Stage                 |     154 |        25 |     0.360 |  0.413 |    1.465 |    0.320 |
+| CONCACAF Gold Cup Final Stage         |     155 |        24 |     0.458 |  0.417 |    1.188 |    0.417 |
+| Copa America Final Stage              |     170 |         9 |     0.333 |  0.407 |    1.842 |    0.333 |
+| World Cup                             |     171 |         8 |     0.375 |  0.417 |    1.189 |    0.375 |
+| **aggregate (n=179)**                 |         |           | **0.369** |        | **1.333** | **0.397** |
+| aggregate SE on save rate             |         |           |   ±0.036  |        |           |          |
+
+The aggregate save rate is **0.369 (SE ±0.036)** — 6× tighter than
+the single 28-row holdout (SE ±0.094). The model is **below** the
+closed-form random baseline (0.405 on the same 179 rows) by 0.036,
+i.e. **just inside one aggregate SE**. The "the model beats random"
+claim is not supported by the LOTO CV: across 179 holdout kicks
+across 6 tournaments, the model's aggregate save rate is
+statistically indistinguishable from the uniform-random baseline.
+The 28-row holdout's "0.464 vs 0.405" was a one-tournament draw from
+a distribution that averages to ~0.37.
+
+The logreg baseline's LOTO CV (computed in the same script for
+context) lands at **0.380 save rate** — also below random, also
+within one SE. The published single-fold "logreg 0.250" number
+(Issue #43) is the same kind of small-sample noise: the logreg
+beats the lightgbm on the WC 2026 holdout (0.250 vs 0.464) but
+loses to it on the cross-tournament aggregate (0.380 vs 0.369 are
+within noise of each other).
+
+The CV reveals what the single 28-row holdout could not: **the
+18-feature model is not adding measurable value over a uniform-
+random dive policy on this dataset.** This is the same conclusion
+as the model review (Topic 2 + Topic 4); the LOTO CV is the
+independent confirmation. v4 work (per-keeper data, anti-classifier)
+is the path to a model that meaningfully beats random.
+
 ## What it predicts
 
 For any kicker, the model returns P(L), P(C), P(R). The goalkeeper
@@ -164,9 +209,15 @@ feature_columns = artifact["feature_columns"]
   fold (the same model the metrics describe; Issue #40 closed the
   artifact-vs-metrics data leak).
 - `model/metrics.json` — the held-out metrics report. Includes
-  log loss, accuracy, save rate, and the calibration block (Brier
+  log loss, accuracy, save rate, the calibration block (Brier
   + ECE for the model, the logreg baseline, and the uniform random
-  baseline; Issue #43).
+  baseline; Issue #43), and the LOTO cross-validation block
+  (per-fold save rate / log loss / accuracy + the aggregate
+  summary; Issue #45).
+- `data/cv_metrics.json` — the standalone LOTO CV artifact (the
+  same payload that's embedded in `model/metrics.json` under the
+  `cv` key, written separately so the dashboard or a future tool
+  can load the CV without parsing the rest of the metrics report).
 - `data/shootout_kicks.jsonl` — 179 target kicks across 18 shootouts in 6
   national-team tournaments, 2021–2022 (the v2 42-shootout scope minus
   24 shootouts with URL rotation issues; see `## Further Notes`).
@@ -217,6 +268,17 @@ data layer.
   Brier score and ECE (10-bin) for the model, the logreg baseline,
   and the uniform random baseline. The card has a new "Calibration"
   section that documents the miscalibration story in plain English.
+- **LOTO cross-validation block added to `model/metrics.json`**
+  (Issue #45): 6 folds (one per `tournament_name` in the 179-row
+  training set) with per-fold save rate, log loss, accuracy, and
+  the aggregate summary (weighted-mean save rate + the binomial
+  SE on the aggregate). The card has a new "Cross-validation"
+  section. The CV reveals that the 18-feature model is not
+  statistically distinguishable from a uniform-random dive policy
+  on the cross-tournament aggregate (model 0.369 vs random 0.405,
+  one aggregate SE), and that the single 28-row holdout's "model
+  beats random" claim was a small-sample draw. v4 work is the
+  path to a model that meaningfully beats random.
 
 ## Further Notes
 
