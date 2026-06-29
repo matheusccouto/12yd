@@ -1,0 +1,78 @@
+{
+  "model": {
+    "name": "model",
+    "log_loss": 1.769495061378782,
+    "accuracy": 0.25,
+    "save_rate": 0.4642857142857143,
+    "n_kicks": 28
+  },
+  "random_baseline": {
+    "name": "random",
+    "log_loss": 1.0986122886681098,
+    "accuracy": 0.3333333333333333,
+    "save_rate": 0.40476190476190477,
+    "n_kicks": 28
+  },
+  "kicker_most_frequent_baseline": {
+    "name": "last_side",
+    "log_loss": null,
+    "accuracy": null,
+    "save_rate": 0.39285714285714285,
+    "n_kicks": 28
+  },
+  "actual_keeper_baseline": {
+    "name": "actual_keeper",
+    "log_loss": null,
+    "accuracy": null,
+    "save_rate": null,
+    "n_kicks": 28
+  },
+  "n_train": 151,
+  "n_holdout": 28,
+  "holdout_cutoff_date": "2026-01-01",
+  "baseline": {
+    "name": "baseline",
+    "log_loss": 1.0765762100728204,
+    "accuracy": 0.42857142857142855,
+    "save_rate": 0.25,
+    "n_kicks": 28
+  },
+  "model_kind": "lightgbm",
+  "classes": [
+    "L",
+    "C",
+    "R"
+  ],
+  "feature_columns": [
+    "p_L_5",
+    "p_C_5",
+    "p_R_5",
+    "p_L_10",
+    "p_C_10",
+    "p_R_10",
+    "p_L_20",
+    "p_C_20",
+    "p_R_20",
+    "career_penalty_count",
+    "b1_kick_number",
+    "pen_score_home",
+    "pen_score_away",
+    "is_decisive",
+    "age",
+    "last_side",
+    "preferred_foot",
+    "position"
+  ],
+  "params": {
+    "lightgbm": {
+      "num_leaves": 31,
+      "learning_rate": 0.05,
+      "n_estimators": 500,
+      "min_child_samples": 20
+    },
+    "logreg": {
+      "C": 0.005,
+      "class_weight": "balanced"
+    }
+  }
+}

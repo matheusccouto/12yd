@@ -601,8 +601,14 @@ def test_live_no_history_kickers_have_unknown_foot() -> None:
     reason="output/ artifacts not present (run the slices first)",
 )
 def test_live_with_history_kickers_have_known_foot() -> None:
-    """Players with penalty history have a non-"Unknown" kicking_foot
-    derived from the history's `shot_type` mode."""
+    """Every roster player has a non-empty `kicking_foot`.
+
+    v3 (Issue #36): the column keeps the `kicking_foot` name for consumer
+    continuity, but the underlying semantic is the declared `preferred_foot`
+    from `pageProps.data.playerInformation[]` (translationKey="preferred_foot").
+    The FotMob cache covers all 1247 roster players, so every row gets a
+    real value (`left` / `right` / `both`) — no `"Unknown"` rows.
+    """
     art = Artifacts()
     preds_path = art.predictions
     if not preds_path.exists():
@@ -611,13 +617,14 @@ def test_live_with_history_kickers_have_known_foot() -> None:
         rows = [json.loads(line) for line in f]
     n_unknown = sum(1 for r in rows if r["kicking_foot"] == "Unknown")
     n_known = len(rows) - n_unknown
-    # Live: 265/1243 with history. The model gives all 1243 players
-    # a prediction; the 265 with history get a real kicking_foot.
+    # v3: the per-player FotMob page is the source of truth, so every
+    # row has a real preferred_foot (left/right/both). The `"Unknown"`
+    # sentinel from the v2 inferred-from-history path is gone.
     assert n_known > 0
-    assert n_unknown > 0
-    # Sanity: known feet are exactly the two-shot string values.
+    assert n_unknown == 0
+    # Sanity: known feet are the three declared-foot string values.
     for r in rows:
-        assert r["kicking_foot"] in ("LeftFoot", "RightFoot", "Unknown"), (
+        assert r["kicking_foot"] in ("left", "right", "both"), (
             f"unexpected kicking_foot: {r['kicking_foot']!r}"
         )
 
