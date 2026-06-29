@@ -51,70 +51,9 @@ from penalty_pred.model import (
     save_artifact,
     temporal_split,
 )
+from tests._factories import make_training_row
 
-# ---------------------------------------------------------------------------
-# Helpers (test-local)
-# ---------------------------------------------------------------------------
-
-
-def _make_row(
-    label: str = "L",
-    *,
-    match_id: int = 1,
-    kick_number: int = 1,
-    kicker_id: int = 1,
-    date: str = "2024-06-01T00:00:00+00:00",
-    kicking_foot: str = "RightFoot",
-    pos: str = "striker",
-    rnd: str = "1/8",
-    age: float | None = 25.0,
-    last_side: str = "L",
-    career: int = 5,
-    score: tuple[int, int] = (0, 0),
-) -> TrainingRow:
-    """Build a complete `TrainingRow` for tests (the unified row type)."""
-    return TrainingRow(
-        match_id=match_id,
-        kick_number=kick_number,
-        kicker_id=kicker_id,
-        kicker_name="Stub",
-        match_date=date,
-        tournament_id=77,
-        tournament_name="World Cup",
-        round=rnd,
-        team_id=1,
-        is_home=True,
-        label=label,
-        is_on_target=True,
-        # A1 — uniform-ish; tests verify the matrix shape, not the math.
-        p_L_5=1.0 if label == "L" else 0.0,
-        p_C_5=1.0 if label == "C" else 0.0,
-        p_R_5=1.0 if label == "R" else 0.0,
-        p_L_10=1.0 if label == "L" else 0.0,
-        p_C_10=1.0 if label == "C" else 0.0,
-        p_R_10=1.0 if label == "R" else 0.0,
-        p_L_20=1.0 if label == "L" else 0.0,
-        p_C_20=1.0 if label == "C" else 0.0,
-        p_R_20=1.0 if label == "R" else 0.0,
-        # A2
-        last_side=last_side,
-        # A3
-        kicking_foot=kicking_foot,
-        # A4
-        career_penalty_count=career,
-        # B1
-        b1_kick_number=kick_number,
-        # B2
-        pen_score_home=score[0],
-        pen_score_away=score[1],
-        is_decisive=False,
-        # B3
-        b3_round=rnd,
-        # C1
-        position=pos,
-        # C2
-        age=age if age is not None else float("nan"),
-    )
+_make_row = make_training_row
 
 
 # ---------------------------------------------------------------------------
@@ -230,9 +169,9 @@ def test_build_feature_matrix_default_columns() -> None:
 
 def test_temporal_split_pre_post() -> None:
     """Rows before the cutoff go to train, rows at or after to holdout."""
-    pre = _make_row(date="2025-12-31T23:59:00+00:00")
-    edge = _make_row(date="2026-01-01T00:00:00+00:00")
-    post = _make_row(date="2026-06-15T00:00:00+00:00")
+    pre = _make_row(match_date="2025-12-31T23:59:00+00:00")
+    edge = _make_row(match_date="2026-01-01T00:00:00+00:00")
+    post = _make_row(match_date="2026-06-15T00:00:00+00:00")
     train, holdout = temporal_split([pre, edge, post])
     assert len(train) == 1
     assert len(holdout) == 2
@@ -241,8 +180,8 @@ def test_temporal_split_pre_post() -> None:
 
 
 def test_temporal_split_custom_cutoff() -> None:
-    pre = _make_row(date="2022-01-01T00:00:00+00:00")
-    post = _make_row(date="2022-12-31T00:00:00+00:00")
+    pre = _make_row(match_date="2022-01-01T00:00:00+00:00")
+    post = _make_row(match_date="2022-12-31T00:00:00+00:00")
     train, holdout = temporal_split([pre, post], cutoff_date="2022-06-01")
     assert len(train) == 1
     assert len(holdout) == 1
@@ -436,7 +375,7 @@ def _toy_dataset(n_per_class: int = 30) -> list[TrainingRow]:
                 _make_row(
                     label=label,
                     kicker_id=hash((label, i)) & 0xFFFF,
-                    pos={"L": "striker", "C": "midfielder", "R": "defender"}[label],
+                    position={"L": "striker", "C": "midfielder", "R": "defender"}[label],
                     kicking_foot={"L": "RightFoot", "C": "RightFoot", "R": "LeftFoot"}[label],
                 )
             )

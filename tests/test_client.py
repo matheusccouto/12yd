@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gzip
+import json
 from pathlib import Path
 from typing import Any, cast
 
@@ -130,23 +131,77 @@ def test_304_response_serves_from_disk_cache(tmp_path: Path, monkeypatch) -> Non
     assert result == {"x": 1}
 
 
-def test_cache_key_is_filesystem_safe() -> None:
-    key = client_module._cache_key("https://x.y/z?a=1&b=2/")
-    assert "/" not in key.name
-    assert "?" not in key.name
-    assert key.name.endswith(".json.gz")
-
-
-def test_decompress_handles_uncompressed_body() -> None:
-    """A response with content-encoding=gzip header but uncompressed body
-    (some FotMob edge cases) is not double-decompressed."""
+def test_get_handles_url_with_query_string_and_trailing_slash(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """`client.get` accepts paths whose query string or trailing slash
+    would create filesystem-unsafe characters in the cache key. The
+    public interface succeeds without raising; the cache file is
+    created under the (filesystem-safe) cache key."""
+    monkeypatch.setattr(client_module, "_discover_build_id", lambda c: "fake-build-id")
     payload = b'{"ok": true}'
-    resp = _StubResponse(body=payload, headers={"content-encoding": "gzip"})
-    assert client_module._decompress(cast("httpx.Response", resp)) == payload
+    _stub_httpx_client(
+        monkeypatch,
+        _StubResponse(status_code=200, body=payload, headers={"etag": "abc"}),
+    )
+    client = FotMobClient(cache_dir=tmp_path)
+    result = client.get("leagues/77/overview/world-cup?tz=UTC&date=20240101")
+    assert result == {"ok": True}
+    # The cache file is created under the sanitized key (no `/` or `?`
+    # in the file name). One .json.gz body + one .etag sidecar.
+    cache_files = list(tmp_path.glob("*.json.gz"))
+    assert len(cache_files) == 1
+    assert "/" not in cache_files[0].name
+    assert "?" not in cache_files[0].name
 
 
-def test_decompress_handles_gzipped_body() -> None:
-    payload = b'{"ok": true}'
+def test_get_decompresses_gzipped_response_body(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """`client.get` decompresses a gzipped body (the `content-encoding`
+    header is set). The parsed JSON is the decompressed payload, not
+    the raw gzip bytes."""
+    monkeypatch.setattr(client_module, "_discover_build_id", lambda c: "fake-build-id")
+    payload = b'{"decompressed": true}'
     gz = gzip.compress(payload)
-    resp = _StubResponse(body=gz, headers={"content-encoding": "gzip"})
-    assert client_module._decompress(cast("httpx.Response", resp)) == payload
+    _stub_httpx_client(
+        monkeypatch,
+        _StubResponse(
+            status_code=200,
+            body=gz,
+            headers={"content-encoding": "gzip", "etag": "abc"},
+        ),
+    )
+    client = FotMobClient(cache_dir=tmp_path)
+    result = client.get("matches/x/y")
+    assert result == {"decompressed": True}
+    # The on-disk cache holds the gzipped payload (so the second
+    # request is a 304, not a re-fetch).
+    cache_file = next(tmp_path.glob("*.json.gz"))
+    assert gzip.decompress(cache_file.read_bytes()) == payload
+
+
+def test_get_handles_uncompressed_body_with_gzip_header(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Some FotMob responses set `content-encoding: gzip` but ship
+    already-uncompressed bytes. `client.get` parses the JSON without
+    double-decompressing (it detects gzip by magic bytes, not by
+    header)."""
+    monkeypatch.setattr(client_module, "_discover_build_id", lambda c: "fake-build-id")
+    payload = b'{"uncompressed": true}'
+    _stub_httpx_client(
+        monkeypatch,
+        _StubResponse(
+            status_code=200,
+            body=payload,
+            headers={"content-encoding": "gzip", "etag": "abc"},
+        ),
+    )
+    client = FotMobClient(cache_dir=tmp_path)
+    result = client.get("matches/x/y")
+    assert result == {"uncompressed": True}
+    # The cache stores the bytes verbatim (the on-disk round-trip is
+    # the same as the round-trip via gzip.compress + gzip.decompress).
+    cache_file = next(tmp_path.glob("*.json.gz"))
+    assert json.loads(gzip.decompress(cache_file.read_bytes())) == {"uncompressed": True}

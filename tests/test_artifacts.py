@@ -19,12 +19,14 @@ import pytest
 
 from penalty_pred.artifacts import Artifacts
 from penalty_pred.evaluate import BaselineMetrics, MetricsReport
-from penalty_pred.features import TrainingRow
-from penalty_pred.initial_set import MissingKicker
-from penalty_pred.player_history import PlayerPenalty
-from penalty_pred.predict import PredictionRow
-from penalty_pred.rosters import RosterPlayer
-from penalty_pred.shootouts import ShootoutKick
+from tests._factories import (
+    make_history_row,
+    make_missing_kicker,
+    make_prediction_row,
+    make_roster_player,
+    make_shootout_kick,
+    make_training_row,
+)
 
 
 # A module-level dataclass (not nested in a test) so pickle can
@@ -85,27 +87,7 @@ def test_fotmob_client_factory_uses_cache_dir() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _shootout_kick(match_id: int = 1, kick_number: int = 1) -> ShootoutKick:
-    return ShootoutKick(
-        match_id=match_id,
-        match_date="2022-12-18T15:00:00+00:00",
-        tournament_id=77,
-        tournament_name="World Cup",
-        round="Final",
-        kick_number=kick_number,
-        kicker_id=42,
-        kicker_name="Stub",
-        team_id=100,
-        is_home=True,
-        x=0.5,
-        side="L",
-        is_on_target=True,
-        outcome="Goal",
-        pen_score_before=[0, 0],
-        pen_score_after=[1, 0],
-        match_score_home=3,
-        match_score_away=3,
-    )
+_shootout_kick = make_shootout_kick
 
 
 def test_shootout_kicks_round_trip(tmp_path: Path) -> None:
@@ -118,22 +100,7 @@ def test_shootout_kicks_round_trip(tmp_path: Path) -> None:
 
 def test_player_history_round_trip(tmp_path: Path) -> None:
     art = Artifacts(root=tmp_path)
-    rows = [
-        PlayerPenalty(
-            kicker_id=42,
-            match_id=99,
-            match_date="2022-01-01T00:00:00+00:00",
-            league_id=77,
-            league_name="World Cup",
-            team_id=100,
-            is_home=True,
-            x=0.5,
-            side="L",
-            is_on_target=True,
-            outcome="Goal",
-            shot_type="RightFoot",
-        )
-    ]
+    rows = [make_history_row(match_id=99, match_date="2022-01-01T00:00:00+00:00")]
     n = art.write_player_history(rows, path=art.player_history)
     assert n == 1
     assert art.read_player_history() == rows
@@ -141,14 +108,7 @@ def test_player_history_round_trip(tmp_path: Path) -> None:
 
 def test_missing_history_round_trip(tmp_path: Path) -> None:
     art = Artifacts(root=tmp_path)
-    rows = [
-        MissingKicker(
-            player_id=1,
-            player_name="No History",
-            team_id=1,
-            team_name="Argentina",
-        )
-    ]
+    rows = [make_missing_kicker()]
     n = art.write_missing_history(rows, path=art.missing_history)
     assert n == 1
     assert art.read_missing_history() == rows
@@ -156,15 +116,7 @@ def test_missing_history_round_trip(tmp_path: Path) -> None:
 
 def test_roster_round_trip(tmp_path: Path) -> None:
     art = Artifacts(root=tmp_path)
-    rows = [
-        RosterPlayer(
-            player_id=1,
-            player_name="Alpha",
-            team_id=100,
-            team_name="Argentina",
-            country_code="ARG",
-        )
-    ]
+    rows = [make_roster_player()]
     n = art.write_roster(rows, path=art.roster)
     assert n == 1
     assert art.read_roster() == rows
@@ -172,19 +124,7 @@ def test_roster_round_trip(tmp_path: Path) -> None:
 
 def test_predictions_round_trip(tmp_path: Path) -> None:
     art = Artifacts(root=tmp_path)
-    rows = [
-        PredictionRow(
-            player_id=1,
-            player_name="Alpha",
-            team_id=100,
-            team_name="Argentina",
-            country_code="ARG",
-            kicking_foot="RightFoot",
-            p_L=0.5,
-            p_C=0.25,
-            p_R=0.25,
-        )
-    ]
+    rows = [make_prediction_row()]
     n = art.write_predictions(rows, path=art.predictions)
     assert n == 1
     assert art.read_predictions() == rows
@@ -194,41 +134,7 @@ def test_training_table_round_trip_with_nan_age(tmp_path: Path) -> None:
     """`write_training_table` emits NaN ages as JSON `null` (strict
     JSON, not `NaN`); `read_training_table` recovers them as `None`."""
     art = Artifacts(root=tmp_path)
-    rows = [
-        TrainingRow(
-            match_id=1,
-            kick_number=1,
-            kicker_id=1,
-            kicker_name="X",
-            match_date="2022-12-18T15:00:00+00:00",
-            tournament_id=77,
-            tournament_name="World Cup",
-            round="Final",
-            team_id=1,
-            is_home=True,
-            label="L",
-            is_on_target=True,
-            p_L_5=1.0,
-            p_C_5=0.0,
-            p_R_5=0.0,
-            p_L_10=1.0,
-            p_C_10=0.0,
-            p_R_10=0.0,
-            p_L_20=1.0,
-            p_C_20=0.0,
-            p_R_20=0.0,
-            last_side="R",
-            kicking_foot="RightFoot",
-            career_penalty_count=5,
-            b1_kick_number=1,
-            pen_score_home=0,
-            pen_score_away=0,
-            is_decisive=False,
-            b3_round="Final",
-            position="striker",
-            age=math.nan,
-        )
-    ]
+    rows = [make_training_row(age=math.nan)]
     n = art.write_training_table(rows, path=art.training_table)
     assert n == 1
     raw = art.training_table.read_text(encoding="utf-8")
@@ -376,39 +282,7 @@ def test_serialize_row_emits_nan_as_null() -> None:
     """`serialize_row(nan_to_null=True)` emits NaN ages as JSON `null`
     (strict JSON), matching `write_training_table`'s per-row shape."""
     art = Artifacts()
-    row = TrainingRow(
-        match_id=1,
-        kick_number=1,
-        kicker_id=1,
-        kicker_name="X",
-        match_date="2022-12-18T15:00:00+00:00",
-        tournament_id=77,
-        tournament_name="World Cup",
-        round="Final",
-        team_id=1,
-        is_home=True,
-        label="L",
-        is_on_target=True,
-        p_L_5=1.0,
-        p_C_5=0.0,
-        p_R_5=0.0,
-        p_L_10=1.0,
-        p_C_10=0.0,
-        p_R_10=0.0,
-        p_L_20=1.0,
-        p_C_20=0.0,
-        p_R_20=0.0,
-        last_side="R",
-        kicking_foot="RightFoot",
-        career_penalty_count=5,
-        b1_kick_number=1,
-        pen_score_home=0,
-        pen_score_away=0,
-        is_decisive=False,
-        b3_round="Final",
-        position="striker",
-        age=math.nan,
-    )
+    row = make_training_row(age=math.nan)
     text = art.serialize_row(row, nan_to_null=True)
     payload = json.loads(text)
     assert payload["age"] is None

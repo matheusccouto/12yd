@@ -44,7 +44,7 @@ import pytest
 
 from penalty_pred.artifacts import Artifacts
 from penalty_pred.features import PRIOR_PROB
-from penalty_pred.player_history import PlayerMetadata, PlayerPenalty
+from penalty_pred.player_history import PlayerMetadata
 from penalty_pred.predict import (
     PredictionRow,
     build_prediction_features,
@@ -52,64 +52,16 @@ from penalty_pred.predict import (
     predict_roster,
 )
 from penalty_pred.rosters import RosterPlayer
+from tests._factories import (
+    PREDICTION_ROW_FIELDS,
+    make_history_row,
+    make_metadata,
+    make_roster_player,
+)
 
-# ---------------------------------------------------------------------------
-# Sample builders (test-local)
-# ---------------------------------------------------------------------------
-
-
-def _roster_player(
-    player_id: int = 1,
-    name: str = "Alpha",
-    team_id: int = 1,
-    team_name: str = "Argentina",
-    country_code: str = "ARG",
-) -> RosterPlayer:
-    return RosterPlayer(
-        player_id=player_id,
-        player_name=name,
-        team_id=team_id,
-        team_name=team_name,
-        country_code=country_code,
-    )
-
-
-def _penalty(
-    match_id: int = 1,
-    match_date: str = "2024-06-01T00:00:00+00:00",
-    side: str = "L",
-    shot_type: str = "RightFoot",
-    kicker_id: int = 1,
-) -> PlayerPenalty:
-    return PlayerPenalty(
-        kicker_id=kicker_id,
-        match_id=match_id,
-        match_date=match_date,
-        league_id=77,
-        league_name="World Cup",
-        team_id=100,
-        is_home=True,
-        x=0.5,
-        side=side,
-        is_on_target=True,
-        outcome="Goal",
-        shot_type=shot_type,
-    )
-
-
-def _metadata(
-    player_id: int = 1,
-    name: str = "Alpha",
-    position_key: str = "striker",
-    birth_date: str = "1995-01-01",
-) -> PlayerMetadata:
-    return PlayerMetadata(
-        player_id=player_id,
-        player_name=name,
-        position_key=position_key,
-        birth_date=birth_date,
-    )
-
+_roster_player = make_roster_player
+_penalty = make_history_row
+_metadata = make_metadata
 
 TARGET_DATE: str = "2026-12-31T00:00:00+00:00"
 
@@ -271,7 +223,7 @@ def test_predict_kicker_with_no_history_returns_prior_only_row() -> None:
     stub = _StubModel(np.array([0.4, 0.2, 0.4]))
     pred = predict_kicker(
         model=stub,
-        kicker=_roster_player(player_id=1, name="Alpha"),
+        kicker=_roster_player(player_id=1, player_name="Alpha"),
         history=[],
         metadata=_metadata(player_id=1),
         target_date=TARGET_DATE,
@@ -366,9 +318,9 @@ def test_predict_roster_returns_one_row_per_kicker() -> None:
     """The orchestrator returns one `PredictionRow` per input roster
     player, in the same order."""
     roster = [
-        _roster_player(player_id=1, name="Alpha"),
-        _roster_player(player_id=2, name="Bravo"),
-        _roster_player(player_id=3, name="Charlie"),
+        _roster_player(player_id=1, player_name="Alpha"),
+        _roster_player(player_id=2, player_name="Bravo"),
+        _roster_player(player_id=3, player_name="Charlie"),
     ]
     stub = _StubModel(np.array([0.5, 0.25, 0.25]))
     out = predict_roster(
@@ -388,8 +340,8 @@ def test_predict_roster_looks_up_per_kicker_history() -> None:
     `player_history` dict. A kicker with a populated history gets
     `kicking_foot` from that history; a kicker without gets "Unknown"."""
     roster = [
-        _roster_player(player_id=1, name="With History"),
-        _roster_player(player_id=2, name="No History"),
+        _roster_player(player_id=1, player_name="With History"),
+        _roster_player(player_id=2, player_name="No History"),
     ]
     history = {
         1: [_penalty(1, "2024-01-01T00:00:00+00:00", side="L", shot_type="RightFoot")],
@@ -411,8 +363,8 @@ def test_predict_roster_handles_metadata_fetch_failure() -> None:
     abort the run — those kickers just get `position=""` and
     `age=NaN`."""
     roster = [
-        _roster_player(player_id=1, name="A"),
-        _roster_player(player_id=2, name="B"),
+        _roster_player(player_id=1, player_name="A"),
+        _roster_player(player_id=2, player_name="B"),
     ]
     stub = _StubModel(np.array([0.5, 0.3, 0.2]))
 
@@ -537,21 +489,10 @@ def test_live_predictions_jsonl_schema_smoke() -> None:
         f"predictions.jsonl has {n_preds} rows, roster has {n_roster}; expected 1-to-1"
     )
 
-    expected_fields = {
-        "player_id",
-        "player_name",
-        "team_id",
-        "team_name",
-        "country_code",
-        "kicking_foot",
-        "p_L",
-        "p_C",
-        "p_R",
-    }
     for i, line in enumerate(lines):
         row = json.loads(line)
-        assert set(row.keys()) == expected_fields, (
-            f"row {i} has unexpected fields: {set(row.keys()) ^ expected_fields}"
+        assert set(row.keys()) == set(PREDICTION_ROW_FIELDS), (
+            f"row {i} has unexpected fields: {set(row.keys()) ^ set(PREDICTION_ROW_FIELDS)}"
         )
         # Probabilities are valid floats and sum to 1.
         p_L, p_C, p_R = row["p_L"], row["p_C"], row["p_R"]

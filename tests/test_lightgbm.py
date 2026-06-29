@@ -29,7 +29,6 @@ import pickle
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 import pytest
 
 from penalty_pred.artifacts import Artifacts
@@ -40,7 +39,6 @@ from penalty_pred.model import (
     RANDOM_SEED,
     LightGBMClassifierWrapper,
     TrainingRow,
-    _coerce_lightgbm_categoricals,
     build_feature_matrix,
     compute_class_weights,
     fit_lightgbm,
@@ -49,65 +47,9 @@ from penalty_pred.model import (
     make_lightgbm,
     save_artifact,
 )
+from tests._factories import make_training_row
 
-# ---------------------------------------------------------------------------
-# Helpers (test-local)
-# ---------------------------------------------------------------------------
-
-
-def _make_row(
-    label: str = "L",
-    *,
-    match_id: int = 1,
-    kick_number: int = 1,
-    kicker_id: int = 1,
-    date: str = "2024-06-01T00:00:00+00:00",
-    kicking_foot: str = "RightFoot",
-    pos: str = "striker",
-    rnd: str = "1/8",
-    age: float | None = 25.0,
-    last_side: str = "L",
-    career: int = 5,
-    score: tuple[int, int] = (0, 0),
-) -> TrainingRow:
-    """Build a complete `TrainingRow` (the unified row type).
-
-    Mirrors the helper in `test_model.py` so the toy datasets are
-    interchangeable between the two test modules.
-    """
-    return TrainingRow(
-        match_id=match_id,
-        kick_number=kick_number,
-        kicker_id=kicker_id,
-        kicker_name="Stub",
-        match_date=date,
-        tournament_id=77,
-        tournament_name="World Cup",
-        round=rnd,
-        team_id=1,
-        is_home=True,
-        label=label,
-        is_on_target=True,
-        p_L_5=1.0 if label == "L" else 0.0,
-        p_C_5=1.0 if label == "C" else 0.0,
-        p_R_5=1.0 if label == "R" else 0.0,
-        p_L_10=1.0 if label == "L" else 0.0,
-        p_C_10=1.0 if label == "C" else 0.0,
-        p_R_10=1.0 if label == "R" else 0.0,
-        p_L_20=1.0 if label == "L" else 0.0,
-        p_C_20=1.0 if label == "C" else 0.0,
-        p_R_20=1.0 if label == "R" else 0.0,
-        last_side=last_side,
-        kicking_foot=kicking_foot,
-        career_penalty_count=career,
-        b1_kick_number=kick_number,
-        pen_score_home=score[0],
-        pen_score_away=score[1],
-        is_decisive=False,
-        b3_round=rnd,
-        position=pos,
-        age=age if age is not None else float("nan"),
-    )
+_make_row = make_training_row
 
 
 def _toy_dataset(n_per_class: int = 30) -> list[TrainingRow]:
@@ -119,7 +61,7 @@ def _toy_dataset(n_per_class: int = 30) -> list[TrainingRow]:
                 _make_row(
                     label=label,
                     kicker_id=hash((label, i)) & 0xFFFF,
-                    pos={"L": "striker", "C": "midfielder", "R": "defender"}[label],
+                    position={"L": "striker", "C": "midfielder", "R": "defender"}[label],
                     kicking_foot={"L": "RightFoot", "C": "RightFoot", "R": "LeftFoot"}[label],
                 )
             )
@@ -173,47 +115,6 @@ def test_compute_class_weights_balanced_uniform() -> None:
 def test_compute_class_weights_empty() -> None:
     """Empty input returns an empty dict (no classes observed)."""
     assert compute_class_weights(np.empty(0, dtype=np.int64)) == {}
-
-
-# ---------------------------------------------------------------------------
-# _coerce_lightgbm_categoricals
-# ---------------------------------------------------------------------------
-
-
-def test_coerce_lightgbm_categoricals_fit_captures_values() -> None:
-    """At fit time, the function captures the categories present in X."""
-    X = pd.DataFrame({"cat": ["a", "b", "a", "c"], "num": [1.0, 2.0, 3.0, 4.0]})
-    out = _coerce_lightgbm_categoricals(X, ["cat"], fit=True, categories=None)
-    assert isinstance(out["cat"].dtype, pd.CategoricalDtype)
-    assert set(out["cat"].cat.categories.tolist()) == {"a", "b", "c"}
-
-
-def test_coerce_lightgbm_categoricals_predict_uses_captured() -> None:
-    """At predict time, the function uses the captured categories
-    from the `categories` dict. Unseen values become NaN (which
-    LightGBM treats as missing)."""
-    X = pd.DataFrame({"cat": ["a", "b", "a", "c"]})
-    out = _coerce_lightgbm_categoricals(X, ["cat"], fit=False, categories={"cat": ["a", "b"]})
-    # "c" is not in the captured categories → NaN
-    assert pd.isna(out["cat"].iloc[3])
-    # "a" and "b" are in the captured categories → kept
-    assert out["cat"].iloc[0] == "a"
-    assert out["cat"].iloc[1] == "b"
-
-
-def test_coerce_lightgbm_categoricals_passthrough_non_categorical() -> None:
-    """Non-categorical columns are passed through unchanged."""
-    X = pd.DataFrame({"cat": ["a", "b"], "num": [1.0, 2.0]})
-    out = _coerce_lightgbm_categoricals(X, ["cat"], fit=True, categories=None)
-    assert out["num"].tolist() == [1.0, 2.0]
-
-
-def test_coerce_lightgbm_categoricals_no_mutation() -> None:
-    """The function does not mutate the input DataFrame."""
-    X = pd.DataFrame({"cat": ["a", "b"]})
-    original_dtype = X["cat"].dtype
-    _coerce_lightgbm_categoricals(X, ["cat"], fit=True, categories=None)
-    assert X["cat"].dtype == original_dtype
 
 
 # ---------------------------------------------------------------------------
@@ -322,7 +223,7 @@ def test_predict_handles_unseen_categorical_values() -> None:
     wrapper = fit_lightgbm(matrix)
 
     # Build a new row with an unseen `b3_round`.
-    new_row = _make_row(label="L", rnd="NEVER_SEEN_BEFORE")
+    new_row = _make_row(label="L", round="NEVER_SEEN_BEFORE")
     new_matrix = build_feature_matrix([new_row])
     probs = np.asarray(wrapper.predict_proba(new_matrix.X))
     assert probs.shape == (1, 3)

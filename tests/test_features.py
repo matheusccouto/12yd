@@ -50,8 +50,13 @@ from penalty_pred.features import (
     mode_kicking_foot,
     side_distribution,
 )
-from penalty_pred.player_history import PlayerMetadata, PlayerPenalty
+from penalty_pred.player_history import PlayerMetadata
 from penalty_pred.shootouts import ShootoutKick
+from tests._factories import (
+    TRAINING_ROW_FIELDS,
+    make_history_row,
+    make_shootout_kick,
+)
 
 # ---------------------------------------------------------------------------
 # side_distribution
@@ -225,27 +230,7 @@ def test_age_in_years_malformed_returns_nan() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _penalty(
-    match_id: int,
-    match_date: str,
-    side: str = "L",
-    shot_type: str = "RightFoot",
-    kicker_id: int = 1,
-) -> PlayerPenalty:
-    return PlayerPenalty(
-        kicker_id=kicker_id,
-        match_id=match_id,
-        match_date=match_date,
-        league_id=77,
-        league_name="World Cup",
-        team_id=100,
-        is_home=True,
-        x=0.5,
-        side=side,
-        is_on_target=True,
-        outcome="Goal",
-        shot_type=shot_type,
-    )
+_penalty = make_history_row
 
 
 def test_filter_history_excludes_target_date() -> None:
@@ -279,35 +264,7 @@ def test_filter_history_empty() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _shootout_kick(
-    match_id: int,
-    kick_number: int,
-    *,
-    kicker_id: int = 1,
-    is_home: bool = True,
-    side: str = "L",
-    match_date: str = "2022-12-18T15:00:00+00:00",
-) -> ShootoutKick:
-    return ShootoutKick(
-        match_id=match_id,
-        match_date=match_date,
-        tournament_id=77,
-        tournament_name="World Cup",
-        round="Final",
-        kick_number=kick_number,
-        kicker_id=kicker_id,
-        kicker_name="Stub",
-        team_id=1 if is_home else 2,
-        is_home=is_home,
-        x=0.5,
-        side=side,
-        is_on_target=True,
-        outcome="Goal",
-        pen_score_before=[0, 0],
-        pen_score_after=[1, 0],
-        match_score_home=1,
-        match_score_away=1,
-    )
+_shootout_kick = make_shootout_kick
 
 
 def test_index_kicks_done_walks_match_in_order() -> None:
@@ -844,50 +801,6 @@ def test_write_training_table_empty(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-REQUIRED_FIELDS = frozenset(
-    {
-        # Identifiers
-        "match_id",
-        "kick_number",
-        "kicker_id",
-        "kicker_name",
-        "match_date",
-        "tournament_id",
-        "tournament_name",
-        "round",
-        "team_id",
-        "is_home",
-        # Label
-        "label",
-        # is_on_target
-        "is_on_target",
-        # A1
-        "p_L_5",
-        "p_C_5",
-        "p_R_5",
-        "p_L_10",
-        "p_C_10",
-        "p_R_10",
-        "p_L_20",
-        "p_C_20",
-        "p_R_20",
-        # A2 / A3 / A4
-        "last_side",
-        "kicking_foot",
-        "career_penalty_count",
-        # B1 / B2 / B3
-        "b1_kick_number",
-        "pen_score_home",
-        "pen_score_away",
-        "is_decisive",
-        "b3_round",
-        # C1 / C2
-        "position",
-        "age",
-    }
-)
-
-
 @pytest.mark.skipif(
     not (
         Artifacts().shootout_kicks.exists()
@@ -899,7 +812,8 @@ REQUIRED_FIELDS = frozenset(
 def test_training_table_jsonl_schema_smoke() -> None:
     """Smoke test against the live `output/training_table.jsonl`:
 
-    1. Every row has the 26 PRD-mandated fields.
+    1. Every row has the unified `TrainingRow` schema (derived from
+       `dataclasses.fields(TrainingRow)` in `tests._factories`).
     2. Row count equals the count in `shootout_kicks.jsonl`.
     3. A1 sums to 1.0 (within 1e-6) for every row.
     4. `age` is either a number ≥ 0 or `null` (no NaN literals, no
@@ -933,8 +847,8 @@ def test_training_table_jsonl_schema_smoke() -> None:
             if not line:
                 continue
             row = json.loads(line)
-            assert REQUIRED_FIELDS <= set(row.keys()), (
-                f"row missing fields: {REQUIRED_FIELDS - set(row.keys())}"
+            assert TRAINING_ROW_FIELDS <= set(row.keys()), (
+                f"row missing fields: {TRAINING_ROW_FIELDS - set(row.keys())}"
             )
             assert row["label"] in {"L", "C", "R"}, f"bad label: {row['label']!r}"
             assert isinstance(row["is_decisive"], bool)

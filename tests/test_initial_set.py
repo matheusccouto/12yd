@@ -39,6 +39,12 @@ from penalty_pred.initial_set import (
 from penalty_pred.player_history import fetch_player_data
 from penalty_pred.rosters import RosterPlayer
 from penalty_pred.shootouts import ShootoutKick
+from tests._factories import (
+    MISSING_KICKER_FIELDS,
+    PLAYER_PENALTY_FIELDS,
+    make_roster_player,
+    make_shootout_kick,
+)
 
 # ---------------------------------------------------------------------------
 # Typed row builders (the iter_initial_set_kickers tests)
@@ -51,27 +57,14 @@ def _shootout_kick(
     team_id: int = 0,
     match_id: int = 1,
 ) -> ShootoutKick:
-    """A minimal `ShootoutKick` carrying only the fields `iter_initial_set_kickers`
-    reads. Other fields are zeroed — they are not on this code path."""
-    return ShootoutKick(
+    """A `ShootoutKick` carrying the fields `iter_initial_set_kickers`
+    reads. The factory's defaults cover the rest."""
+    return make_shootout_kick(
         match_id=match_id,
-        match_date="2022-12-18T15:00:00+00:00",
-        tournament_id=77,
-        tournament_name="World Cup",
-        round="Final",
         kick_number=1,
         kicker_id=kicker_id,
         kicker_name=kicker_name,
         team_id=team_id,
-        is_home=True,
-        x=0.5,
-        side="L",
-        is_on_target=True,
-        outcome="Goal",
-        pen_score_before=[0, 0],
-        pen_score_after=[1, 0],
-        match_score_home=3,
-        match_score_away=3,
     )
 
 
@@ -81,12 +74,11 @@ def _roster_player(
     team_id: int = 0,
     team_name: str = "",
 ) -> RosterPlayer:
-    return RosterPlayer(
+    return make_roster_player(
         player_id=player_id,
         player_name=player_name,
         team_id=team_id,
         team_name=team_name,
-        country_code="ARG",
     )
 
 
@@ -552,25 +544,6 @@ def test_fetch_initial_set_script_accepts_reparameterisation_flags() -> None:
 # ---------------------------------------------------------------------------
 
 
-REQUIRED_PLAYER_HISTORY_FIELDS = frozenset(
-    {
-        "kicker_id",
-        "match_id",
-        "match_date",
-        "league_id",
-        "league_name",
-        "team_id",
-        "is_home",
-        "x",
-        "side",
-        "is_on_target",
-        "outcome",
-        "shot_type",
-    }
-)
-REQUIRED_MISSING_FIELDS = frozenset({"player_id", "player_name", "team_id"})
-
-
 @pytest.mark.skipif(
     not (Artifacts().player_history.exists()
          and Artifacts().missing_history.exists()
@@ -580,11 +553,11 @@ REQUIRED_MISSING_FIELDS = frozenset({"player_id", "player_name", "team_id"})
 )
 def test_player_history_jsonl_schema_smoke() -> None:
     """Smoke test against the live output: every row in
-    `output/player_history.jsonl` has the 12 PRD-mandated fields, every
-    `x` is in [0, 2], every `side` is in {L, C, R}, every `outcome` is in
-    {Goal, Saved, Missed}, and the missing list has the 3 required fields
-    plus `team_name` (the full schema also carries `team_name` for parity
-    with the roster).
+    `output/player_history.jsonl` has the `PlayerPenalty` schema (derived
+    from `dataclasses.fields(PlayerPenalty)` in `tests._factories`),
+    every `x` is in [0, 2], every `side` is in {L, C, R}, every
+    `outcome` is in {Goal, Saved, Missed}, and the missing list has
+    the `MissingKicker` schema.
     """
     art = Artifacts()
     n_rows = 0
@@ -595,8 +568,8 @@ def test_player_history_jsonl_schema_smoke() -> None:
             if not line:
                 continue
             row = json.loads(line)
-            assert REQUIRED_PLAYER_HISTORY_FIELDS <= set(row.keys()), (
-                f"row missing fields: {REQUIRED_PLAYER_HISTORY_FIELDS - set(row.keys())}"
+            assert PLAYER_PENALTY_FIELDS <= set(row.keys()), (
+                f"row missing fields: {PLAYER_PENALTY_FIELDS - set(row.keys())}"
             )
             assert 0.0 <= float(row["x"]) <= 2.0
             assert row["side"] in {"L", "C", "R"}
@@ -613,7 +586,7 @@ def test_player_history_jsonl_schema_smoke() -> None:
             if not line:
                 continue
             row = json.loads(line)
-            assert REQUIRED_MISSING_FIELDS <= set(row.keys())
+            assert MISSING_KICKER_FIELDS <= set(row.keys())
             missing_ids.add(int(row["player_id"]))
             n_missing += 1
     # Sanity: no kicker should appear in both the row list and the missing list.

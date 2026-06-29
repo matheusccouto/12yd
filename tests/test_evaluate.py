@@ -44,53 +44,9 @@ from penalty_pred.evaluate import (
     recommended_dive,
     write_metrics_json,
 )
-from penalty_pred.model import TrainingRow
+from tests._factories import make_training_row
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _make_row(
-    label: str,
-    *,
-    last_side: str = "",
-    is_on_target: bool = True,
-    kicker_id: int = 1,
-) -> TrainingRow:
-    return TrainingRow(
-        match_id=1,
-        kick_number=1,
-        kicker_id=kicker_id,
-        kicker_name="Stub",
-        match_date="2026-01-15T00:00:00+00:00",
-        tournament_id=77,
-        tournament_name="World Cup",
-        round="1/8",
-        team_id=1,
-        is_home=True,
-        label=label,
-        is_on_target=is_on_target,
-        p_L_5=0.0,
-        p_C_5=0.0,
-        p_R_5=0.0,
-        p_L_10=0.0,
-        p_C_10=0.0,
-        p_R_10=0.0,
-        p_L_20=0.0,
-        p_C_20=0.0,
-        p_R_20=0.0,
-        career_penalty_count=0,
-        b1_kick_number=1,
-        pen_score_home=0,
-        pen_score_away=0,
-        is_decisive=False,
-        age=25.0,
-        last_side=last_side,
-        kicking_foot="Unknown",
-        b3_round="1/8",
-        position="striker",
-    )
+_make_row = make_training_row
 
 
 # ---------------------------------------------------------------------------
