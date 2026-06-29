@@ -9,7 +9,7 @@ tags:
 
 # 12yd — Penalty Shootout Side Prediction
 
-Multiclass classifier (L / C / R) on 18 per-kick features; trained on 179 shootout kicks across 6 national-team tournaments (2021–2022). Frozen deployment artifact for `matheusccouto/12yd`.
+Multiclass classifier (L / C / R) on 18 per-kick features; trained on the 151 pre-2026 shootout kicks across 6 national-team tournaments (2021–2022). Frozen deployment artifact for `matheusccouto/12yd`.
 
 ## Save rate is the deployment KPI
 
@@ -40,10 +40,14 @@ should compare to the baselines.
 
 `random` and `last-side` baselines are deterministic and do not depend on
 the retrain; the v2 numbers are pinned. The `lightgbm` and `logreg` rows
-reflect the v3 fit on the v2 179-kick training set (the 18 formerly-skipped
-refs have URL rotation issues and need a separate fix — see `## Further
-Notes`); the `actual keeper` row is `null` because StatsBomb does not
-yet publish per-keeper dive-direction data for the in-scope tournaments.
+reflect the v3 fit on the 151 pre-2026 training rows (Issue #40: the
+artifact and the metrics describe the same model; the previous recipe
+fit the artifact on all 179 rows including the 28-row holdout, so the
+deployed save rate was 0.107 — in-sample memorisation — not the 0.464
+this card advertises). The 18 formerly-skipped refs have URL rotation
+issues and need a separate fix — see `## Further Notes`. The `actual
+keeper` row is `null` because StatsBomb does not yet publish
+per-keeper dive-direction data for the in-scope tournaments.
 
 ### Statistical caveat — 28-row holdout
 
@@ -122,9 +126,9 @@ feature_columns = artifact["feature_columns"]
 ## Repository layout
 
 - `model/lightgbm.pkl` — the frozen LightGBM (LGBMClassifier inside a
-  `LightGBMClassifierWrapper`), trained on the v2 179-kick training set
-  (the 18 formerly-skipped refs have URL rotation issues; see
-  `## Further Notes`).
+  `LightGBMClassifierWrapper`), trained on the 151 pre-2026 training
+  fold (the same model the metrics describe; Issue #40 closed the
+  artifact-vs-metrics data leak).
 - `model/metrics.json` — the held-out metrics report.
 - `data/shootout_kicks.jsonl` — 179 target kicks across 18 shootouts in 6
   national-team tournaments, 2021–2022 (the v2 42-shootout scope minus
@@ -162,10 +166,13 @@ data layer.
   in the A3 feature. 1080 of 1247 v2 rows with `"Unknown"` get real
   declared-foot values from the cached `pageProps.data.playerInformation[]`
   payload. The v3 `predictions.jsonl` has 0 `"Unknown"` rows.
-- **Retrained on the v2 179-kick training set** (the 18 formerly-skipped
-  refs have URL rotation issues; see `## Further Notes`). The holdout
-  (28 WC 2026 kicks, 2026-01-01+) is unchanged from v2; `n_train` is
-  still 151.
+- **Retrained on the 151 pre-2026 training rows** (the same model the
+  metrics describe; Issue #40 closed the artifact-vs-metrics data
+  leak — the v3 release shipped a 179-row artifact with a 0.107
+  in-sample save rate, not the 0.464 the card advertised). The
+  holdout (28 WC 2026 kicks, 2026-01-01+) is unchanged from v2;
+  `n_train` is 151. The 18 formerly-skipped refs have URL rotation
+  issues; see `## Further Notes`.
 - **Save rate is now the headline metric** in this card; the
   accuracy-led v2 card is replaced. The 28-row holdout caveat
   applies to both metrics at this sample size.

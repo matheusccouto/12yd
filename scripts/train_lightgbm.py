@@ -10,9 +10,12 @@ writes:
   save rate for the LightGBM model, the logreg baseline (trained on
   the same training fold for an apples-to-apples comparison), and
   three fixed baselines (random, kicker-most-frequent, actual keeper).
-- `output/lightgbm.pkl` — the LightGBM model retrained on ALL
-  `training_table.jsonl` rows (no holdout) — the frozen deployment
-  artifact the predict slice (#25) will load.
+- `output/lightgbm.pkl` — the LightGBM model fitted on the same
+  151-row pre-2026 training fold that produced the metrics. The
+  artifact and the metrics describe the SAME model (Issue #40: the
+  previous "retrain on all rows" recipe produced an artifact whose
+  in-sample holdout save rate was 0.107, not the 0.464 the card
+  advertised).
 
 The script is re-runnable: same inputs + same random seed → identical
 output. The LightGBM hyperparameters and the holdout cutoff are
@@ -171,6 +174,14 @@ def main() -> int:
         params=lgb_params,
         random_state=RANDOM_SEED,
     )
+    # Issue #40: `lgb` is the model we just scored on the holdout and
+    # wrote to `metrics.json`. Freeze THIS model as the deployment
+    # artifact — never a second fit. A second `fit_lightgbm` call on
+    # the same data with the same seed can drift a kick or two (LightGBM
+    # has minor internal non-determinism from parallel histogram
+    # construction), so the artifact and the metrics would describe
+    # *almost* the same model, not the same one.
+    frozen = lgb
     print(
         f"Fitted LightGBM on {len(train_rows)} rows (params={lgb_params}, "
         f"class_weight=inverse_frequency)."
@@ -221,12 +232,11 @@ def main() -> int:
         f"  keeper:           save_rate={report.actual_keeper_baseline.save_rate}"
     )
 
-    full_matrix = build_feature_matrix(rows)
-    frozen = fit_lightgbm(
-        full_matrix,
-        params=lgb_params,
-        random_state=RANDOM_SEED,
-    )
+    # Issue #40: freeze the deployment artifact on the same 151-row
+    # training fold that produced the metrics, so the artifact and
+    # metrics describe the same model. The previous "retrain on all
+    # rows" recipe produced an in-sample artifact whose holdout save
+    # rate was 0.107, not the 0.464 the card advertised.
     args.model_output.parent.mkdir(parents=True, exist_ok=True)
     art.write_model(
         frozen,
@@ -236,12 +246,12 @@ def main() -> int:
             **lgb_params,
             "class_weight": "inverse_frequency",
             "random_state": RANDOM_SEED,
-            "n_train_rows": len(rows),
+            "n_train_rows": len(train_rows),
         },
         path=args.model_output,
     )
     print(
-        f"\nFroze LightGBM on all {len(rows)} rows → {args.model_output}.\n"
+        f"\nFroze LightGBM on {len(train_rows)} rows (pre-{args.holdout_cutoff}) → {args.model_output}.\n"
         f"  categorical_features={list(CATEGORICAL_FEATURES)}\n"
         f"  numeric_features={list(NUMERIC_FEATURES)}"
     )

@@ -407,6 +407,41 @@ def test_live_lightgbm_artifact_smoke() -> None:
 
 
 @pytest.mark.skipif(
+    not (Artifacts().lightgbm_model.exists() and Artifacts().metrics.exists()),
+    reason="output/ artifacts not present (run the slice first)",
+)
+def test_live_lightgbm_artifact_matches_metrics_n_train() -> None:
+    """Issue #40 AC: the published `lightgbm.pkl` is the SAME model the
+    published `metrics.json` describes. Concretely, the artifact's
+    `params["n_train_rows"]` equals `metrics["n_train"]` and is
+    strictly less than `n_holdout + n_train` (i.e. the artifact was
+    NOT fit on the holdout).
+
+    The previous "retrain on all rows" recipe fit the artifact on
+    179 rows (the full table, including the 28-row 2026 holdout),
+    so the artifact's in-sample save rate was 0.107, not the 0.464
+    the card advertised. The dashboard reads the artifact, so the
+    deployed save rate was 0.107, not 0.464. This test pins the
+    invariant so the regression cannot recur.
+    """
+    art = load_artifact(Artifacts().lightgbm_model)
+    with Artifacts().metrics.open(encoding="utf-8") as f:
+        metrics = json.load(f)
+    artifact_n = art["params"]["n_train_rows"]
+    metrics_n = metrics["n_train"]
+    metrics_holdout = metrics["n_holdout"]
+    assert artifact_n == metrics_n, (
+        f"Artifact n_train_rows={artifact_n} disagrees with metrics "
+        f"n_train={metrics_n}. The two must describe the same model."
+    )
+    assert artifact_n < metrics_n + metrics_holdout, (
+        f"Artifact n_train_rows={artifact_n} looks like the full "
+        f"table (n_train + n_holdout = {metrics_n + metrics_holdout}); "
+        f"it should be the train split only."
+    )
+
+
+@pytest.mark.skipif(
     not Artifacts().lightgbm_model.exists(),
     reason="output/lightgbm.pkl not present (run the slice first)",
 )
