@@ -804,6 +804,172 @@ def test_write_training_table_empty(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Phase 3 (Issue #51): `tournament_kind` on `TrainingRow` is metadata,
+# derived from the `TOURNAMENT_KIND_BY_LEAGUE_ID` lookup at
+# `build_features` time. The field is `"international"` (default) for the
+# 6 existing in-scope tournaments and `"club"` for the 7 new in-scope
+# club tournaments. The model does NOT read this field; it is metadata
+# for the dashboard / future analyst scripts.
+# ---------------------------------------------------------------------------
+
+
+def test_build_features_default_tournament_kind_is_international() -> None:
+    """A `build_features` call with the default `tournament_id=77`
+    (World Cup) returns a row with `tournament_kind="international"`.
+
+    The lookup is a default; the field is always populated even
+    when the caller doesn't pass it.
+    """
+    target = make_shootout_kick(tournament_id=77, tournament_name="World Cup")
+    features = compute_features(
+        history=[],
+        metadata=None,
+        target_date=target.match_date,
+        b_group=BGroupContext(
+            kick_number=target.kick_number,
+            pen_score_home=target.pen_score_before[0],
+            pen_score_away=target.pen_score_before[1],
+            is_home=target.is_home,
+        ),
+        kicks_done=KickIndex(0, 0),
+    )
+    row = build_features(
+        features,
+        match_id=target.match_id,
+        kick_number=target.kick_number,
+        kicker_id=target.kicker_id,
+        kicker_name=target.kicker_name,
+        match_date=target.match_date,
+        tournament_id=target.tournament_id,
+        tournament_name=target.tournament_name,
+        round=target.round,
+        team_id=target.team_id,
+        is_home=target.is_home,
+        label=target.side,
+        is_on_target=target.is_on_target,
+    )
+    assert row.tournament_kind == "international"
+
+
+def test_build_features_club_tournament_kind_is_club() -> None:
+    """A `build_features` call with `tournament_id=42` (Champions
+    League) returns a row with `tournament_kind="club"`.
+
+    The lookup is the source of truth: any of the 7 in-scope club
+    leagues (41=Copa Libertadores, 42=Champions League, 125=DFB-
+    Pokal, 132=FA Cup, 133=Coupe de France, 137=Coppa Italia,
+    138=Copa del Rey) returns `"club"`. The field is metadata
+    only; the model does not consume it.
+    """
+    target = make_shootout_kick(
+        tournament_id=42, tournament_name="Champions League"
+    )
+    features = compute_features(
+        history=[],
+        metadata=None,
+        target_date=target.match_date,
+        b_group=BGroupContext(
+            kick_number=target.kick_number,
+            pen_score_home=target.pen_score_before[0],
+            pen_score_away=target.pen_score_before[1],
+            is_home=target.is_home,
+        ),
+        kicks_done=KickIndex(0, 0),
+    )
+    row = build_features(
+        features,
+        match_id=target.match_id,
+        kick_number=target.kick_number,
+        kicker_id=target.kicker_id,
+        kicker_name=target.kicker_name,
+        match_date=target.match_date,
+        tournament_id=target.tournament_id,
+        tournament_name=target.tournament_name,
+        round=target.round,
+        team_id=target.team_id,
+        is_home=target.is_home,
+        label=target.side,
+        is_on_target=target.is_on_target,
+    )
+    assert row.tournament_kind == "club"
+
+
+def test_build_features_tournament_kind_explicit_override() -> None:
+    """An explicit `tournament_kind="club"` argument overrides the
+    lookup. This is the escape hatch for tests that want to pin
+    a specific kind without depending on the league registry.
+    """
+    target = make_shootout_kick(tournament_id=77, tournament_name="World Cup")
+    features = compute_features(
+        history=[],
+        metadata=None,
+        target_date=target.match_date,
+        b_group=BGroupContext(
+            kick_number=target.kick_number,
+            pen_score_home=target.pen_score_before[0],
+            pen_score_away=target.pen_score_before[1],
+            is_home=target.is_home,
+        ),
+        kicks_done=KickIndex(0, 0),
+    )
+    row = build_features(
+        features,
+        match_id=target.match_id,
+        kick_number=target.kick_number,
+        kicker_id=target.kicker_id,
+        kicker_name=target.kicker_name,
+        match_date=target.match_date,
+        tournament_id=target.tournament_id,
+        tournament_name=target.tournament_name,
+        round=target.round,
+        team_id=target.team_id,
+        is_home=target.is_home,
+        label=target.side,
+        is_on_target=target.is_on_target,
+        tournament_kind="club",  # explicit override
+    )
+    assert row.tournament_kind == "club"
+
+
+def test_build_features_unknown_tournament_id_defaults_to_international() -> None:
+    """An unknown `tournament_id` (not in
+    `TOURNAMENT_KIND_BY_LEAGUE_ID`) defaults to `"international"`.
+    This is a defensive fallback for any future league that the
+    registry doesn't track; the in-scope scope always has a
+    registered id.
+    """
+    target = make_shootout_kick(tournament_id=99999, tournament_name="Unknown")
+    features = compute_features(
+        history=[],
+        metadata=None,
+        target_date=target.match_date,
+        b_group=BGroupContext(
+            kick_number=target.kick_number,
+            pen_score_home=target.pen_score_before[0],
+            pen_score_away=target.pen_score_before[1],
+            is_home=target.is_home,
+        ),
+        kicks_done=KickIndex(0, 0),
+    )
+    row = build_features(
+        features,
+        match_id=target.match_id,
+        kick_number=target.kick_number,
+        kicker_id=target.kicker_id,
+        kicker_name=target.kicker_name,
+        match_date=target.match_date,
+        tournament_id=target.tournament_id,
+        tournament_name=target.tournament_name,
+        round=target.round,
+        team_id=target.team_id,
+        is_home=target.is_home,
+        label=target.side,
+        is_on_target=target.is_on_target,
+    )
+    assert row.tournament_kind == "international"
+
+
+# ---------------------------------------------------------------------------
 # Live smoke test
 # ---------------------------------------------------------------------------
 

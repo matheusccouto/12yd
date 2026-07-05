@@ -140,25 +140,40 @@ def test_from_fixture_team_names() -> None:
 # --- LEAGUE_SEASONS_PREDICT_WINDOW constant ---------------------------------
 
 
-def test_league_seasons_constant_has_all_six_tournaments() -> None:
+def test_league_seasons_constant_has_all_in_scope_tournaments() -> None:
     from penalty_pred.tournaments import LEAGUE_SEASONS_PREDICT_WINDOW
 
     leagues = {lid for lid, _ in LEAGUE_SEASONS_PREDICT_WINDOW}
-    # `LEAGUE_BY_ID` is now the union of the 6 in-scope tournaments
-    # and the extended leagues (slice #4). The shootout scraper only
-    # iterates the in-scope tournaments, so we compare against `LEAGUES`
-    # (the in-scope table), not the full `LEAGUE_BY_ID`.
-    from penalty_pred.leagues import LEAGUES
+    # Phase 3 (Issue #51): the scope now covers the 6 in-scope
+    # international tournaments PLUS the 7 in-scope club tournaments
+    # (Copa Libertadores, Champions League, FA Cup, Coupe de France,
+    # DFB-Pokal, Coppa Italia, Copa del Rey). The shootout scraper
+    # iterates `LEAGUE_SEASONS_PREDICT_WINDOW`, which is the union of
+    # `INTERNATIONAL_PAIRS` and `CLUB_PAIRS` in
+    # `src/penalty_pred/tournaments.py`. The 12 `domestic_only`
+    # extended leagues (LaLiga, Premier League, etc.) are NOT in
+    # scope — they are player-history only.
+    from penalty_pred.leagues import CLUB_LEAGUES, LEAGUES
 
-    assert leagues == {league.league_id for league in LEAGUES}
+    expected = {league.league_id for league in LEAGUES} | {
+        league.league_id for league in CLUB_LEAGUES
+    }
+    assert leagues == expected
 
 
 def test_league_seasons_constant_covers_predict_window() -> None:
-    """The 15 (league, season) pairs cover all tournaments with shootouts
-    between 2021-01-01 and today (2026-06-22)."""
+    """The 57 (league, season) pairs cover all tournaments with shootouts
+    between 2021-01-01 and today (2026-06-22).
+
+    Phase 3 (Issue #51): the 15 in-scope international pairs extend
+    with the 7 × 6 = 42 in-scope club pairs (Copa Libertadores,
+    Champions League, FA Cup, Coupe de France, DFB-Pokal, Coppa
+    Italia, Copa del Rey — each over FotMob seasons 2021–2026). The
+    total is 57 pairs across 13 tournaments.
+    """
     from penalty_pred.tournaments import LEAGUE_SEASONS_PREDICT_WINDOW
 
-    expected = {
+    expected: set[tuple[int, int]] = {
         (77, 2022),  # World Cup 2022
         (77, 2026),  # World Cup 2026 (in progress)
         (50, 2020),  # Euro 2020 (held 2021)
@@ -175,6 +190,11 @@ def test_league_seasons_constant_covers_predict_window() -> None:
         (290, 2023),
         (290, 2025),  # Asian Cup × 3
     }
+    # 7 in-scope club leagues × 6 seasons (2021–2026) = 42 pairs
+    club_league_ids = (41, 42, 125, 132, 133, 137, 138)
+    for league_id in club_league_ids:
+        for season in (2021, 2022, 2023, 2024, 2025, 2026):
+            expected.add((league_id, season))
     assert set(LEAGUE_SEASONS_PREDICT_WINDOW) == expected
 
 

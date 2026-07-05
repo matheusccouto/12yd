@@ -59,6 +59,7 @@ from .model import (
 )
 from .player_history import PlayerMetadata, PlayerPenalty
 from .rosters import RosterPlayer
+from .tournaments import TournamentKind
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,12 @@ class PredictionRow:
       mode-of-history inference.
     - `p_L`, `p_C`, `p_R`: predicted probabilities from the frozen
       LightGBM, in `CLASSES` order. Sum to 1.0 within 1e-6.
+    - `tournament_kind`: Phase 3 (Issue #51) metadata attribute — the
+      kind of the tournament the prediction is for. For the WC 2026
+      roster (the current consumer), the kind is always
+      `"international"`; a future cycle that adds club-roster
+      predictions will see `"club"`. Surfaced as per-kicker metadata
+      so the dashboard can render the kind on the per-kicker card.
     """
 
     player_id: int
@@ -91,6 +98,7 @@ class PredictionRow:
     p_L: float
     p_C: float
     p_R: float
+    tournament_kind: TournamentKind = "international"
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +187,7 @@ def predict_kicker(
         p_L=p_L,
         p_C=p_C,
         p_R=p_R,
+        tournament_kind=row.tournament_kind,
     )
 
 

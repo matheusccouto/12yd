@@ -77,6 +77,7 @@ from .player_history import (
     extract_player_metadata,
     fetch_player_data,
 )
+from .tournaments import TOURNAMENT_KIND_BY_LEAGUE_ID, TournamentKind
 
 # Prior over (L, C, R) for kickers with no history. The PRD specifies
 # "1/3 each" for the missing-history fallback.
@@ -145,7 +146,7 @@ class PredictionTarget:
 class TrainingRow:
     """One training row: a target Shootout Kick plus the 17 features for it.
 
-    The unified row type (Issue #30, refined in #36 + #41): the 17
+    The unified row type (Issue #30, refined in #36 + #41 + #51): the 17
     model features are individual fields (not a dict) so the type
     checker can pin them, and the row carries its own identifiers and
     label so the on-disk format is self-contained. The previous B3
@@ -157,6 +158,16 @@ class TrainingRow:
     age improves both save rate and log loss on the 28-row 2026
     holdout, and the LOTO CV confirms the gain on the cross-tournament
     aggregate.
+
+    Phase 3 (Issue #51) adds a single `tournament_kind` metadata
+    attribute — `"international"` (default, for the existing 6 national-
+    team cup competitions) or `"club"` (for the 7 new in-scope club
+    cup competitions: Copa Libertadores, Champions League, FA Cup,
+    Coupe de France, DFB-Pokal, Coppa Italia, Copa del Rey). The
+    value is derived from the `TOURNAMENT_KIND_BY_LEAGUE_ID` lookup
+    at `build_features` time — it is metadata, not a model input.
+    The 17-feature schema is unchanged. See
+    `docs/adr/0004-phase-3-data-source.md` §"Schema — what changes".
 
     Identifier fields are pass-throughs from `shootout_kicks.jsonl` so
     the row is self-contained. `label` is the side the kicker actually
@@ -209,6 +220,10 @@ class TrainingRow:
     is_decisive: bool
     # C1: position
     position: str
+    # Phase 3 (Issue #51): metadata attribute — `"international"` or `"club"`.
+    # Default `"international"` for the existing rows; club rows are
+    # derived from the league registry at `build_features` time.
+    tournament_kind: TournamentKind = "international"
 
     @property
     def label_index(self) -> int:
@@ -522,6 +537,7 @@ def build_features(
     is_home: bool,
     label: str,
     is_on_target: bool,
+    tournament_kind: TournamentKind | None = None,
 ) -> TrainingRow:
     """Package a `PredictionTarget` into a `TrainingRow`.
 
@@ -535,7 +551,19 @@ def build_features(
     rows it is `True` (the dummy value — the model doesn't use it at
     predict time, but the unified type carries it so the on-disk
     schema is self-describing).
+
+    Phase 3 (Issue #51): `tournament_kind` is derived from
+    `TOURNAMENT_KIND_BY_LEAGUE_ID[tournament_id]` when not supplied.
+    The default is `"international"` for any unknown league id (a
+    defensive fallback; in practice the in-scope scope always has a
+    registered id). For the existing 6 international tournaments,
+    the lookup returns `"international"`; for the 7 new in-scope
+    club tournaments (Copa Libertadores, Champions League, FA Cup,
+    Coupe de France, DFB-Pokal, Coppa Italia, Copa del Rey), it
+    returns `"club"`.
     """
+    if tournament_kind is None:
+        tournament_kind = TOURNAMENT_KIND_BY_LEAGUE_ID.get(tournament_id, "international")
     return TrainingRow(
         match_id=match_id,
         kick_number=kick_number,
@@ -566,6 +594,7 @@ def build_features(
         pen_score_away=features.pen_score_away,
         is_decisive=features.is_decisive,
         position=features.position,
+        tournament_kind=tournament_kind,
     )
 
 

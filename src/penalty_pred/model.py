@@ -285,6 +285,7 @@ def load_training_table(
                     pen_score_away=int(row["pen_score_away"]),
                     is_decisive=bool(row["is_decisive"]),
                     position=str(row["position"]),
+                    tournament_kind=row.get("tournament_kind", "international"),
                 )
             )
     return out

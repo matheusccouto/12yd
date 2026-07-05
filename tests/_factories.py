@@ -44,6 +44,7 @@ from penalty_pred.player_history import PlayerMetadata, PlayerPenalty
 from penalty_pred.predict import PredictionRow
 from penalty_pred.rosters import RosterPlayer
 from penalty_pred.shootouts import ShootoutKick
+from penalty_pred.tournaments import TournamentKind
 
 # ---------------------------------------------------------------------------
 # Schema constants (derived from the dataclasses — adding a field is
@@ -97,6 +98,8 @@ def make_training_row(
     is_decisive: bool = False,
     # C1 (C2 was dropped in Issue #41)
     position: str = "striker",
+    # Phase 3 (Issue #51)
+    tournament_kind: TournamentKind = "international",
 ) -> TrainingRow:
     """Build a `TrainingRow` with sensible defaults.
 
@@ -107,6 +110,9 @@ def make_training_row(
     v3 (Issue #41) dropped the C2 (`age`) column; the model's
     ablation in `docs/model-review.md` Topic 2.3 showed age
     actively hurt the save rate on the 28-row 2026 holdout.
+    Phase 3 (Issue #51) added the `tournament_kind` metadata
+    attribute; default is `"international"` (the existing 6
+    national-team cup competitions).
     """
     return TrainingRow(
         match_id=match_id,
@@ -138,6 +144,7 @@ def make_training_row(
         pen_score_away=pen_score_away,
         is_decisive=is_decisive,
         position=position,
+        tournament_kind=tournament_kind,
     )
 
 
@@ -340,11 +347,15 @@ def make_prediction_row(
     p_L: float = 0.5,
     p_C: float = 0.25,
     p_R: float = 0.25,
+    tournament_kind: TournamentKind = "international",
 ) -> PredictionRow:
     """Build a `PredictionRow` (one row of `predictions.jsonl`).
 
     Default probabilities are roughly balanced so a unit test that
-    sums them sees 1.0.
+    sums them sees 1.0. Phase 3 (Issue #51) added the
+    `tournament_kind` metadata attribute; default is
+    `"international"` (the WC 2026 roster always predicts
+    international).
     """
     return PredictionRow(
         player_id=player_id,
@@ -356,4 +367,5 @@ def make_prediction_row(
         p_L=p_L,
         p_C=p_C,
         p_R=p_R,
+        tournament_kind=tournament_kind,
     )

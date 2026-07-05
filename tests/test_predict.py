@@ -198,6 +198,28 @@ def test_build_prediction_features_returns_unified_training_row() -> None:
     # Identifiers are pass-throughs.
     assert row.kicker_id == 42
     assert row.match_date == TARGET_DATE
+    # Phase 3 (Issue #51): the WC 2026 roster prediction carries
+    # `tournament_kind="international"` (the WC is league 77).
+    assert row.tournament_kind == "international"
+
+
+def test_predict_kicker_propagates_tournament_kind_international() -> None:
+    """A `predict_kicker` call against the WC 2026 roster returns a
+    `PredictionRow` with `tournament_kind="international"`. The
+    prediction slice hard-codes `tournament_id=77` (the FotMob WC
+    league id), so the lookup returns `"international"`.
+    """
+    from penalty_pred.predict import predict_kicker
+
+    stub = _StubModel(np.array([0.4, 0.2, 0.4]))
+    pred = predict_kicker(
+        model=stub,
+        kicker=_roster_player(player_id=1, player_name="Alpha"),
+        history=[],
+        metadata=_metadata(player_id=1),
+        target_date=TARGET_DATE,
+    )
+    assert pred.tournament_kind == "international"
 
 
 # ---------------------------------------------------------------------------

@@ -36,6 +36,8 @@ from penalty_pred.rsssf import (
     parse_rsssf_html,
 )
 from penalty_pred.tournaments import (
+    CLUB_PAIRS,
+    INTERNATIONAL_PAIRS,
     LEAGUE_SEASONS_PREDICT_WINDOW,
     RSSSF_TO_LEAGUE_NAME,
     WC_2026_LEAGUE,
@@ -105,26 +107,47 @@ def rsssf_shootouts() -> list[RSSSFShootout]:
 # --- LEAGUE_SEASONS_PREDICT_WINDOW is the source of truth ------------------
 
 
-def test_scope_has_fifteen_pairs() -> None:
-    """The scope is the 15 (league, season) pairs across the 6 in-scope
-    tournaments (3× WC, 2× Euro, 2× Copa, 3× AFCON, 3× Gold Cup, 3× Asian
-    Cup — minus 1 for WC 2026 = 1 entry because the tournament is in
-    progress)."""
-    assert len(LEAGUE_SEASONS_PREDICT_WINDOW) == 15
+def test_scope_has_fifty_seven_pairs() -> None:
+    """The scope is the 57 (league, season) pairs across the 6
+    in-scope international + 7 in-scope club tournaments (Phase 3,
+    Issue #51).
+
+    15 international pairs (3× WC, 2× Euro, 2× Copa, 3× AFCON, 3× Gold
+    Cup, 3× Asian Cup — minus 1 for WC 2026 = 1 entry because the
+    tournament is in progress) + 42 club pairs (7 leagues × 6 seasons
+    2021–2026).
+    """
+    assert len(LEAGUE_SEASONS_PREDICT_WINDOW) == 57
 
 
-def test_scope_covers_all_six_in_scope_leagues() -> None:
-    """Every league in `LEAGUES` is represented in the scope."""
-    from penalty_pred.leagues import LEAGUES
+def test_scope_covers_all_thirteen_in_scope_leagues() -> None:
+    """Every league in `LEAGUES` (6 international) and `CLUB_LEAGUES`
+    (7 club) is represented in the scope (Phase 3, Issue #51).
+
+    The 12 `domestic_only` extended leagues (LaLiga, Premier League,
+    etc.) are NOT in the scope — they are player-history only.
+    """
+    from penalty_pred.leagues import CLUB_LEAGUES, LEAGUES
 
     scope_leagues = {lid for lid, _ in LEAGUE_SEASONS_PREDICT_WINDOW}
-    assert scope_leagues == {league.league_id for league in LEAGUES}
+    expected = {league.league_id for league in LEAGUES} | {
+        league.league_id for league in CLUB_LEAGUES
+    }
+    assert scope_leagues == expected
 
 
-def test_scope_excludes_extended_leagues() -> None:
-    """Leagues in `EXTENDED_LEAGUES` (e.g. LaLiga, Champions League) are
-    NOT in the shootout scope — those are for the player-history
-    fetcher only."""
+def test_scope_excludes_domestic_only_extended_leagues() -> None:
+    """Leagues in `EXTENDED_LEAGUES` (e.g. LaLiga, Ligue 1) are NOT
+    in the shootout scope — those are for the player-history fetcher
+    only.
+
+    Phase 3 (Issue #51): the 7 in-scope club leagues (Copa
+    Libertadores, Champions League, FA Cup, Coupe de France, DFB-
+    Pokal, Coppa Italia, Copa del Rey) have moved from
+    `EXTENDED_LEAGUES` to a separate `CLUB_LEAGUES` tuple with
+    `kind="club"`. The 12 remaining `EXTENDED_LEAGUES` are
+    `kind="domestic_only"` and remain out of scope.
+    """
     from penalty_pred.leagues import EXTENDED_LEAGUES
 
     scope_leagues = {lid for lid, _ in LEAGUE_SEASONS_PREDICT_WINDOW}
@@ -137,14 +160,15 @@ def test_scope_excludes_extended_leagues() -> None:
 
 @pytest.mark.parametrize(
     ("league_id", "season"),
-    list(LEAGUE_SEASONS_PREDICT_WINDOW),
-    ids=[f"{lid}-{s}" for lid, s in LEAGUE_SEASONS_PREDICT_WINDOW],
+    list(INTERNATIONAL_PAIRS),
+    ids=[f"{lid}-{s}" for lid, s in INTERNATIONAL_PAIRS],
 )
 def test_each_in_scope_pair_matches_rsssf_count(
     rsssf_shootouts: list[object], league_id: int, season: int
 ) -> None:
-    """Each in-scope (league, season) matches the RSSSF oracle's
-    **raw** shootout count (which can be 0 for legitimately empty pairs).
+    """Each in-scope international (league, season) matches the RSSSF
+    oracle's **raw** shootout count (which can be 0 for legitimately
+    empty pairs).
 
     A regression that drops a (league, season) from the scope, adds a
     non-existent one, or changes the in-scope coverage without
@@ -154,6 +178,14 @@ def test_each_in_scope_pair_matches_rsssf_count(
     count (`EXPECTED_SHOOTOUT_COUNTS`) is derived; a change in
     `EXCLUDED_EMPTY_SHOTMAP` (e.g. new documentation, or a Phase 3
     source closing the gap) is the separate signal.
+
+    Phase 3 (Issue #51): the parametrized list is now
+    `INTERNATIONAL_PAIRS` (the 15 international pairs), not the full
+    `LEAGUE_SEASONS_PREDICT_WINDOW` (57 pairs). The 42 new club
+    pairs are in scope but the current RSSSF snapshot has no club
+    oracle — a future Phase 4 ADR-driven decision will fill in
+    `CLUB_RAW_COUNTS` (a per-(club league, season) count) and the
+    parametrized list can extend.
     """
     expected = RSSSF_RAW_COUNTS[(league_id, season)]
     actual = count_shootouts_by_pairs(rsssf_shootouts, [(league_id, season)])
@@ -164,20 +196,63 @@ def test_each_in_scope_pair_matches_rsssf_count(
     )
 
 
-def test_total_in_scope_count_is_42(rsssf_shootouts: list[object]) -> None:
-    """The full 15-pair scope totals 42 shootouts on the RSSSF page
-    (the raw oracle count, before the 6 empty-shotmap exclusions).
+def test_club_pairs_count_is_42() -> None:
+    """Phase 3 (Issue #51): the 7 in-scope club leagues each have 6
+    FotMob seasons (2021–2026), totalling 42 club (league, season)
+    pairs. The 7 leagues are: Copa Libertadores, Champions League,
+    FA Cup, Coupe de France, DFB-Pokal, Coppa Italia, Copa del Rey.
+    """
+    assert len(CLUB_PAIRS) == 42
+    # Each club league has 6 seasons (2021–2026)
+    league_ids = {lid for lid, _ in CLUB_PAIRS}
+    assert len(league_ids) == 7
+    for lid in league_ids:
+        league_seasons = [s for pair_lid, s in CLUB_PAIRS if pair_lid == lid]
+        assert sorted(league_seasons) == [2021, 2022, 2023, 2024, 2025, 2026], (
+            f"club league {lid} has seasons {league_seasons}, expected 2021-2026"
+        )
+
+
+def test_club_pairs_have_no_rsssf_coverage(
+    rsssf_shootouts: list[RSSSFShootout],
+) -> None:
+    """The current RSSSF snapshot has no club shootout coverage —
+    the 42 new club pairs all return 0 from the oracle.
+
+    This is a forward-looking pin: a future Phase 4 ADR-driven
+    decision (RSSSF per-cup detail scraping, or a non-RSSSF oracle)
+    can fill in the per-(club league, season) counts. Until then,
+    the scraper-reachable count for club pairs is 0 (no validation
+    can pass against an absent oracle).
+    """
+    n = count_shootouts_by_pairs(rsssf_shootouts, CLUB_PAIRS)
+    assert n == 0, (
+        f"RSSSF snapshot reported {n} club shootouts, expected 0 "
+        f"(no club oracle yet — see Issue #51 + Phase 4 ADR)"
+    )
+
+
+def test_total_in_scope_count_is_42(rsssf_shootouts: list[RSSSFShootout]) -> None:
+    """The 15-pair international scope totals 42 shootouts on the
+    RSSSF page (the raw oracle count, before the 6 empty-shotmap
+    exclusions).
 
     This is the round-trip assertion that the per-pair map is complete:
     if a new tournament is added, the expected count and the validation
     logic both need to be updated. The raw RSSSF count is 42; the
     scraper-reachable count is 36 (see `test_total_in_scope_count_is_36`).
+    The 42 new club pairs contribute 0 (no RSSSF coverage; see
+    `test_club_pairs_have_no_rsssf_coverage`).
+
+    Phase 3 (Issue #51): the test is restricted to the
+    international pairs (the per-pair oracle counts live in
+    `RSSSF_RAW_COUNTS`).
     """
-    n = count_shootouts_by_pairs(rsssf_shootouts, LEAGUE_SEASONS_PREDICT_WINDOW)
+    n = count_shootouts_by_pairs(rsssf_shootouts, INTERNATIONAL_PAIRS)
     assert n == 42
 
 
-def test_total_in_scope_count_is_36(rsssf_shootouts: list[object]) -> None:
+def test_total_in_scope_count_is_36(rsssf_shootouts: list[RSSSFShootout]) -> None:
     """The scraper-reachable count is 36 = 42 RSSSF - 6 empty-shotmap cases.
 
     `validate_shootout_count` pins the validator against the reachable
@@ -187,8 +262,11 @@ def test_total_in_scope_count_is_36(rsssf_shootouts: list[object]) -> None:
     Phase 3 source (Issue #51) recovers the 6 missing shootouts, this
     assertion updates to 42 and the per-pair map in
     `EXPECTED_SHOOTOUT_COUNTS` updates accordingly.
+
+    Phase 3 (Issue #51): the test is restricted to the international
+    pairs (the per-pair oracle counts live in `RSSSF_RAW_COUNTS`).
     """
-    raw = count_shootouts_by_pairs(rsssf_shootouts, LEAGUE_SEASONS_PREDICT_WINDOW)
+    raw = count_shootouts_by_pairs(rsssf_shootouts, INTERNATIONAL_PAIRS)
     assert raw == 42
     documented = _documented_empty_shotmap_count()
     reachable = raw - documented
@@ -341,8 +419,16 @@ def test_expected_counts_match_scope() -> None:
     exactly. A drift between the map and the scope is a test bug,
     not a code bug, but it must be caught here so the per-pair test
     cannot silently pass on a missing pair.
+
+    Phase 3 (Issue #51): `EXPECTED_SHOOTOUT_COUNTS` is the per-pair
+    map for the **international** scope only (the pairs in
+    `RSSSF_RAW_COUNTS`). The 42 new club pairs are in
+    `LEAGUE_SEASONS_PREDICT_WINDOW` but have no `RSSSF_RAW_COUNTS`
+    entry yet (the club oracle is a Phase 4 ADR-driven decision);
+    `EXPECTED_SHOOTOUT_COUNTS` therefore covers the 15 international
+    pairs, not the 57 total scope.
     """
-    assert set(EXPECTED_SHOOTOUT_COUNTS.keys()) == set(LEAGUE_SEASONS_PREDICT_WINDOW)
+    assert set(EXPECTED_SHOOTOUT_COUNTS.keys()) == set(INTERNATIONAL_PAIRS)
 
 
 # --- RSSSF_TO_LEAGUE_NAME covers the in-scope headings --------------------
@@ -384,6 +470,119 @@ def test_wc_2026_season_is_2026() -> None:
     assert WC_2026_SEASON == 2026
     # And the (WC 2026 league, 2026) pair is in the scope.
     assert (WC_2026_LEAGUE.league_id, WC_2026_SEASON) in LEAGUE_SEASONS_PREDICT_WINDOW
+
+
+# --- Phase 3 schema additions (Issue #51) ---------------------------------
+
+
+def test_tournament_kind_lookup_international() -> None:
+    """The 6 in-scope international tournaments all map to
+    `"international"` in the `TOURNAMENT_KIND_BY_LEAGUE_ID` lookup.
+
+    The lookup is the source of truth for the `tournament_kind`
+    attribute on `TrainingRow` and `PredictionRow`. The international
+    tournaments keep the existing 6 IDs.
+    """
+    from penalty_pred.tournaments import TOURNAMENT_KIND_BY_LEAGUE_ID
+
+    expected_international = {77, 50, 44, 298, 290, 289}
+    for league_id in expected_international:
+        assert TOURNAMENT_KIND_BY_LEAGUE_ID[league_id] == "international", (
+            f"league {league_id} should be 'international', "
+            f"got {TOURNAMENT_KIND_BY_LEAGUE_ID[league_id]!r}"
+        )
+
+
+def test_tournament_kind_lookup_club() -> None:
+    """The 7 in-scope club tournaments all map to `"club"` in the
+    `TOURNAMENT_KIND_BY_LEAGUE_ID` lookup.
+
+    Per the Phase 3 ADR (`docs/adr/0004-phase-3-data-source.md`):
+    the 7 in-scope club leagues (Copa Libertadores, Champions
+    League, FA Cup, Coupe de France, DFB-Pokal, Coppa Italia, Copa
+    del Rey) carry the `"club"` kind; the model treats this as
+    metadata, not a model input.
+    """
+    from penalty_pred.tournaments import TOURNAMENT_KIND_BY_LEAGUE_ID
+
+    expected_clubs = {41, 42, 125, 132, 133, 137, 138}
+    for league_id in expected_clubs:
+        assert TOURNAMENT_KIND_BY_LEAGUE_ID[league_id] == "club", (
+            f"league {league_id} should be 'club', "
+            f"got {TOURNAMENT_KIND_BY_LEAGUE_ID[league_id]!r}"
+        )
+
+
+def test_tournament_kind_lookup_excludes_domestic_only() -> None:
+    """The `TOURNAMENT_KIND_BY_LEAGUE_ID` lookup only contains
+    in-scope leagues (international + club). The 12
+    `domestic_only` extended leagues (LaLiga, Premier League, etc.)
+    are NOT in the lookup — they are player-history only and
+    never appear in the shootout scope.
+    """
+    from penalty_pred.leagues import EXTENDED_LEAGUES
+    from penalty_pred.tournaments import TOURNAMENT_KIND_BY_LEAGUE_ID
+
+    for league in EXTENDED_LEAGUES:
+        assert league.league_id not in TOURNAMENT_KIND_BY_LEAGUE_ID, (
+            f"domestic_only league {league.league_id} ({league.name}) "
+            "should not be in the tournament_kind lookup"
+        )
+
+
+def test_club_leagues_tuple() -> None:
+    """`CLUB_LEAGUES` is the 7-tournament table of in-scope club
+    shootouts (Phase 3, Issue #51). Each entry has `kind="club"`.
+    The 7 league IDs match the Phase 3 ADR's per-tournament list.
+    """
+    from penalty_pred.leagues import CLUB_LEAGUES
+
+    assert len(CLUB_LEAGUES) == 7
+    for league in CLUB_LEAGUES:
+        assert league.kind == "club", (
+            f"club league {league.league_id} ({league.name}) has kind={league.kind!r}, "
+            "expected 'club'"
+        )
+    assert {league.league_id for league in CLUB_LEAGUES} == {
+        41,
+        42,
+        125,
+        132,
+        133,
+        137,
+        138,
+    }
+
+
+def test_rsssf_to_club_league_name_covers_seven_tournaments() -> None:
+    """`RSSSF_TO_CLUB_LEAGUE_NAME` is the 7-heading map for the
+    forward-looking Phase 3 club oracle. The current RSSSF snapshot
+    has no club shootout coverage (see `test_club_pairs_have_no_rsssf_coverage`),
+    but the map is the shape for a future Phase 4 ingest.
+    """
+    from penalty_pred.tournaments import RSSSF_TO_CLUB_LEAGUE_NAME
+
+    assert set(RSSSF_TO_CLUB_LEAGUE_NAME.keys()) == {
+        "Copa Libertadores",
+        "UEFA Champions League",
+        "FA Cup",
+        "Coupe de France",
+        "DFB-Pokal",
+        "Coppa Italia",
+        "Copa del Rey",
+    }
+
+
+def test_rsssf_to_club_league_name_values_match_club_league_names() -> None:
+    """Each value in `RSSSF_TO_CLUB_LEAGUE_NAME` is the FotMob
+    league name (matches `CLUB_LEAGUES`). A drift between the
+    map and the league table is a code bug.
+    """
+    from penalty_pred.leagues import CLUB_LEAGUES
+    from penalty_pred.tournaments import RSSSF_TO_CLUB_LEAGUE_NAME
+
+    fotmob_names = {league.name for league in CLUB_LEAGUES}
+    assert set(RSSSF_TO_CLUB_LEAGUE_NAME.values()) == fotmob_names
 
 
 # --- Phase 3 source ADR (Issue #50) ---------------------------------------
