@@ -104,9 +104,7 @@ def test_club_league_ids_constant() -> None:
 def test_international_league_ids_constant() -> None:
     """`INTERNATIONAL_LEAGUE_IDS` is the 6-id set of in-scope
     international leagues (the existing `LEAGUES` IDs)."""
-    assert INTERNATIONAL_LEAGUE_IDS == frozenset(
-        {league.league_id for league in LEAGUES}
-    )
+    assert INTERNATIONAL_LEAGUE_IDS == frozenset({league.league_id for league in LEAGUES})
 
 
 # --- `kind` field on every League (Issue #51) -----------------------------

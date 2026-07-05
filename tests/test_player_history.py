@@ -247,9 +247,7 @@ def test_extract_player_metadata_reads_preferred_foot() -> None:
     )
     # No preferred_foot entry → "".
     assert (
-        _preferred_foot(
-            [{"translationKey": "height_sentencecase", "value": {"numberValue": 180}}]
-        )
+        _preferred_foot([{"translationKey": "height_sentencecase", "value": {"numberValue": 180}}])
         == ""
     )
     # Empty list → "".

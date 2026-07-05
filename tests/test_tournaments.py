@@ -24,6 +24,7 @@ empty-shotmap file.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -62,12 +63,12 @@ EMPTY_SHOTMAP_DOC = REPO_ROOT / "data" / "empty_shotmap_documentation.md"
 # count; the per-pair reachable count is derived as
 # `RSSSF_RAW_COUNTS[pair] - EXCLUDED_EMPTY_SHOTMAP[pair]`.
 RSSSF_RAW_COUNTS: dict[tuple[int, int], int] = {
-    (77, 2022): 5,   # World Cup 2022
-    (77, 2026): 0,   # World Cup 2026 (in progress; RSSSF snapshot is stale)
-    (50, 2020): 4,   # Euro 2020 (held 2021)
-    (50, 2024): 3,   # Euro 2024
-    (44, 2021): 3,   # Copa América 2021
-    (44, 2024): 4,   # Copa América 2024
+    (77, 2022): 5,  # World Cup 2022
+    (77, 2026): 0,  # World Cup 2026 (in progress; RSSSF snapshot is stale)
+    (50, 2020): 4,  # Euro 2020 (held 2021)
+    (50, 2024): 3,  # Euro 2024
+    (44, 2021): 3,  # Copa América 2021
+    (44, 2024): 4,  # Copa América 2024
     (289, 2021): 6,  # AFCON 2021 (raw RSSSF)
     (289, 2023): 5,  # AFCON 2023
     (289, 2025): 3,  # AFCON 2025
@@ -92,8 +93,7 @@ EXCLUDED_EMPTY_SHOTMAP: dict[tuple[int, int], int] = {
 # count the `validate_shootout_count` test pins the scraper against.
 # The sum is 36, the scraper-reachable total.
 EXPECTED_SHOOTOUT_COUNTS: dict[tuple[int, int], int] = {
-    pair: RSSSF_RAW_COUNTS[pair] - EXCLUDED_EMPTY_SHOTMAP.get(pair, 0)
-    for pair in RSSSF_RAW_COUNTS
+    pair: RSSSF_RAW_COUNTS[pair] - EXCLUDED_EMPTY_SHOTMAP.get(pair, 0) for pair in RSSSF_RAW_COUNTS
 }
 
 
@@ -360,8 +360,7 @@ def test_empty_shotmap_documentation_has_six_cases() -> None:
     FotMob data gap (4 in AFCON 2021 + 2 in Asian Cup 2023)."""
     cases = _parse_empty_shotmap_doc(EMPTY_SHOTMAP_DOC)
     assert len(cases) == 6, (
-        f"expected 6 empty-shotmap cases, got {len(cases)}: "
-        f"{[c['heading'] for c in cases]}"
+        f"expected 6 empty-shotmap cases, got {len(cases)}: {[c['heading'] for c in cases]}"
     )
 
 
@@ -508,8 +507,7 @@ def test_tournament_kind_lookup_club() -> None:
     expected_clubs = {41, 42, 125, 132, 133, 137, 138}
     for league_id in expected_clubs:
         assert TOURNAMENT_KIND_BY_LEAGUE_ID[league_id] == "club", (
-            f"league {league_id} should be 'club', "
-            f"got {TOURNAMENT_KIND_BY_LEAGUE_ID[league_id]!r}"
+            f"league {league_id} should be 'club', got {TOURNAMENT_KIND_BY_LEAGUE_ID[league_id]!r}"
         )
 
 
@@ -782,13 +780,24 @@ def test_url_rotation_wall_lists_18_stale_hash_refs() -> None:
     in the JSONL)."""
     text = URL_ROTATION_WALL.read_text(encoding="utf-8")
     for mid in (
-        3370565, 2767865, 2767870, 2767869,
-        3231662, 3231660, 3231664,
-        4407868, 4407869, 4407870,
-        3705434, 3705509,
+        3370565,
+        2767865,
+        2767870,
+        2767869,
+        3231662,
+        3231660,
+        3231664,
+        4407868,
+        4407869,
+        4407870,
+        3705434,
+        3705509,
         4353245,
-        4211901, 4211904, 4772526,
-        4394637, 4394643,
+        4211901,
+        4211904,
+        4772526,
+        4394637,
+        4394643,
     ):
         assert str(mid) in text, (
             f"URL rotation wall must list the stale-hash ref {mid}; "
@@ -809,11 +818,99 @@ def test_url_rotation_wall_cross_references_phase_3_adr() -> None:
         "the wall is the stop condition for in-FotMob attempts, and "
         "Phase 3 is the path forward"
     )
-    assert (
-        "0004" in text or "phase-3-data-source" in text or "issue #50" in text
-    ), (
+    assert "0004" in text or "phase-3-data-source" in text or "issue #50" in text, (
         "URL rotation wall must cross-reference the Phase 3 ADR "
         "(`docs/adr/0004-phase-3-data-source.md`); the wall defers "
         "the 6 empty-shotmap + 18 stale-hash cases to a future Phase 4 "
         "ADR-driven decision"
     )
+
+
+# --- Per-tournament success-rate diagnostic (v4 PRD Phase 2) -------------
+
+# Path to the on-disk per-tournament success-rate artifact. The file
+# is gitignored (`data/*.jsonl`, `output/*.jsonl` patterns) so the
+# test skips if the slice pipeline hasn't been re-run. The default
+# location is the same path `scripts/fetch_all_shootouts.py` writes
+# to, with `Artifacts(root="output")` as the source of truth.
+TOURNAMENT_SUCCESS_RATE_PATH: Path = Path("output/tournament_success_rate.jsonl")
+
+
+def _load_tournament_success_rate() -> list[dict[str, object]] | None:
+    """Read the per-tournament success-rate JSONL, or `None` if absent."""
+    if not TOURNAMENT_SUCCESS_RATE_PATH.exists():
+        return None
+    out: list[dict[str, object]] = []
+    for line in TOURNAMENT_SUCCESS_RATE_PATH.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        out.append(json.loads(line))
+    return out
+
+
+@pytest.mark.parametrize(
+    ("league_id", "season"),
+    list(INTERNATIONAL_PAIRS),
+    ids=[f"{lid}-{s}" for lid, s in INTERNATIONAL_PAIRS],
+)
+def test_tournament_success_rate_covers_every_in_scope_pair(league_id: int, season: int) -> None:
+    """v4 PRD Phase 2 acceptance criterion: every in-scope
+    (league, season) has a row in `tournament_success_rate.jsonl`,
+    and the row's `match_count` agrees with the scraper-reachable
+    count in `EXPECTED_SHOOTOUT_COUNTS` (so a future regression
+    that drops a pair is caught at the artifact).
+
+    The test skips if the artifact is absent (the slice pipeline
+    hasn't been re-run). The unit test in `test_shootouts_pipeline.py`
+    covers the aggregation logic without a disk artifact; this
+    integration test pins the on-disk shape.
+    """
+    rows = _load_tournament_success_rate()
+    if rows is None:
+        pytest.skip(
+            f"{TOURNAMENT_SUCCESS_RATE_PATH} not present; "
+            "run `scripts/fetch_all_shootouts.py` to generate"
+        )
+    expected_count = EXPECTED_SHOOTOUT_COUNTS[(league_id, season)]
+    pair_rows = [r for r in rows if r["league_id"] == league_id and r["season"] == season]
+    assert len(pair_rows) == 1, (
+        f"pair ({league_id}, {season}) has {len(pair_rows)} rows in the "
+        f"artifact, expected exactly 1"
+    )
+    row = pair_rows[0]
+    assert row["expected_match_count"] == (RSSSF_RAW_COUNTS[(league_id, season)]), (
+        f"raw expected count drift on ({league_id}, {season})"
+    )
+    assert row["reachable_match_count"] == expected_count, (
+        f"reachable count drift on ({league_id}, {season}): "
+        f"artifact={row['reachable_match_count']}, "
+        f"EXPECTED_SHOOTOUT_COUNTS={expected_count}"
+    )
+    if expected_count == 0:
+        # The pair legitimately has no shootouts; the rollup marks
+        # this as `"n/a"` (no coverage expected). The
+        # kick_count / match_count are 0 in that case.
+        assert row["status"] == "n/a"
+        assert row["match_count"] == 0
+        assert row["kick_count"] == 0
+    else:
+        # The pair has a reachable count > 0. The artifact's
+        # `match_count` must equal the reachable count (the
+        # scraper reached every match) — a `partial` or
+        # `missing` row would be a regression.
+        assert row["match_count"] == expected_count, (
+            f"pair ({league_id}, {season}) has match_count="
+            f"{row['match_count']}, expected {expected_count} "
+            f"(reachable); status={row['status']!r}"
+        )
+        assert row["status"] == "ok", (
+            f"pair ({league_id}, {season}) status is {row['status']!r}, "
+            "expected 'ok' (a fresh re-run with the wall reached should "
+            "find every reachable match)"
+        )
+        assert row["kick_count"] > 0, (
+            f"pair ({league_id}, {season}) has kick_count="
+            f"{row['kick_count']}, expected > 0 (every reachable match "
+            "should have at least one shootout kick)"
+        )

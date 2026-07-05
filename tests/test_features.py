@@ -140,7 +140,9 @@ def test_is_decisive_2022_final_montiel_kick() -> None:
     (3-2 with 1+1 remaining; home is not yet clinched). So the kick is
     decisive (scoring ends it)."""
     # Before kick 8: home 3, away 4 done; score 3-2.
-    assert is_decisive_kick(3, 2, home_kicks_done=3, away_kicks_done=4, is_home_kicking=True) is True
+    assert (
+        is_decisive_kick(3, 2, home_kicks_done=3, away_kicks_done=4, is_home_kicking=True) is True
+    )
 
 
 def test_is_decisive_2022_final_kolo_muani_kick() -> None:
@@ -148,14 +150,18 @@ def test_is_decisive_2022_final_kolo_muani_kick() -> None:
     ends the shootout (Argentina clinches 3-1 with 2 home and 1 away
     remaining; 3 > 1+1=2). Scoring does not (3-2 with 2+1 remaining;
     3 not > 2+1=3). So the kick is decisive (missing ends it)."""
-    assert is_decisive_kick(3, 1, home_kicks_done=3, away_kicks_done=3, is_home_kicking=False) is True
+    assert (
+        is_decisive_kick(3, 1, home_kicks_done=3, away_kicks_done=3, is_home_kicking=False) is True
+    )
 
 
 def test_is_decisive_2022_final_paredes_kick_not_decisive() -> None:
     """The 2022 final kick 6 (Paredes, home, score 2-1): neither
     outcome ends the shootout (Argentina cannot clinch by scoring, and
     cannot be eliminated by missing)."""
-    assert is_decisive_kick(2, 1, home_kicks_done=2, away_kicks_done=3, is_home_kicking=True) is False
+    assert (
+        is_decisive_kick(2, 1, home_kicks_done=2, away_kicks_done=3, is_home_kicking=True) is False
+    )
 
 
 def test_is_decisive_full_round_clinches() -> None:
@@ -163,7 +169,9 @@ def test_is_decisive_full_round_clinches() -> None:
     makes it 5-0, away has 1 kick left, max away = 1. 5 > 1. Clinched.
     Missing keeps it 4-0, away has 1 kick, max away = 1. 4 > 1. Clinched.
     So scoring OR missing ends the shootout → decisive."""
-    assert is_decisive_kick(4, 0, home_kicks_done=4, away_kicks_done=4, is_home_kicking=True) is True
+    assert (
+        is_decisive_kick(4, 0, home_kicks_done=4, away_kicks_done=4, is_home_kicking=True) is True
+    )
 
 
 def test_is_decisive_elimination_in_both_branches() -> None:
@@ -171,7 +179,9 @@ def test_is_decisive_elimination_in_both_branches() -> None:
     1 kick left, away has 2 left. Home max possible score is 1,
     away already at 3 → home is eliminated. So both scoring and
     missing end the shootout → decisive."""
-    assert is_decisive_kick(0, 3, home_kicks_done=3, away_kicks_done=3, is_home_kicking=True) is True
+    assert (
+        is_decisive_kick(0, 3, home_kicks_done=3, away_kicks_done=3, is_home_kicking=True) is True
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -255,9 +265,7 @@ def test_index_kicks_done_walks_match_in_order() -> None:
     """For the 2022 final, kick 1 is away, kick 2 is home, ... The
     index records (home_kicks_done, away_kicks_done) BEFORE each kick."""
     # Build the kicks in canonical 2022-final order: kick k is_home = (k % 2 == 0).
-    kicks = [
-        _shootout_kick(1, k, is_home=(k % 2 == 0)) for k in range(1, 9)
-    ]
+    kicks = [_shootout_kick(1, k, is_home=(k % 2 == 0)) for k in range(1, 9)]
     idx = index_kicks_done(kicks)
     assert idx[(1, 1)] == KickIndex(home_kicks_done=0, away_kicks_done=0)
     assert idx[(1, 2)] == KickIndex(home_kicks_done=0, away_kicks_done=1)
@@ -316,7 +324,9 @@ def test_build_features_with_no_history_uses_prior() -> None:
     target = _target(kicker_id=1, side="L")
     features = compute_features(
         history=[],
-        metadata=PlayerMetadata(player_id=1, player_name="X", position_key="striker", birth_date="1990-01-01"),
+        metadata=PlayerMetadata(
+            player_id=1, player_name="X", position_key="striker", birth_date="1990-01-01"
+        ),
         target_date=target.match_date,
         b_group=BGroupContext(
             kick_number=target.kick_number,
@@ -409,14 +419,15 @@ def test_build_features_a1_horizons_nest() -> None:
     non-decreasing across horizons (1.0, 0.5, 0.75)... wait, that's
     NOT monotonic in this case. Use a sequence where it IS
     monotonic."""
-    history = (
-        [_penalty(i, f"2021-{i:02d}-01T00:00:00+00:00", side="L") for i in range(1, 21)]
-        + [_penalty(100 + i, f"2022-{i:02d}-01T00:00:00+00:00", side="L") for i in range(1, 6)]
-    )
+    history = [_penalty(i, f"2021-{i:02d}-01T00:00:00+00:00", side="L") for i in range(1, 21)] + [
+        _penalty(100 + i, f"2022-{i:02d}-01T00:00:00+00:00", side="L") for i in range(1, 6)
+    ]
     target = _target(kicker_id=1)
     features = compute_features(
         history=history,
-        metadata=PlayerMetadata(player_id=1, player_name="X", position_key="striker", birth_date="1990-01-01"),
+        metadata=PlayerMetadata(
+            player_id=1, player_name="X", position_key="striker", birth_date="1990-01-01"
+        ),
         target_date=target.match_date,
         b_group=BGroupContext(
             kick_number=target.kick_number,
@@ -861,9 +872,7 @@ def test_build_features_club_tournament_kind_is_club() -> None:
     138=Copa del Rey) returns `"club"`. The field is metadata
     only; the model does not consume it.
     """
-    target = make_shootout_kick(
-        tournament_id=42, tournament_name="Champions League"
-    )
+    target = make_shootout_kick(tournament_id=42, tournament_name="Champions League")
     features = compute_features(
         history=[],
         metadata=None,
@@ -1036,9 +1045,7 @@ def test_training_table_jsonl_schema_smoke() -> None:
             kickers.add(int(row["kicker_id"]))
 
     assert n_rows == n_target, f"row count {n_rows} != target count {n_target}"
-    assert training_kickers <= kickers, (
-        f"missing training kickers: {training_kickers - kickers}"
-    )
+    assert training_kickers <= kickers, f"missing training kickers: {training_kickers - kickers}"
 
 
 @pytest.mark.skipif(

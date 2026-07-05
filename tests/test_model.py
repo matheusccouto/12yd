@@ -505,9 +505,7 @@ def test_build_feature_matrix_with_explicit_y() -> None:
     rows = [_make_row(label="L"), _make_row(label="R")]
     explicit_y = np.array([1, 1], dtype=np.int64)  # both labelled C
     explicit_on_target = np.array([False, True], dtype=bool)
-    matrix = build_feature_matrix(
-        rows, y=explicit_y, on_target=explicit_on_target
-    )
+    matrix = build_feature_matrix(rows, y=explicit_y, on_target=explicit_on_target)
     assert matrix.y.tolist() == [1, 1]
     assert matrix.on_target.tolist() == [False, True]
 

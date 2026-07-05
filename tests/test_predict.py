@@ -412,9 +412,7 @@ def test_predict_roster_handles_metadata_fetch_failure() -> None:
 
     def fetch(pid: int) -> PlayerMetadata | None:
         if pid == 1:
-            return _metadata(
-                player_id=1, position_key="striker", birth_date="1990-01-01"
-            )
+            return _metadata(player_id=1, position_key="striker", birth_date="1990-01-01")
         return None  # failed for player 2
 
     out = predict_roster(
@@ -504,9 +502,7 @@ def test_predictions_jsonl_roundtrip(tmp_path: Path) -> None:
 
 def _live_artifacts_present() -> bool:
     art = Artifacts()
-    return (
-        art.roster.exists() and art.player_history.exists() and art.lightgbm_model.exists()
-    )
+    return art.roster.exists() and art.player_history.exists() and art.lightgbm_model.exists()
 
 
 @pytest.mark.skipif(

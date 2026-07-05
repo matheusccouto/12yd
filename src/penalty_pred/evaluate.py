@@ -438,9 +438,7 @@ class MetricsReport:
                 **payload["kicker_most_frequent_baseline"]
             ),
             actual_keeper_baseline=BaselineMetrics(**payload["actual_keeper_baseline"]),
-            baseline=(
-                BaselineMetrics(**payload["baseline"]) if payload.get("baseline") else None
-            ),
+            baseline=(BaselineMetrics(**payload["baseline"]) if payload.get("baseline") else None),
             calibration=calibration,
             cv=cv,
             n_train=int(payload["n_train"]),

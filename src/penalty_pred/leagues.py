@@ -92,7 +92,9 @@ EXTENDED_LEAGUES: tuple[League, ...] = (
     # International friendlies + qualifiers
     League(114, "friendlies", "Friendlies", kind="domestic_only"),
     League(76, "uefa-euro-qualification", "UEFA Euro Qualifiers", kind="domestic_only"),
-    League(84, "fifa-world-cup-qualifiers-conmebol", "CONMEBOL WC Qualifiers", kind="domestic_only"),
+    League(
+        84, "fifa-world-cup-qualifiers-conmebol", "CONMEBOL WC Qualifiers", kind="domestic_only"
+    ),
     # Club continental (Americas)
     League(292, "concacaf-champions-cup", "CONCACAF Champions Cup", kind="domestic_only"),
     League(195, "leagues-cup", "Leagues Cup", kind="domestic_only"),
@@ -103,17 +105,12 @@ EXTENDED_LEAGUES: tuple[League, ...] = (
 # to `kind in {"international", "club"}` (i.e. the union of `LEAGUES`
 # and `CLUB_LEAGUES`).
 LEAGUE_BY_ID: dict[int, League] = {
-    league.league_id: league
-    for league in (*LEAGUES, *CLUB_LEAGUES, *EXTENDED_LEAGUES)
+    league.league_id: league for league in (*LEAGUES, *CLUB_LEAGUES, *EXTENDED_LEAGUES)
 }
 
 # Convenience sets used by the shootout scraper and the tournament
 # scope filters. The shootout scraper's filter is
 # `kind in {"international", "club"}`; these sets make the intent
 # explicit at the call site and the test surface.
-INTERNATIONAL_LEAGUE_IDS: frozenset[int] = frozenset(
-    league.league_id for league in LEAGUES
-)
-CLUB_LEAGUE_IDS: frozenset[int] = frozenset(
-    league.league_id for league in CLUB_LEAGUES
-)
+INTERNATIONAL_LEAGUE_IDS: frozenset[int] = frozenset(league.league_id for league in LEAGUES)
+CLUB_LEAGUE_IDS: frozenset[int] = frozenset(league.league_id for league in CLUB_LEAGUES)

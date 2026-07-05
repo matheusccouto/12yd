@@ -652,6 +652,7 @@ def fetcher_from_client(client: Any) -> MetadataFetcher:
     player-history slice populated), so a re-run is a no-op once the
     cache is warm.
     """
+
     def _fetch(player_id: int) -> PlayerMetadata | None:
         try:
             payload = fetch_player_data(client, player_id)

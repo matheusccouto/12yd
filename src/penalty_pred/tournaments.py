@@ -64,9 +64,7 @@ CLUB_PAIRS: tuple[tuple[int, int], ...] = tuple(
 
 # The combined shootout scope. The scraper iterates this list. The
 # validator's expected count comes from the per-pair RSSSF count.
-LEAGUE_SEASONS_PREDICT_WINDOW: tuple[tuple[int, int], ...] = (
-    INTERNATIONAL_PAIRS + CLUB_PAIRS
-)
+LEAGUE_SEASONS_PREDICT_WINDOW: tuple[tuple[int, int], ...] = INTERNATIONAL_PAIRS + CLUB_PAIRS
 
 # Per-(league_id, season) list of FotMob `?season=` values for each
 # in-scope club league. Convenience for tests and future per-league

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -405,3 +405,144 @@ def predict_window_bounds() -> tuple[datetime, datetime]:
     start = datetime.combine(PREDICT_WINDOW_START, datetime.min.time(), tzinfo=UTC)
     end = datetime.combine(today_utc(), datetime.min.time(), tzinfo=UTC)
     return start, end
+
+
+# --- Per-tournament success-rate diagnostic (v4 PRD Phase 2) ---------------
+
+
+@dataclass(frozen=True)
+class TournamentSuccessRate:
+    """One row in the per-tournament success-rate diagnostic.
+
+    The per-(league, season) rollup of a scraper run. The fields
+    answer two questions:
+
+    1. **Did the scraper find every match the RSSSF oracle says exists
+       in this (league, season)?** — `match_count` vs.
+       `reachable_match_count` (raw RSSSF count minus the documented
+       empty-shotmap exclusions).
+    2. **If not, why (skipped, no_kicks, failed)?** — the three count
+       fields surface the per-pair diagnostic breakdown.
+
+    `status` is one of:
+    - `"ok"` — `match_count >= reachable_match_count`.
+    - `"partial"` — `0 < match_count < reachable_match_count`.
+    - `"missing"` — `match_count == 0` (and `reachable_match_count > 0`).
+    - `"n/a"` — `expected_match_count == 0` (the pair legitimately has
+      zero shootouts, e.g. Gold Cup 2021, Asian Cup 2021, Asian Cup
+      2025, WC 2026).
+
+    The dataclass is the on-disk row shape for
+    `tournament_success_rate.jsonl`. The aggregate function
+    (`aggregate_per_tournament_success_rate`) and the writer
+    (`write_per_tournament_success_rate`) live next to it so the
+    diagnostic is one import.
+    """
+
+    league_id: int
+    season: int
+    tournament_name: str
+    match_count: int
+    kick_count: int
+    skipped_count: int
+    no_kicks_count: int
+    failed_count: int
+    expected_match_count: int
+    reachable_match_count: int
+    status: str
+
+
+def aggregate_per_tournament_success_rate(
+    pair_results: Iterable[tuple[tuple[int, int], list[FetchResult]]],
+    *,
+    expected_counts: Mapping[tuple[int, int], int] | None = None,
+    excluded_counts: Mapping[tuple[int, int], int] | None = None,
+    tournament_names: Mapping[int, str] | None = None,
+) -> list[TournamentSuccessRate]:
+    """Roll up per-(league, season) results into a coverage diagnostic.
+
+    The rollup compares the scraper's match count against the RSSSF
+    oracle's expected count (minus documented empty-shotmap cases).
+    The output is one `TournamentSuccessRate` row per `(league, season)`
+    pair in `pair_results` — pairs that are in the scope but not in
+    `pair_results` (e.g. a league with zero shootout fixtures) are
+    NOT included; the integration test cross-checks the artifact
+    against the full in-scope pair list separately.
+
+    Args:
+        pair_results: iterable of `((league_id, season), [FetchResult])`.
+        expected_counts: per-pair raw RSSSF count, e.g.
+            `{(77, 2022): 5, ...}`. Pairs not in the map get 0.
+        excluded_counts: per-pair empty-shotmap exclusions, e.g.
+            `{(289, 2021): 4, ...}`. The reachable count is
+            `expected - excluded`. Pairs not in the map get 0.
+        tournament_names: per-league-id display name, e.g.
+            `{77: "World Cup"}`. Defaults to `LEAGUE_BY_ID` lookup
+            (the union of international + club + extended leagues).
+    """
+    expected_counts = dict(expected_counts or {})
+    excluded_counts = dict(excluded_counts or {})
+    if tournament_names is None:
+        tournament_names = {lid: league.name for lid, league in LEAGUE_BY_ID.items()}
+
+    rows: list[TournamentSuccessRate] = []
+    for pair, results in pair_results:
+        league_id, season = pair
+        match_count = sum(1 for r in results if r.kicks and not r.skipped)
+        kick_count = sum(len(r.kicks) for r in results)
+        skipped_count = sum(1 for r in results if r.skipped)
+        no_kicks_count = sum(1 for r in results if r.no_kicks)
+        failed_count = sum(1 for r in results if r.failure_mode)
+        expected = expected_counts.get(pair, 0)
+        excluded = excluded_counts.get(pair, 0)
+        reachable = max(0, expected - excluded)
+        if expected == 0:
+            status = "n/a"
+        elif match_count >= reachable:
+            status = "ok"
+        elif match_count > 0:
+            status = "partial"
+        else:
+            status = "missing"
+        rows.append(
+            TournamentSuccessRate(
+                league_id=league_id,
+                season=season,
+                tournament_name=tournament_names.get(league_id, ""),
+                match_count=match_count,
+                kick_count=kick_count,
+                skipped_count=skipped_count,
+                no_kicks_count=no_kicks_count,
+                failed_count=failed_count,
+                expected_match_count=expected,
+                reachable_match_count=reachable,
+                status=status,
+            )
+        )
+    return rows
+
+
+def write_per_tournament_success_rate(
+    rows: Iterable[TournamentSuccessRate],
+    path: Path,
+) -> int:
+    """Write one JSONL row per (league, season) pair to `path`.
+
+    The output complements `write_skipped_refs_diagnostics` (which
+    surfaces the per-match skip / no-kicks / failure reasons) with a
+    per-tournament rollup that answers "did the scraper reach every
+    (league, season) the oracle says exists?". The artifact is a
+    v4 PRD Phase 2 acceptance criterion: a future maintainer running
+    the slice pipeline can spot a regression on a single tournament
+    (a `"partial"` or `"missing"` row) without parsing the per-match
+    diagnostics file. The test in `test_tournaments.py` pins the
+    per-pair coverage against `EXPECTED_SHOOTOUT_COUNTS`.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    count = 0
+    with path.open("w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(asdict(row), ensure_ascii=False))
+            f.write("\n")
+            count += 1
+    return count

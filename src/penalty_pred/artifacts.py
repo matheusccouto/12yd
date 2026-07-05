@@ -32,6 +32,12 @@ The on-disk layout (relative to `root`):
 - `skipped_refs_diagnostics.jsonl` — one record per non-empty
   skip / no-kicks / failure result, with the `failure_mode` discriminator
   (`stale_hash` | `empty_shotmap` | `ExceptionClass: message`).
+- `tournament_success_rate.jsonl` — one `TournamentSuccessRate` row per
+  (league, season) pair, with the scraper's match / kick counts, the
+  per-state breakdown (skipped, no-kicks, failed), and the expected /
+  reachable counts from the RSSSF oracle. Companion to
+  `skipped_refs_diagnostics.jsonl` — the per-match file surfaces the
+  why, this file surfaces the per-tournament rollup.
 - `cv_metrics.json` — the leave-one-tournament-out cross-validation
   report (Issue #45), with per-fold metrics and the aggregate
   summary. Also embedded as the `cv` block in `metrics.json` so the
@@ -69,7 +75,7 @@ from .model import (
 from .player_history import PlayerPenalty
 from .predict import PredictionRow
 from .rosters import RosterPlayer
-from .shootouts import ShootoutKick
+from .shootouts import ShootoutKick, TournamentSuccessRate
 
 _T = TypeVar("_T")
 
@@ -204,6 +210,20 @@ class Artifacts:
         return self.root / "skipped_refs_diagnostics.jsonl"
 
     @property
+    def tournament_success_rate(self) -> Path:
+        """Path to the per-(league, season) scraper coverage diagnostic.
+
+        Issue #51 (v4 PRD Phase 2 acceptance criterion): the scraper
+        writes one JSONL row per (league, season) pair with the
+        match / kick counts, the per-state breakdown (skipped,
+        no-kicks, failed), and the expected / reachable counts from
+        the RSSSF oracle. The `test_tournaments.py` integration test
+        pins every in-scope pair's coverage against
+        `EXPECTED_SHOOTOUT_COUNTS`.
+        """
+        return self.root / "tournament_success_rate.jsonl"
+
+    @property
     def cv_metrics(self) -> Path:
         return self.root / "cv_metrics.json"
 
@@ -212,9 +232,7 @@ class Artifacts:
     def read_shootout_kicks(self, path: Path | None = None) -> list[ShootoutKick]:
         return _read_jsonl_of_dataclasses(path or self.shootout_kicks, ShootoutKick)
 
-    def write_shootout_kicks(
-        self, rows: Iterable[ShootoutKick], path: Path | None = None
-    ) -> int:
+    def write_shootout_kicks(self, rows: Iterable[ShootoutKick], path: Path | None = None) -> int:
         return _write_jsonl(path or self.shootout_kicks, rows)
 
     # ------------------------------------------------------------ player_h
@@ -222,9 +240,7 @@ class Artifacts:
     def read_player_history(self, path: Path | None = None) -> list[PlayerPenalty]:
         return _read_jsonl_of_dataclasses(path or self.player_history, PlayerPenalty)
 
-    def write_player_history(
-        self, rows: Iterable[PlayerPenalty], path: Path | None = None
-    ) -> int:
+    def write_player_history(self, rows: Iterable[PlayerPenalty], path: Path | None = None) -> int:
         return _write_jsonl(path or self.player_history, rows)
 
     # ----------------------------------------------------------- missing_h
@@ -232,9 +248,7 @@ class Artifacts:
     def read_missing_history(self, path: Path | None = None) -> list[MissingKicker]:
         return _read_jsonl_of_dataclasses(path or self.missing_history, MissingKicker)
 
-    def write_missing_history(
-        self, rows: Iterable[MissingKicker], path: Path | None = None
-    ) -> int:
+    def write_missing_history(self, rows: Iterable[MissingKicker], path: Path | None = None) -> int:
         return _write_jsonl(path or self.missing_history, rows)
 
     # ----------------------------------------------------------------- roster
@@ -250,9 +264,7 @@ class Artifacts:
     def read_training_table(self, path: Path | None = None) -> list[TrainingRow]:
         return _read_jsonl_of_dataclasses(path or self.training_table, TrainingRow)
 
-    def write_training_table(
-        self, rows: Iterable[TrainingRow], path: Path | None = None
-    ) -> int:
+    def write_training_table(self, rows: Iterable[TrainingRow], path: Path | None = None) -> int:
         return _write_jsonl(path or self.training_table, rows, nan_to_null=True)
 
     # ----------------------------------------------------------- predictions
@@ -260,10 +272,24 @@ class Artifacts:
     def read_predictions(self, path: Path | None = None) -> list[PredictionRow]:
         return _read_jsonl_of_dataclasses(path or self.predictions, PredictionRow)
 
-    def write_predictions(
-        self, rows: Iterable[PredictionRow], path: Path | None = None
-    ) -> int:
+    def write_predictions(self, rows: Iterable[PredictionRow], path: Path | None = None) -> int:
         return _write_jsonl(path or self.predictions, rows)
+
+    # --------------------------------------------- tournament success-rate
+
+    def read_tournament_success_rate(self, path: Path | None = None) -> list[TournamentSuccessRate]:
+        """Read the per-tournament scraper coverage diagnostic.
+
+        Issue #51 (v4 PRD Phase 2): the artifact is one
+        `TournamentSuccessRate` row per (league, season) pair, with
+        the match / kick counts and the per-state breakdown. The
+        reader reconstructs the dataclass list; callers use
+        `aggregate_per_tournament_success_rate` to compute the rows
+        before writing.
+        """
+        return _read_jsonl_of_dataclasses(
+            path or self.tournament_success_rate, TournamentSuccessRate
+        )
 
     # -------------------------------------------------------------- metrics
 

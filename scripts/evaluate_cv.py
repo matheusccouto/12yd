@@ -166,7 +166,9 @@ def main() -> int:
     )
 
     print("\nPer-fold (lightgbm, sorted largest first):")
-    print(f"  {'tournament':<48s} {'n_train':>8s} {'n_holdout':>10s} {'save':>7s} {'random':>7s} {'log_loss':>9s} {'acc':>6s}")
+    print(
+        f"  {'tournament':<48s} {'n_train':>8s} {'n_holdout':>10s} {'save':>7s} {'random':>7s} {'log_loss':>9s} {'acc':>6s}"
+    )
     for fold in lgb_cv.folds:
         print(
             f"  {fold.name:<48s} {fold.n_train:>8d} {fold.n_holdout:>10d} "

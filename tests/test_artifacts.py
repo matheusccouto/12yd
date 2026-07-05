@@ -59,6 +59,7 @@ def test_default_paths_point_at_canonical_filenames() -> None:
     assert art.metrics == Path("output/metrics.json")
     assert art.discrepancies == Path("output/discrepancies.json")
     assert art.diagnostics == Path("output/skipped_refs_diagnostics.jsonl")
+    assert art.tournament_success_rate == Path("output/tournament_success_rate.jsonl")
     assert art.cv_metrics == Path("output/cv_metrics.json")
 
 
@@ -71,6 +72,7 @@ def test_custom_root_redirects_every_artifact() -> None:
     assert art.predictions == Path("/tmp/foo/predictions.jsonl")
     assert art.metrics == Path("/tmp/foo/metrics.json")
     assert art.diagnostics == Path("/tmp/foo/skipped_refs_diagnostics.jsonl")
+    assert art.tournament_success_rate == Path("/tmp/foo/tournament_success_rate.jsonl")
     assert art.cv_metrics == Path("/tmp/foo/cv_metrics.json")
     # The cache_dir is independent of `root`.
     assert art.cache_dir == Path("data/fotmob_cache")
@@ -333,3 +335,89 @@ def test_write_creates_parent_directories(tmp_path: Path) -> None:
     art = Artifacts(root=tmp_path / "deep" / "nested")
     art.write_shootout_kicks([_shootout_kick()])
     assert art.shootout_kicks.exists()
+
+
+# ---------------------------------------------------------------------------
+# Per-tournament success-rate JSONL round-trip
+# ---------------------------------------------------------------------------
+
+
+def test_tournament_success_rate_round_trip(tmp_path: Path) -> None:
+    """The `TournamentSuccessRate` dataclass round-trips through the
+    adapter's read/write pair. A small fixture covers the four
+    `status` values (`"ok"`, `"partial"`, `"missing"`, `"n/a"`) so
+    the JSONL shape is pinned at the seam."""
+    from penalty_pred.shootouts import TournamentSuccessRate
+
+    art = Artifacts(root=tmp_path)
+    rows = [
+        TournamentSuccessRate(
+            league_id=77,
+            season=2022,
+            tournament_name="World Cup",
+            match_count=5,
+            kick_count=25,
+            skipped_count=0,
+            no_kicks_count=0,
+            failed_count=0,
+            expected_match_count=5,
+            reachable_match_count=5,
+            status="ok",
+        ),
+        TournamentSuccessRate(
+            league_id=50,
+            season=2024,
+            tournament_name="Euro",
+            match_count=1,
+            kick_count=8,
+            skipped_count=0,
+            no_kicks_count=0,
+            failed_count=0,
+            expected_match_count=3,
+            reachable_match_count=3,
+            status="partial",
+        ),
+        TournamentSuccessRate(
+            league_id=44,
+            season=2024,
+            tournament_name="Copa América",
+            match_count=0,
+            kick_count=0,
+            skipped_count=0,
+            no_kicks_count=0,
+            failed_count=0,
+            expected_match_count=4,
+            reachable_match_count=4,
+            status="missing",
+        ),
+        TournamentSuccessRate(
+            league_id=298,
+            season=2021,
+            tournament_name="CONCACAF Gold Cup",
+            match_count=0,
+            kick_count=0,
+            skipped_count=0,
+            no_kicks_count=0,
+            failed_count=0,
+            expected_match_count=0,
+            reachable_match_count=0,
+            status="n/a",
+        ),
+    ]
+    n = 0
+    with art.tournament_success_rate.open("w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row.__dict__, ensure_ascii=False))
+            f.write("\n")
+            n += 1
+    assert n == 4
+    assert art.tournament_success_rate.exists()
+
+    loaded = art.read_tournament_success_rate()
+    assert len(loaded) == 4
+    assert loaded[0] == rows[0]
+    assert loaded[1] == rows[1]
+    assert loaded[2] == rows[2]
+    assert loaded[3] == rows[3]
+    # The four status values are all preserved.
+    assert [r.status for r in loaded] == ["ok", "partial", "missing", "n/a"]

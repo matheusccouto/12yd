@@ -11,7 +11,12 @@ script:
 5. Writes `skipped_refs_diagnostics.jsonl` with one record per
    non-empty skip / no-kicks / failure result, used to diagnose the
    RSSSF divergence.
-6. Loads the RSSSF penaltiestour page, counts in-window shootouts, and writes
+6. Writes `tournament_success_rate.jsonl` with one record per
+   (league, season) pair, the per-tournament rollup of the per-match
+   results (v4 PRD Phase 2 acceptance criterion). The pair info is
+   tracked per iteration so the rollup can be generated alongside the
+   per-match diagnostics in the same loop.
+7. Loads the RSSSF penaltiestour page, counts in-window shootouts, and writes
    `discrepancies.json` if the count diverges from what the scraper found.
 
 Re-runs are cache-hit-dominated: the FotMob client serves 304 responses from
@@ -29,8 +34,11 @@ from penalty_pred.artifacts import Artifacts
 from penalty_pred.client import FotMobClient
 from penalty_pred.rsssf import load_rsssf_html, parse_rsssf_html
 from penalty_pred.shootouts import (
+    FetchResult,
+    aggregate_per_tournament_success_rate,
     fetch_all_shootout_kicks_with_skips,
     fetch_all_shootout_match_refs,
+    write_per_tournament_success_rate,
     write_skipped_refs_diagnostics,
 )
 from penalty_pred.tournaments import LEAGUE_SEASONS_PREDICT_WINDOW
@@ -65,9 +73,15 @@ def main() -> int:
         "--diagnostics",
         type=Path,
         default=art.diagnostics,
+        help=(f"Path to write the per-match diagnostics JSONL (default: {art.diagnostics})."),
+    )
+    parser.add_argument(
+        "--tournament-success-rate",
+        type=Path,
+        default=art.tournament_success_rate,
         help=(
-            "Path to write the per-match diagnostics JSONL "
-            f"(default: {art.diagnostics})."
+            "Path to write the per-(league, season) success-rate JSONL "
+            f"(default: {art.tournament_success_rate})."
         ),
     )
     parser.add_argument(
@@ -92,21 +106,41 @@ def main() -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     client = FotMobClient(cache_dir=args.cache_dir)
 
-    # 1. Discover the shootout match references (one fetch per (league, season)).
-    refs = fetch_all_shootout_match_refs(client, LEAGUE_SEASONS_PREDICT_WINDOW)
-    print(f"Discovered {len(refs)} shootout matches across all in-scope tournaments")
+    # 1. Per-(league, season) iteration. We track the pair alongside the
+    # per-match results so the per-tournament success-rate diagnostic
+    # (v4 PRD Phase 2 acceptance criterion) can be generated alongside
+    # the per-match diagnostics. The pair is dropped inside
+    # `fetch_all_shootout_match_refs` (it returns a flat list of refs),
+    # so we re-bind it per iteration here.
+    pair_results: list[tuple[tuple[int, int], list[FetchResult]]] = []
+    all_kicks: list = []
+    skipped: list = []
+    no_kicks: list = []
+    failed: list = []
+    for pair in LEAGUE_SEASONS_PREDICT_WINDOW:
+        refs = fetch_all_shootout_match_refs(client, [pair])
+        results = fetch_all_shootout_kicks_with_skips(client, refs)
+        pair_results.append((pair, results))
+        for r in results:
+            all_kicks.extend(r.kicks)
+            if r.skipped:
+                skipped.append(r.ref)
+            elif r.no_kicks:
+                no_kicks.append(r.ref)
+            elif r.failure_mode:
+                failed.append(r.ref)
+    n_refs = sum(len(results) for _, results in pair_results)
+    print(f"Discovered {n_refs} shootout matches across all in-scope tournaments")
 
-    # 2. Fetch each match and extract its kicks. The orchestrator returns
-    # per-match results so we can surface skipped (stale-URL),
-    # processed-but-no-kicks, and extractor-failure matches in the
-    # diagnostics and discrepancies files.
-    results = fetch_all_shootout_kicks_with_skips(client, refs)
-    all_kicks = [k for r in results for k in r.kicks]
-    skipped = [r.ref for r in results if r.skipped]
-    no_kicks = [r.ref for r in results if r.no_kicks]
-    failed = [r.ref for r in results if r.failure_mode]
-    n_kicks = Artifacts().write_shootout_kicks(all_kicks, path=args.output)
-    n_diag = write_skipped_refs_diagnostics(results, path=args.diagnostics)
+    # 2. Write the artifacts. Three JSONL files: the kicks (one row per
+    # kick), the per-match diagnostics (one row per skip / no-kicks /
+    # failure), and the per-tournament success rate (one row per
+    # (league, season) pair).
+    all_results = [r for _, results in pair_results for r in results]
+    n_kicks = art.write_shootout_kicks(all_kicks, path=args.output)
+    n_diag = write_skipped_refs_diagnostics(all_results, path=args.diagnostics)
+    rows = aggregate_per_tournament_success_rate(pair_results)
+    n_rate = write_per_tournament_success_rate(rows, path=args.tournament_success_rate)
     print(
         f"Wrote {n_kicks} shootout kicks to {args.output} "
         f"({len(skipped)} skipped due to stale (seo, h2h) hashes, "
@@ -114,6 +148,7 @@ def main() -> int:
         f"{len(failed)} failed during extraction)"
     )
     print(f"Wrote {n_diag} per-match diagnostics rows to {args.diagnostics}")
+    print(f"Wrote {n_rate} per-tournament success-rate rows to {args.tournament_success_rate}")
 
     # 3. Run the RSSSF completeness check.
     if args.skip_rsssf:

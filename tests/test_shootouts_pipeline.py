@@ -514,3 +514,212 @@ def test_write_diagnostics_creates_parent_dir(tmp_path: Path) -> None:
     )
     assert n == 1
     assert path.exists()
+
+
+# --- aggregate_per_tournament_success_rate --------------------------------
+
+
+def test_aggregate_per_tournament_writes_one_row_per_pair(tmp_path: Path) -> None:
+    """`aggregate_per_tournament_success_rate` rolls up per-(league,
+    season) results into one `TournamentSuccessRate` row, then
+    `write_per_tournament_success_rate` writes one JSONL record per
+    row. The output complements `write_skipped_refs_diagnostics`
+    (per-match why) with a per-tournament rollup (v4 PRD Phase 2)."""
+    from penalty_pred.shootouts import (
+        FetchResult,
+        TournamentSuccessRate,
+        aggregate_per_tournament_success_rate,
+        write_per_tournament_success_rate,
+    )
+
+    pair1 = (77, 2022)  # World Cup 2022
+    pair2 = (50, 2024)  # Euro 2024
+
+    results_1 = [
+        FetchResult(
+            ref=MatchRef(match_id=1, seo="a", h2h="aa"),
+            kicks=[{"match_id": 1}],
+            skipped=False,
+            no_kicks=False,
+        ),
+        FetchResult(
+            ref=MatchRef(match_id=2, seo="b", h2h="bb"),
+            kicks=[],
+            skipped=True,
+            live_match_id=99,
+            resolved_url="https://www.fotmob.com/matches/b/bb",
+        ),
+    ]
+    results_2 = [
+        FetchResult(
+            ref=MatchRef(match_id=3, seo="c", h2h="cc"),
+            kicks=[{"match_id": 3}],
+            skipped=False,
+            no_kicks=False,
+        ),
+    ]
+
+    pair_results = [(pair1, results_1), (pair2, results_2)]
+    expected_counts = {pair1: 5, pair2: 3}
+    excluded_counts: dict = {}
+    rows = aggregate_per_tournament_success_rate(
+        pair_results,
+        expected_counts=expected_counts,
+        excluded_counts=excluded_counts,
+    )
+    assert len(rows) == 2
+    assert all(isinstance(r, TournamentSuccessRate) for r in rows)
+
+    # Pair 1: 1 match with kicks, 1 skipped. expected=5, reachable=5.
+    # status should be "partial" (1 < 5).
+    pair1_row = next(r for r in rows if (r.league_id, r.season) == pair1)
+    assert pair1_row.match_count == 1
+    assert pair1_row.kick_count == 1
+    assert pair1_row.skipped_count == 1
+    assert pair1_row.no_kicks_count == 0
+    assert pair1_row.failed_count == 0
+    assert pair1_row.expected_match_count == 5
+    assert pair1_row.reachable_match_count == 5
+    assert pair1_row.status == "partial"
+    assert pair1_row.tournament_name == "World Cup"
+
+    # Pair 2: 1 match with kicks. expected=3, reachable=3.
+    # status should be "partial" (1 < 3).
+    pair2_row = next(r for r in rows if (r.league_id, r.season) == pair2)
+    assert pair2_row.match_count == 1
+    assert pair2_row.expected_match_count == 3
+    assert pair2_row.reachable_match_count == 3
+    assert pair2_row.status == "partial"
+    assert pair2_row.tournament_name == "Euro"
+
+    # Writer
+    path = tmp_path / "rate.jsonl"
+    n = write_per_tournament_success_rate(rows, path=path)
+    assert n == 2
+    on_disk = [json.loads(line) for line in path.read_text().splitlines() if line]
+    assert on_disk[0]["league_id"] == 77
+    assert on_disk[0]["status"] == "partial"
+    assert on_disk[1]["league_id"] == 50
+
+
+def test_aggregate_per_tournament_status_states(tmp_path: Path) -> None:
+    """`aggregate_per_tournament_success_rate` produces the four
+    expected `status` values — `"ok"`, `"partial"`, `"missing"`, and
+    `"n/a"` — from the (match_count, expected, excluded) inputs.
+
+    A row is `"ok"` iff the scraper reached every reachable match; a
+    row is `"n/a"` iff the pair has 0 expected shootouts (e.g. Gold
+    Cup 2021); a row is `"missing"` iff match_count is 0 and the
+    pair has reachable matches; a row is `"partial"` otherwise.
+    """
+    from penalty_pred.shootouts import (
+        FetchResult,
+        aggregate_per_tournament_success_rate,
+    )
+
+    def ok(pair: tuple[int, int], expected: int) -> FetchResult:
+        return FetchResult(
+            ref=MatchRef(match_id=expected, seo="s", h2h="h"),
+            kicks=[{"match_id": expected}],
+            skipped=False,
+            no_kicks=False,
+        )
+
+    # ok: 3 results, expected=3, reachable=3.
+    ok_pair = (77, 2022)
+    # partial: 1 result, expected=3, reachable=3.
+    partial_pair = (50, 2024)
+    # missing: 0 results, expected=3, reachable=3.
+    missing_pair = (44, 2024)
+    # n/a: 0 results, expected=0 (the pair legitimately has no shootouts).
+    na_pair = (298, 2021)
+    pair_results = [
+        (ok_pair, [ok(ok_pair, 1), ok(ok_pair, 2), ok(ok_pair, 3)]),
+        (partial_pair, [ok(partial_pair, 1)]),
+        (missing_pair, []),
+        (na_pair, []),
+    ]
+    rows = aggregate_per_tournament_success_rate(
+        pair_results,
+        expected_counts={
+            ok_pair: 3,
+            partial_pair: 3,
+            missing_pair: 3,
+            na_pair: 0,
+        },
+    )
+    by_pair = {(r.league_id, r.season): r for r in rows}
+    assert by_pair[ok_pair].status == "ok"
+    assert by_pair[partial_pair].status == "partial"
+    assert by_pair[missing_pair].status == "missing"
+    assert by_pair[na_pair].status == "n/a"
+
+
+def test_aggregate_per_tournament_respects_excluded_counts() -> None:
+    """`excluded_counts` lowers `reachable_match_count` from the raw
+    `expected_counts` value. A pair with `expected=6, excluded=4` has
+    `reachable=2`; the row reports `reachable_match_count=2` and the
+    status uses the reachable (not raw) threshold."""
+    from penalty_pred.shootouts import (
+        FetchResult,
+        aggregate_per_tournament_success_rate,
+    )
+
+    pair = (289, 2021)  # AFCON 2021 (Issue #49: 4 empty-shotmap cases)
+    results = [
+        FetchResult(
+            ref=MatchRef(match_id=1, seo="a", h2h="aa"),
+            kicks=[{"match_id": 1}],
+            skipped=False,
+            no_kicks=False,
+        ),
+        FetchResult(
+            ref=MatchRef(match_id=2, seo="b", h2h="bb"),
+            kicks=[{"match_id": 2}],
+            skipped=False,
+            no_kicks=False,
+        ),
+    ]
+    rows = aggregate_per_tournament_success_rate(
+        [(pair, results)],
+        expected_counts={pair: 6},
+        excluded_counts={pair: 4},
+    )
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.expected_match_count == 6
+    assert row.reachable_match_count == 2
+    assert row.match_count == 2
+    assert row.status == "ok"  # 2 >= 2
+
+
+def test_write_per_tournament_creates_parent_dir(tmp_path: Path) -> None:
+    """`write_per_tournament_success_rate` creates the parent directory
+    if it does not exist (consistent with `write_skipped_refs_diagnostics`
+    and the other `Artifacts.write_*` methods)."""
+    from penalty_pred.shootouts import (
+        TournamentSuccessRate,
+        write_per_tournament_success_rate,
+    )
+
+    path = tmp_path / "nested" / "rate.jsonl"
+    n = write_per_tournament_success_rate(
+        [
+            TournamentSuccessRate(
+                league_id=77,
+                season=2022,
+                tournament_name="World Cup",
+                match_count=3,
+                kick_count=15,
+                skipped_count=0,
+                no_kicks_count=0,
+                failed_count=0,
+                expected_match_count=5,
+                reachable_match_count=5,
+                status="partial",
+            )
+        ],
+        path=path,
+    )
+    assert n == 1
+    assert path.exists()

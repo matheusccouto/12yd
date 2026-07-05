@@ -423,9 +423,27 @@ def test_calibration_report_roundtrip() -> None:
     # Roundtrip through the metrics report's from_dict helper.
     metrics_payload = {
         "model": {"name": "m", "log_loss": 1.0, "accuracy": 0.5, "save_rate": 0.5, "n_kicks": 4},
-        "random_baseline": {"name": "r", "log_loss": 1.1, "accuracy": 0.33, "save_rate": 0.4, "n_kicks": 4},
-        "kicker_most_frequent_baseline": {"name": "k", "log_loss": None, "accuracy": None, "save_rate": 0.4, "n_kicks": 4},
-        "actual_keeper_baseline": {"name": "a", "log_loss": None, "accuracy": None, "save_rate": None, "n_kicks": 4},
+        "random_baseline": {
+            "name": "r",
+            "log_loss": 1.1,
+            "accuracy": 0.33,
+            "save_rate": 0.4,
+            "n_kicks": 4,
+        },
+        "kicker_most_frequent_baseline": {
+            "name": "k",
+            "log_loss": None,
+            "accuracy": None,
+            "save_rate": 0.4,
+            "n_kicks": 4,
+        },
+        "actual_keeper_baseline": {
+            "name": "a",
+            "log_loss": None,
+            "accuracy": None,
+            "save_rate": None,
+            "n_kicks": 4,
+        },
         "n_train": 151,
         "n_holdout": 4,
         "holdout_cutoff_date": "2026-01-01",
@@ -460,9 +478,27 @@ def test_metrics_report_from_dict_handles_missing_calibration() -> None:
     roundtrips with `calibration=None`."""
     payload = {
         "model": {"name": "m", "log_loss": 1.0, "accuracy": 0.5, "save_rate": 0.5, "n_kicks": 4},
-        "random_baseline": {"name": "r", "log_loss": 1.1, "accuracy": 0.33, "save_rate": 0.4, "n_kicks": 4},
-        "kicker_most_frequent_baseline": {"name": "k", "log_loss": None, "accuracy": None, "save_rate": 0.4, "n_kicks": 4},
-        "actual_keeper_baseline": {"name": "a", "log_loss": None, "accuracy": None, "save_rate": None, "n_kicks": 4},
+        "random_baseline": {
+            "name": "r",
+            "log_loss": 1.1,
+            "accuracy": 0.33,
+            "save_rate": 0.4,
+            "n_kicks": 4,
+        },
+        "kicker_most_frequent_baseline": {
+            "name": "k",
+            "log_loss": None,
+            "accuracy": None,
+            "save_rate": 0.4,
+            "n_kicks": 4,
+        },
+        "actual_keeper_baseline": {
+            "name": "a",
+            "log_loss": None,
+            "accuracy": None,
+            "save_rate": None,
+            "n_kicks": 4,
+        },
         "n_train": 151,
         "n_holdout": 4,
         "holdout_cutoff_date": "2026-01-01",
@@ -674,8 +710,10 @@ class _PerfectClassifier:
 
 def _make_uniform_factory(mode: str = "uniform"):
     """Build a model factory that returns a constant `_PerfectClassifier`."""
+
     def factory(matrix):  # noqa: ARG001
         return _PerfectClassifier(mode=mode).fit(matrix)
+
     return factory
 
 
@@ -727,7 +765,9 @@ def test_cross_validate_aggregate_save_rate_weighted_correctly() -> None:
     rows = []
     for t in ("X", "Y", "Z"):
         for i in range(4):
-            rows.append(_make_row("L", tournament_name=t, match_id=hash(t) % 1000 + i, kick_number=1))
+            rows.append(
+                _make_row("L", tournament_name=t, match_id=hash(t) % 1000 + i, kick_number=1)
+            )
     report = cross_validate(_make_uniform_factory("uniform"), rows)
     assert len(report.folds) == 3
     assert report.n_total == 12
@@ -744,7 +784,11 @@ def test_cross_validate_se_is_binomial_on_weighted_total() -> None:
     rows = []
     for t in ("G1", "G2", "G3", "G4"):
         for label in ("L", "L", "C", "R", "R"):  # 2 L, 1 C, 2 R per fold
-            rows.append(_make_row(label, tournament_name=t, match_id=hash(t) % 1000 + len(rows), kick_number=1))
+            rows.append(
+                _make_row(
+                    label, tournament_name=t, match_id=hash(t) % 1000 + len(rows), kick_number=1
+                )
+            )
     report = cross_validate(_make_uniform_factory("always_L"), rows)
     assert report.n_total == 20
     p = report.aggregate_save_rate
@@ -917,9 +961,27 @@ def _make_minimal_metrics_payload() -> dict:
     compat path can be exercised."""
     return {
         "model": {"name": "m", "log_loss": 1.0, "accuracy": 0.5, "save_rate": 0.5, "n_kicks": 4},
-        "random_baseline": {"name": "r", "log_loss": 1.1, "accuracy": 0.33, "save_rate": 0.4, "n_kicks": 4},
-        "kicker_most_frequent_baseline": {"name": "k", "log_loss": None, "accuracy": None, "save_rate": 0.4, "n_kicks": 4},
-        "actual_keeper_baseline": {"name": "a", "log_loss": None, "accuracy": None, "save_rate": None, "n_kicks": 4},
+        "random_baseline": {
+            "name": "r",
+            "log_loss": 1.1,
+            "accuracy": 0.33,
+            "save_rate": 0.4,
+            "n_kicks": 4,
+        },
+        "kicker_most_frequent_baseline": {
+            "name": "k",
+            "log_loss": None,
+            "accuracy": None,
+            "save_rate": 0.4,
+            "n_kicks": 4,
+        },
+        "actual_keeper_baseline": {
+            "name": "a",
+            "log_loss": None,
+            "accuracy": None,
+            "save_rate": None,
+            "n_kicks": 4,
+        },
         "n_train": 4,
         "n_holdout": 4,
         "holdout_cutoff_date": "2026-01-01",

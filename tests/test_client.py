@@ -131,9 +131,7 @@ def test_304_response_serves_from_disk_cache(tmp_path: Path, monkeypatch) -> Non
     assert result == {"x": 1}
 
 
-def test_get_handles_url_with_query_string_and_trailing_slash(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_get_handles_url_with_query_string_and_trailing_slash(tmp_path: Path, monkeypatch) -> None:
     """`client.get` accepts paths whose query string or trailing slash
     would create filesystem-unsafe characters in the cache key. The
     public interface succeeds without raising; the cache file is
@@ -155,9 +153,7 @@ def test_get_handles_url_with_query_string_and_trailing_slash(
     assert "?" not in cache_files[0].name
 
 
-def test_get_decompresses_gzipped_response_body(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_get_decompresses_gzipped_response_body(tmp_path: Path, monkeypatch) -> None:
     """`client.get` decompresses a gzipped body (the `content-encoding`
     header is set). The parsed JSON is the decompressed payload, not
     the raw gzip bytes."""
@@ -181,9 +177,7 @@ def test_get_decompresses_gzipped_response_body(
     assert gzip.decompress(cache_file.read_bytes()) == payload
 
 
-def test_get_handles_uncompressed_body_with_gzip_header(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_get_handles_uncompressed_body_with_gzip_header(tmp_path: Path, monkeypatch) -> None:
     """Some FotMob responses set `content-encoding: gzip` but ship
     already-uncompressed bytes. `client.get` parses the JSON without
     double-decompressing (it detects gzip by magic bytes, not by
