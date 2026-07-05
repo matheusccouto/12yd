@@ -28,8 +28,12 @@ class ShootoutCountReport:
     """The result of one `validate_shootout_count` call.
 
     `actual` is the count of distinct shootout matches in the JSONL.
-    `expected` is the count RSSSF lists for the in-scope (league_id, season)
-    pairs. `match` is `actual == expected`. `actual_pairs` is the sorted
+    `expected` is the count the validator asserts against — the raw
+    RSSSF count minus the documented `no_kicks_refs` (Issue #49: 42 - 6
+    = 36 for the current 15-pair in-scope scope). `raw_expected` is
+    the raw RSSSF oracle count, before the `no_kicks_refs` adjustment;
+    it is included for debugging and for tests that exercise the raw
+    oracle. `match` is `actual == expected`. `actual_pairs` is the sorted
     list of (tournament, year) pairs observed in the JSONL, used for
     debugging. `skipped_refs` is the list of match refs whose (seo, h2h)
     hash was stale (FotMob reuses hashes and pointed us at a different
@@ -39,8 +43,8 @@ class ShootoutCountReport:
     exception and reported `failure_mode` on the `FetchResult`; the
     validator only needs the refs, the `failure_mode` is in
     `skipped_refs_diagnostics.jsonl`). When the slice reports any of
-    these, the actual count is bounded by `expected - len(skipped_refs)
-    - len(no_kicks_refs) - len(failed_refs)`.
+    these, the actual count is bounded by
+    `raw_expected - len(skipped_refs) - len(failed_refs)`.
     """
 
     actual: int
@@ -50,6 +54,7 @@ class ShootoutCountReport:
     skipped_refs: list[MatchRef] = field(default_factory=list)
     no_kicks_refs: list[MatchRef] = field(default_factory=list)
     failed_refs: list[MatchRef] = field(default_factory=list)
+    raw_expected: int = 0
 
     @property
     def delta(self) -> int:
@@ -106,6 +111,14 @@ def validate_shootout_count(
     `skipped_refs_diagnostics.jsonl` by the slice script. All three lists
     are included in the discrepancies file for debugging.
 
+    The expected count is the raw RSSSF count minus the number of
+    `no_kicks_refs` (Issue #49): the 6 documented FotMob empty-shotmap
+    cases are accepted as data gaps, so the validator's reachable
+    count is 36 = 42 - 6. A caller that does not pass `no_kicks_refs`
+    (e.g. a unit test that exercises the raw oracle) gets the raw
+    count (42) as the expected; the script that drives the full
+    orchestrator always passes the 6 no_kicks_refs and gets 36.
+
     The JSONL is read through the data layer's reader (`Artifacts.read_shootout_kicks`)
     so the validator stops re-parsing the file format with its own
     ad-hoc readers. `artifacts` is overridable for tests that need a
@@ -115,11 +128,15 @@ def validate_shootout_count(
     shootout_kicks = art.read_shootout_kicks(jsonl_path)
     actual_ids = _distinct_match_ids(shootout_kicks)
     actual = len(actual_ids)
-    expected = count_shootouts_by_pairs(rsssf_shootouts, league_seasons)
-    actual_pairs = _tournament_year_pairs(shootout_kicks)
     skipped_list = list(skipped_refs)
     no_kicks_list = list(no_kicks_refs)
     failed_list = list(failed_refs)
+    raw_expected = count_shootouts_by_pairs(rsssf_shootouts, league_seasons)
+    # Issue #49: the 6 documented empty-shotmap cases are accepted
+    # as FotMob data gaps; the validator's expected count is the raw
+    # RSSSF count minus those exclusions.
+    expected = raw_expected - len(no_kicks_list)
+    actual_pairs = _tournament_year_pairs(shootout_kicks)
     report = ShootoutCountReport(
         actual=actual,
         expected=expected,
@@ -128,6 +145,7 @@ def validate_shootout_count(
         skipped_refs=skipped_list,
         no_kicks_refs=no_kicks_list,
         failed_refs=failed_list,
+        raw_expected=raw_expected,
     )
     if discrepancies_path is not None and not report.match:
         discrepancies_path.parent.mkdir(parents=True, exist_ok=True)
@@ -136,6 +154,7 @@ def validate_shootout_count(
                 {
                     "actual_shootout_count": report.actual,
                     "expected_shootout_count": report.expected,
+                    "raw_expected_shootout_count": report.raw_expected,
                     "delta": report.delta,
                     "actual_pairs": [{"tournament": t, "year": y} for t, y in report.actual_pairs],
                     "skipped_refs": [_ref_payload(r) for r in skipped_list],

@@ -11,7 +11,8 @@ from pathlib import Path
 import pytest
 
 from penalty_pred.artifacts import Artifacts
-from penalty_pred.rsssf import load_rsssf_html, parse_rsssf_html
+from penalty_pred.match_ref import MatchRef
+from penalty_pred.rsssf import RSSSFShootout, load_rsssf_html, parse_rsssf_html
 from penalty_pred.shootouts import ShootoutKick
 from penalty_pred.tournaments import LEAGUE_SEASONS_PREDICT_WINDOW
 from penalty_pred.validate import validate_shootout_count
@@ -21,7 +22,7 @@ RSSSF_FIXTURE = REPO_ROOT / "docs" / "samples" / "rsssf_penaltiestour.html"
 
 
 @pytest.fixture(scope="module")
-def rsssf_shootouts() -> list[object]:
+def rsssf_shootouts() -> list[RSSSFShootout]:
     return parse_rsssf_html(load_rsssf_html(RSSSF_FIXTURE))
 
 
@@ -68,32 +69,135 @@ def _kicks_for_pairs(pairs: list[tuple[str, int, int]]) -> list[ShootoutKick]:
     return out
 
 
+# Issue #49: the per-pair reachable counts are the RSSSF raw counts
+# minus the 6 documented empty-shotmap cases. The validator pins
+# `actual == 36` against a fresh re-run; the 6 unreachable cases are
+# documented in `data/empty_shotmap_documentation.md`.
 IN_SCOPE_PAIRS: list[tuple[str, int, int]] = [
     ("World Cup", 2022, 5),
     ("Euro", 2020, 4),
     ("Euro", 2024, 3),
     ("Copa América", 2021, 3),
     ("Copa América", 2024, 4),
-    ("Africa Cup of Nations", 2021, 6),
+    ("Africa Cup of Nations", 2021, 2),  # reachable (RSSSF: 6, 4 empty-shotmap)
     ("Africa Cup of Nations", 2023, 5),
     ("Africa Cup of Nations", 2025, 3),
     ("CONCACAF Gold Cup", 2023, 2),
     ("CONCACAF Gold Cup", 2025, 3),
-    ("AFC Asian Cup", 2023, 4),
+    ("AFC Asian Cup", 2023, 2),  # reachable (RSSSF: 4, 2 empty-shotmap)
+]
+
+
+# Issue #49: the 6 documented empty-shotmap cases the orchestrator
+# surfaces as `no_kicks_refs`. The validator subtracts these from the
+# raw RSSSF expected count (42) to get the reachable expected count (36).
+# These are placeholder refs — the test only needs the count, the
+# identity is exercised in `tests/test_tournaments.py`.
+_NO_KICKS_REFS: list[MatchRef] = [
+    MatchRef(
+        match_id=900001 + i,
+        seo=f"empty-{i}",
+        h2h=f"empty{i:03d}",
+        round_name="",
+        home_team_name="",
+        away_team_name="",
+    )
+    for i in range(6)
 ]
 
 
 def test_match_when_counts_align(tmp_path: Path, rsssf_shootouts: list[object]) -> None:
-    """A JSONL with 42 distinct match_ids whose years/tournaments are the
-    in-scope pairs should match the RSSSF count exactly."""
+    """A JSONL with 36 distinct match_ids (the scraper-reachable count)
+    across the in-scope pairs should match the validator's expected
+    count. Issue #49: the raw RSSSF count is 42, but 6 of those are
+    FotMob data gaps (empty shotmap), so the validator pins `actual == 36`.
+    The 6 documented gaps are in `data/empty_shotmap_documentation.md`."""
     kicks = _kicks_for_pairs(IN_SCOPE_PAIRS)
     jsonl = tmp_path / "kicks.jsonl"
     _write_kicks(jsonl, kicks)
 
-    report = validate_shootout_count(jsonl, rsssf_shootouts, LEAGUE_SEASONS_PREDICT_WINDOW)
-    assert report.actual == 42
-    assert report.expected == 42
+    report = validate_shootout_count(
+        jsonl,
+        rsssf_shootouts,
+        LEAGUE_SEASONS_PREDICT_WINDOW,
+        no_kicks_refs=_NO_KICKS_REFS,
+    )
+    assert report.actual == 36
+    assert report.expected == 36
+    assert report.raw_expected == 42
     assert report.match is True
+
+
+def test_raw_expected_is_42_without_no_kicks_refs(
+    tmp_path: Path, rsssf_shootouts: list[object]
+) -> None:
+    """A caller that does not pass `no_kicks_refs` (e.g. a unit test
+    that exercises the raw oracle) gets the raw count (42) as the
+    expected. The 6 documented exclusions are an opt-in adjustment."""
+    kicks = _kicks_for_pairs(IN_SCOPE_PAIRS)
+    jsonl = tmp_path / "kicks.jsonl"
+    _write_kicks(jsonl, kicks)
+
+    report = validate_shootout_count(
+        jsonl,
+        rsssf_shootouts,
+        LEAGUE_SEASONS_PREDICT_WINDOW,
+    )
+    assert report.actual == 36
+    assert report.expected == 42
+    assert report.raw_expected == 42
+    assert report.match is False  # 36 != 42 without the exclusions
+
+
+def test_no_kicks_refs_subtracted_from_expected(
+    tmp_path: Path, rsssf_shootouts: list[object]
+) -> None:
+    """The validator subtracts `len(no_kicks_refs)` from the raw RSSSF
+    expected count. With the 6 documented exclusions passed, expected
+    goes from 42 to 36. With 3 of them passed, expected is 39."""
+    kicks = _kicks_for_pairs(IN_SCOPE_PAIRS)
+    jsonl = tmp_path / "kicks.jsonl"
+    _write_kicks(jsonl, kicks)
+
+    full = validate_shootout_count(
+        jsonl,
+        rsssf_shootouts,
+        LEAGUE_SEASONS_PREDICT_WINDOW,
+        no_kicks_refs=_NO_KICKS_REFS,
+    )
+    assert full.expected == 36
+    assert full.raw_expected == 42
+
+    partial = validate_shootout_count(
+        jsonl,
+        rsssf_shootouts,
+        LEAGUE_SEASONS_PREDICT_WINDOW,
+        no_kicks_refs=_NO_KICKS_REFS[:3],
+    )
+    assert partial.expected == 39
+    assert partial.raw_expected == 42
+
+    none = validate_shootout_count(
+        jsonl,
+        rsssf_shootouts,
+        LEAGUE_SEASONS_PREDICT_WINDOW,
+        no_kicks_refs=[],
+    )
+    assert none.expected == 42
+    assert none.raw_expected == 42
+
+
+def test_reachable_count_is_36() -> None:
+    """Issue #49: the sum of the per-pair reachable counts is 36 (42
+    RSSSF - 6 documented empty-shotmap cases). A future Phase 3 source
+    (Issue #51) can close the 6-shootout gap and this assertion
+    updates to 42 along with the per-pair map in
+    `test_tournaments.py::EXPECTED_SHOOTOUT_COUNTS`."""
+    # IN_SCOPE_PAIRS uses the reachable counts (the per-pair
+    # `EXPECTED_SHOOTOUT_COUNTS` in `test_tournaments.py`). The two
+    # sums must agree; the test pins the reachable total at 36.
+    reachable = sum(count for _, _, count in IN_SCOPE_PAIRS)
+    assert reachable == 36
 
 
 def test_mismatch_writes_discrepancies(tmp_path: Path, rsssf_shootouts: list[object]) -> None:
@@ -108,25 +212,34 @@ def test_mismatch_writes_discrepancies(tmp_path: Path, rsssf_shootouts: list[obj
     )
     assert report.actual == 1
     assert report.expected == 42
+    assert report.raw_expected == 42
     assert report.match is False
 
     payload = json.loads(disc.read_text())
     assert payload["actual_shootout_count"] == 1
     assert payload["expected_shootout_count"] == 42
+    assert payload["raw_expected_shootout_count"] == 42
     assert payload["delta"] == -41
     # The observed pair is reported.
     assert payload["actual_pairs"] == [{"tournament": "World Cup", "year": 2022}]
 
 
 def test_match_skips_discrepancy_writing(tmp_path: Path, rsssf_shootouts: list[object]) -> None:
-    """When counts match, the discrepancies file is NOT created."""
+    """When counts match (after the no_kicks_refs adjustment for the
+    6 documented empty-shotmap cases), the discrepancies file is NOT created.
+    Issue #49: the 6 exclusions are passed so the 36 reachable entries
+    match the 36 reachable expected count."""
     kicks = _kicks_for_pairs(IN_SCOPE_PAIRS)
     jsonl = tmp_path / "kicks.jsonl"
     _write_kicks(jsonl, kicks)
     disc = tmp_path / "discrepancies.json"
 
     report = validate_shootout_count(
-        jsonl, rsssf_shootouts, LEAGUE_SEASONS_PREDICT_WINDOW, discrepancies_path=disc
+        jsonl,
+        rsssf_shootouts,
+        LEAGUE_SEASONS_PREDICT_WINDOW,
+        discrepancies_path=disc,
+        no_kicks_refs=_NO_KICKS_REFS,
     )
     assert report.match is True
     assert not disc.exists()
