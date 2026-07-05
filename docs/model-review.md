@@ -281,6 +281,17 @@ The cleanest architectural change is to retrain the model with the *opposite* lo
 
 The deployment policy is `argmin(p_L, p_C, p_R)` — dive the side with the lowest predicted probability. This is the right policy *if and only if* the model is calibrated as a classifier over the kicker's actual side.
 
+**Frame pin (Kicker-PoV).** The L/C/R labels are in the **Kicker's**
+point of view — the half of the goal as the Kicker faces it (per
+`CONTEXT.md`). The model and the deployment stay in the Kicker's
+frame end to end: the model predicts where the Kicker will aim,
+`argmin` picks the side the Kicker is *least* likely to aim at, and
+the Goalkeeper dives that side (the Kicker's L is the Goalkeeper's
+R). The v4 card layout (Issue #48) surfaces this with a
+"Kicker will aim" prediction row so the re-anchoring is explicit;
+the v3 review's recommendations and the model's `argmin` output
+are unchanged.
+
 ### 7.1 The policy is invariant under monotone transforms of the per-row probabilities
 
 If the model outputs `f(p_L), f(p_C), f(p_R)` for any monotonically increasing `f`, the argmin does not change. So the policy is robust to miscalibration *as long as* the per-class ordering is preserved within each row. The inverse-frequency class weights shift the per-class ordering in a way that helps save rate but hurts log loss — both are consistent with the invariance.

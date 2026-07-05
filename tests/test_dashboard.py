@@ -426,6 +426,16 @@ def test_recommended_dive_argmin(p_L: float, p_C: float, p_R: float, expected: s
     assert recommended_dive(p_L, p_C, p_R) == expected
 
 
+def test_recommended_dive_docstring_pins_kicker_pov() -> None:
+    """The docstring makes the Kicker-PoV frame explicit (Issue #47 / v4).
+
+    Cheap pin so a future maintainer doesn't quietly re-frame the
+    L/C/R labels to the Goalkeeper's PoV (the v3 dashboard's
+    "Recommended Dive" column invited exactly that re-reading).
+    """
+    assert "Kicker-PoV" in recommended_dive.__doc__
+
+
 # ---------------------------------------------------------------------------
 # `predictions_for_match` — per-match view over the round-agnostic
 # `predictions.jsonl`

@@ -20,6 +20,14 @@ The headline metric for this policy is the **counterfactual save rate** —
 the fraction of kicks the model would have "saved" under
 `argmin(P(L), P(C), P(R))`.
 
+**Frame pin (Kicker-PoV).** The L/C/R labels above are in the
+**Kicker's** point of view — the half of the goal as the Kicker
+faces it (per `CONTEXT.md`). A viewer reading the card must
+re-anchor to themselves: the Kicker's L is the Goalkeeper's R. The
+v4 card layout (Issue #48) surfaces this with a "Kicker will aim"
+prediction row; the model's `argmin` and the v3 card's text both
+stay in the Kicker's frame end to end.
+
 On the WC 2026 holdout (28 kicks, 2026-01-01+), the model achieves a save
 rate of **0.571** versus a uniform-random baseline of **0.405** — a
 41% relative improvement, and a +0.107 absolute gain over the

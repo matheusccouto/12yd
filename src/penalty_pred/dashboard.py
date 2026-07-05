@@ -276,6 +276,19 @@ def predictions_for_match(
 def recommended_dive(p_L: float, p_C: float, p_R: float) -> str:
     """The keeper's optimal pre-kick dive: `argmin` over the three probabilities.
 
+    **Frame pin (Kicker-PoV).** The returned `"L"`, `"C"`, `"R"` is in
+    the **Kicker's** point of view — the horizontal half of the goal
+    as the Kicker sees it (per `CONTEXT.md`, `Side` is "the horizontal
+    half of the goal from the kicker's perspective"). The model
+    predicts where the Kicker will aim; `argmin` picks the side the
+    Kicker is *least* likely to aim at; the Goalkeeper dives *that*
+    side. A viewer reading the recommendation must re-anchor the L/R
+    letter to themselves: the L the Kicker sees is the Goalkeeper's
+    R. The new v4 card layout (Issue #48) surfaces this with a
+    "Kicker will aim: L 55%  ·  GK dive: R ↔" prediction row so the
+    re-anchoring is explicit; this function's return value is
+    unchanged.
+
     The model's policy is uniform-prior-dive: the keeper picks the
     side with the lowest predicted probability of the kicker aiming
     there. The output is one of `"L"`, `"C"`, `"R"`. Ties are broken
