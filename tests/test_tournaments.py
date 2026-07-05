@@ -384,3 +384,136 @@ def test_wc_2026_season_is_2026() -> None:
     assert WC_2026_SEASON == 2026
     # And the (WC 2026 league, 2026) pair is in the scope.
     assert (WC_2026_LEAGUE.league_id, WC_2026_SEASON) in LEAGUE_SEASONS_PREDICT_WINDOW
+
+
+# --- Phase 3 source ADR (Issue #50) ---------------------------------------
+
+PHASE_3_ADR = REPO_ROOT / "docs" / "adr" / "0004-phase-3-data-source.md"
+
+
+def test_phase_3_adr_exists() -> None:
+    """Issue #50: the Phase 3 data source ADR is checked into
+    `docs/adr/0004-phase-3-data-source.md` and is non-empty. A drift
+    (missing file, empty file) is caught here so the implementation
+    in Issue #51 cannot ship without a recorded source decision.
+    """
+    assert PHASE_3_ADR.exists(), (
+        f"Phase 3 source ADR missing at {PHASE_3_ADR}; create the file "
+        "with the source decision rationale (Issue #50)"
+    )
+    assert PHASE_3_ADR.stat().st_size > 500, (
+        f"Phase 3 source ADR at {PHASE_3_ADR} is too short "
+        f"({PHASE_3_ADR.stat().st_size} bytes); expected > 500 bytes"
+    )
+
+
+def test_phase_3_adr_cross_references_empty_shotmap_documentation() -> None:
+    """Issue #50: the ADR cross-references the 6 empty-shotmap FotMob
+    data gaps (Issue #49) and the data gap analysis. The cross-ref
+    pins the rationale for choosing club shootouts over a non-FotMob
+    source: the 6 cases stay documented as FotMob data gaps; closing
+    them is deferred to a future Phase 4 ADR.
+    """
+    text = PHASE_3_ADR.read_text(encoding="utf-8")
+    assert "empty_shotmap" in text.lower() or "issue #49" in text.lower(), (
+        "Phase 3 ADR must cross-reference Issue #49 / the empty-shotmap "
+        "documentation; the 6 FotMob data gaps are the reason the ADR "
+        "rejects a non-FotMob source for Phase 3"
+    )
+
+
+def test_phase_3_adr_cross_references_model_review() -> None:
+    """Issue #50: the ADR cross-references `docs/model-review.md` —
+    Topic 1.4 (the 86.6% no-history prediction rows) or Topic 5 (the
+    LOTO CV statistical-power analysis) — to anchor the data gap
+    framing. The model review is the source of the "more data is
+    the path to statistical power" claim.
+    """
+    text = PHASE_3_ADR.read_text(encoding="utf-8")
+    assert "model-review" in text.lower() or "model review" in text.lower(), (
+        "Phase 3 ADR must cross-reference docs/model-review.md; the "
+        "data gap framing comes from Topic 1.4 (no-history) and "
+        "Topic 5 (LOTO CV statistical power)"
+    )
+
+
+def test_phase_3_adr_mentions_all_three_candidate_sources() -> None:
+    """Issue #50: the ADR's rationale section names each candidate
+    source — FotMob club leagues, StatsBomb Open Data, RSSSF detail
+    pages — with at least one paragraph of trade-offs. A future
+    reader who lands on the ADR must see all three candidates and
+    the rejection rationale for StatsBomb + RSSSF, not just the
+    FotMob-club decision.
+    """
+    text = PHASE_3_ADR.read_text(encoding="utf-8")
+    for candidate in ("fotmob", "statsbomb", "rsssf"):
+        assert candidate in text.lower(), (
+            f"Phase 3 ADR must mention the {candidate} candidate source; "
+            "the rationale section enumerates the three candidates with "
+            "trade-offs for each"
+        )
+
+
+def test_phase_3_adr_records_decision_and_per_tournament_handling() -> None:
+    """Issue #50: the ADR records the decision (club Shootout Kicks
+    via FotMob), the why (schema identical, no new client, ~360-row
+    target), and the per-tournament handling (Copa Libertadores, UCL
+    knockout, domestic cup finals; new `LEAGUE_SEASONS_PREDICT_WINDOW`
+    entries; new `RSSSF_TO_LEAGUE_NAME` headings). A future
+    implementer should be able to read the ADR and know what to
+    register in `leagues.py` + `tournaments.py`.
+    """
+    text = PHASE_3_ADR.read_text(encoding="utf-8")
+    for tournament in (
+        "copa libertadores",
+        "champions league",
+        "fa cup",
+        "coupe de france",
+        "dfb-pokal",
+        "coppa italia",
+        "copa del rey",
+    ):
+        assert tournament in text.lower(), (
+            f"Phase 3 ADR must list {tournament!r} as a per-tournament "
+            "entry; the per-tournament handling is a per-ADR acceptance "
+            "criterion"
+        )
+
+
+def test_phase_3_adr_documents_schema_change() -> None:
+    """Issue #50: the ADR documents the schema change — a new
+    `tournament_kind` attribute ∈ {`international`, `club}` on
+    `TrainingRow` and the unchanged 17-feature model input. The
+    attribute is metadata, not a model input.
+    """
+    text = PHASE_3_ADR.read_text(encoding="utf-8")
+    assert "tournament_kind" in text.lower(), (
+        "Phase 3 ADR must document the new `tournament_kind` attribute "
+        "on `TrainingRow`; the schema-change section is a per-ADR "
+        "acceptance criterion"
+    )
+    assert "international" in text.lower() and "club" in text.lower(), (
+        "Phase 3 ADR must enumerate the two `tournament_kind` values "
+        "(`international`, `club`); the attribute domain is a per-ADR "
+        "acceptance criterion"
+    )
+
+
+def test_phase_3_adr_documents_loto_cv_grouping() -> None:
+    """Issue #50: the ADR documents the LOTO CV grouping strategy —
+    the existing per-`tournament_name` fold unit carries over, the
+    new club tournaments become additional folds, and the
+    `tournament_kind` attribute is a per-row analysis axis (not a
+    fold unit). The strategy section is a per-ADR acceptance
+    criterion.
+    """
+    text = PHASE_3_ADR.read_text(encoding="utf-8")
+    assert "loto" in text.lower() or "leave-one-tournament" in text.lower(), (
+        "Phase 3 ADR must document the LOTO CV grouping strategy; the "
+        "strategy section is a per-ADR acceptance criterion"
+    )
+    # The decision is per-tournament-name fold (not per-kind or per-source).
+    assert "tournament_name" in text.lower() or "tournament name" in text.lower(), (
+        "Phase 3 ADR must document the fold unit; the per-tournament-name "
+        "fold carries over from the v3 LOTO CV (Issue #45)"
+    )
