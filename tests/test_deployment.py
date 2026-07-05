@@ -20,6 +20,24 @@ module named 'plotly'` (Issue #52). The fix is:
 These tests pin both halves: the deployment manifest is in sync
 with `pyproject.toml`'s `[project.dependencies]`, and `uv.lock` is
 gitignored so the next deploy doesn't re-introduce the bug.
+
+**Subtle second-order bug (Issue #52, second push).** Streamlit
+Cloud uses the *hash* of a recognised dep file to decide whether
+to do a fresh install ("smart detection"). The v4 fix
+(`requirements.txt` + `uv.lock` gitignored) was correct, but the
+follow-up commit (`8a37737`, Phase 3 schema) did NOT touch
+`requirements.txt` or `pyproject.toml`, so the smart-detection
+saw no change and the cached broken install (no `plotly`) was
+re-used — the same `ModuleNotFoundError` persisted at the next
+redeploy. The fix: a substantive, hand-maintained change to
+`requirements.txt` (a header comment) forces a hash change,
+which triggers a full redeploy and a fresh install. The
+`test_requirements_txt_documents_deploy_requirement` and
+`test_requirements_txt_is_hand_maintained` tests pin both
+halves: the file must keep its header comment, and it must
+stay in hand-maintained `>=`-specifier form (not `pip freeze`
+`==` form, which would mask future deploy failures by changing
+the hash on every dep bump).
 """
 
 from __future__ import annotations
@@ -203,6 +221,133 @@ def test_uv_lock_is_not_tracked_by_git() -> None:
         "`git rm --cached uv.lock` and ensure it stays in "
         ".gitignore."
     )
+
+
+def test_requirements_txt_is_hand_maintained() -> None:
+    """`requirements.txt` must NOT be in `pip freeze` format
+    (e.g. `streamlit==1.58.0`). The deploy manifest is
+    hand-maintained to mirror `pyproject.toml::[project.dependencies]`,
+    and a `pip freeze > requirements.txt` would (a) pin versions
+    that diverge from the local `uv`-managed dev env, (b) change
+    the file's hash on every dep bump, masking the real cause of
+    a broken deploy (Streamlit Cloud uses the file's hash to
+    decide whether to do a fresh install — see Issue #52), and
+    (c) lose the header comment that documents the deploy
+    requirement.
+
+    Concretely: every non-comment, non-blank line must be a
+    `name[specifier]` requirement (PEP 508), with no `==` (pinned)
+    specifier, no `-r` / `-e` / direct-URL reference, and no
+    `pip freeze` style output."""
+    for raw in REQUIREMENTS_PATH.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        # Reject `pip freeze` style: `package==X.Y.Z` (==) is what
+        # pip freeze emits. >=, <=, ~=, != are specifier operators,
+        # not version pins.
+        assert "==" not in line, (
+            f"requirements.txt has a pinned (==) requirement: "
+            f"{line!r}. The deploy manifest must use minimum-version "
+            f"specifiers (>=, <, ~=) to stay hand-maintained and "
+            f"in sync with pyproject.toml. See Issue #52."
+        )
+        assert not line.startswith("-"), (
+            f"requirements.txt has a `-r` / `-e` / direct-URL line: "
+            f"{line!r}. The deploy manifest is pinned to simple "
+            f"name[specifier] entries only. See Issue #52."
+        )
+        assert "://" not in line, (
+            f"requirements.txt has a direct-URL line: {line!r}. "
+            f"The deploy manifest is pinned to simple "
+            f"name[specifier] entries only. See Issue #52."
+        )
+
+
+def test_requirements_txt_documents_deploy_requirement() -> None:
+    """`requirements.txt` must carry a header comment that
+    documents the deploy manifest's role. Without the comment,
+    a future maintainer may regenerate the file with
+    `pip freeze` and lose the hand-maintained contract. See
+    Issue #52."""
+    header = REQUIREMENTS_PATH.read_text().splitlines()[:8]
+    blob = "\n".join(header)
+    assert "deploy" in blob.lower() or "streamlit cloud" in blob.lower(), (
+        "requirements.txt must start with a comment explaining "
+        "that the file is the Streamlit Cloud deploy manifest, "
+        "so a future maintainer does not regenerate it with "
+        "`pip freeze` and break the deploy hash-detection. See "
+        "Issue #52."
+    )
+
+
+def test_fresh_venv_install() -> None:
+    """End-to-end check that `pip install -r requirements.txt`
+    succeeds in a clean venv and that every declared runtime
+    dep is importable afterwards. Catches the class of bug
+    where `requirements.txt` *looks* correct (passes the
+    in-sync / specifier tests) but the install actually
+    fails — e.g. an unresolvable transitive dep, a yanked
+    version, or a hash mismatch.
+
+    Streamlit Cloud runs a clean install on every hash change
+    of a recognised dep file (see Issue #52); this test
+    mirrors that flow locally. The test is slow (network-bound,
+    ~30-60s) but red-capable: it fails with the exact pip error
+    on a broken `requirements.txt`, and passes on a clean one.
+    """
+    import subprocess
+    import tempfile
+    import venv
+
+    with tempfile.TemporaryDirectory() as tmp:
+        venv_dir = Path(tmp) / "venv"
+        venv.create(venv_dir, with_pip=True, clear=True)
+        pip = venv_dir / "bin" / "pip"
+        python = venv_dir / "bin" / "python"
+        result = subprocess.run(
+            [str(pip), "install", "--quiet", "-r", str(REQUIREMENTS_PATH)],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        )
+        assert result.returncode == 0, (
+            f"`pip install -r requirements.txt` failed in a clean "
+            f"venv. This is what Streamlit Cloud does on every "
+            f"deploy; a failure here means the v4 dashboard will "
+            f"crash at startup with ModuleNotFoundError (Issue #52).\n"
+            f"\nstdout:\n{result.stdout}\n"
+            f"\nstderr:\n{result.stderr}"
+        )
+        # Every runtime dep declared in `pyproject.toml` must be
+        # importable in the fresh venv. Imports use the
+        # distribution name (scikit-learn → sklearn).
+        for pkg in (
+            "httpx",
+            "huggingface_hub",
+            "numpy",
+            "pandas",
+            "packaging",
+            "plotly",
+            "sklearn",
+            "lightgbm",
+            "streamlit",
+        ):
+            check = subprocess.run(
+                [str(python), "-c", f"import {pkg}"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert check.returncode == 0, (
+                f"Fresh-venv install of `requirements.txt` did not "
+                f"install {pkg!r}. Streamlit Cloud would also be "
+                f"missing it, and `app.py` line 49 crashes with "
+                f"ModuleNotFoundError (Issue #52).\n"
+                f"\nstdout:\n{check.stdout}\n"
+                f"\nstderr:\n{check.stderr}"
+            )
 
 
 @pytest.mark.parametrize(
