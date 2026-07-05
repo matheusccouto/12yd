@@ -257,6 +257,14 @@ class FetchResult:
     string is `f"{ExceptionClass}: {message}"`. A failed match is
     neither `skipped` (the matchId is correct) nor `no_kicks` (we never
     finished extracting); the `kicks` list is empty.
+
+    `live_match_id` and `resolved_url` capture where the (seo, h2h) pair
+    actually resolved to when the response's `matchId` differed from the
+    ref's `match_id` (a stale-hash skip). `live_match_id` is the
+    `pageProps.general.matchId` of the live response; `resolved_url` is
+    the absolute FotMob URL the (seo, h2h) pair resolves to (the public
+    match page, not the `__next/data` endpoint). Both fields are empty
+    for non-skip results.
     """
 
     ref: MatchRef
@@ -264,6 +272,8 @@ class FetchResult:
     skipped: bool
     no_kicks: bool = False
     failure_mode: str = ""
+    live_match_id: int = 0
+    resolved_url: str = ""
 
 
 def fetch_all_shootout_kicks_with_skips(
@@ -285,13 +295,33 @@ def fetch_all_shootout_kicks_with_skips(
     reported as a `FetchResult` with `failure_mode` set to a short
     `f"{ExceptionClass}: {message}"` string and empty `kicks`. The
     caller is expected to surface these in the diagnostics JSONL.
+
+    For `skipped` results (stale (seo, h2h) hash — the response's
+    `matchId` differs from the ref's `match_id`), the `live_match_id`
+    and `resolved_url` fields capture where the (seo, h2h) pair
+    actually resolved to. The `live_match_id` is the response's
+    `pageProps.general.matchId`; the `resolved_url` is the public
+    FotMob match page (`https://www.fotmob.com/matches/{seo}/{h2h}`)
+    so a maintainer can verify the rotation in a browser. The two
+    fields let a future URL-rotation handler answer the v4 PRD's
+    Phase 2 step 1 question: are the 18 stale-hash refs concentrated
+    (a single mapping table would fix them) or spread (a general
+    URL-rotation handler is needed)?
     """
     results: list[FetchResult] = []
     for ref in match_refs:
         data = client.get(f"matches/{ref.seo}/{ref.h2h}")
         page_match_id = coerce_int(data.get("pageProps", {}).get("general", {}).get("matchId"))
         if page_match_id and page_match_id != ref.match_id:
-            results.append(FetchResult(ref=ref, kicks=[], skipped=True))
+            results.append(
+                FetchResult(
+                    ref=ref,
+                    kicks=[],
+                    skipped=True,
+                    live_match_id=page_match_id,
+                    resolved_url=f"https://www.fotmob.com/matches/{ref.seo}/{ref.h2h}",
+                )
+            )
             continue
         try:
             kicks = extract_shootout_kicks(data)
@@ -327,6 +357,15 @@ def write_skipped_refs_diagnostics(
     - `empty_shotmap` — matchId was correct but the shotmap had no
       `period == "PenaltyShootout"` entries (`no_kicks=True`).
     - `f"{ExceptionClass}: {message}"` — the extractor raised.
+
+    For `stale_hash` rows, the `live_match_id` and `resolved_url` fields
+    capture where the (seo, h2h) pair actually resolved to (v4 PRD
+    Phase 2 step 1: "concrete diagnosis" of the 18 URL-rotation
+    failures). The two fields let a future URL-rotation handler decide
+    between a single mapping table (refs are concentrated on a small
+    set of newer matchIds) and a general URL-rotation handler (refs
+    are spread across many newer matchIds). The fields are empty
+    strings for `empty_shotmap` and extractor-failure rows.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     count = 0
@@ -340,19 +379,18 @@ def write_skipped_refs_diagnostics(
                 failure_mode = "empty_shotmap"
             else:
                 continue
-            f.write(
-                json.dumps(
-                    {
-                        "match_id": r.ref.match_id,
-                        "home": r.ref.home_team_name,
-                        "away": r.ref.away_team_name,
-                        "round": r.ref.round_name,
-                        "match_date": r.ref.match_date,
-                        "failure_mode": failure_mode,
-                    },
-                    ensure_ascii=False,
-                )
-            )
+            row = {
+                "match_id": r.ref.match_id,
+                "home": r.ref.home_team_name,
+                "away": r.ref.away_team_name,
+                "round": r.ref.round_name,
+                "match_date": r.ref.match_date,
+                "failure_mode": failure_mode,
+            }
+            if r.skipped:
+                row["live_match_id"] = r.live_match_id
+                row["resolved_url"] = r.resolved_url
+            f.write(json.dumps(row, ensure_ascii=False))
             f.write("\n")
             count += 1
     return count

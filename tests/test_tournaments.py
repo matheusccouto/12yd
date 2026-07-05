@@ -517,3 +517,104 @@ def test_phase_3_adr_documents_loto_cv_grouping() -> None:
         "Phase 3 ADR must document the fold unit; the per-tournament-name "
         "fold carries over from the v3 LOTO CV (Issue #45)"
     )
+
+
+# --- URL rotation wall (Issue #39) -----------------------------------------
+
+URL_ROTATION_WALL = REPO_ROOT / "data" / "url_rotation_wall.md"
+
+
+def test_url_rotation_wall_exists() -> None:
+    """Issue #39: the URL rotation wall documentation
+    (`data/url_rotation_wall.md`) exists and is non-empty. The 5
+    URL-lookup strategies are listed with the failure mode for each,
+    the stop condition is reached, and a future maintainer reading
+    the file can find the rationale for the wall without re-doing the
+    5 strategies."""
+    assert URL_ROTATION_WALL.exists(), (
+        f"URL rotation wall documentation missing at {URL_ROTATION_WALL}; "
+        "create the file with the 5 URL-lookup strategies, the failure "
+        "mode for each, and the stop condition"
+    )
+    assert URL_ROTATION_WALL.stat().st_size > 1000, (
+        f"URL rotation wall at {URL_ROTATION_WALL} is too short "
+        f"({URL_ROTATION_WALL.stat().st_size} bytes); expected > 1000 bytes"
+    )
+
+
+def test_url_rotation_wall_documents_five_strategies() -> None:
+    """Issue #39: the wall documents all 5 URL-lookup strategies. The
+    v4 PRD Phase 2 step 2 enumerates 4 strategies tried in the issue
+    body + 1 bounded attempt (the FotMob public page search); all 5
+    must be listed with the failure mode for each."""
+    text = URL_ROTATION_WALL.read_text(encoding="utf-8").lower()
+    for keyword in (
+        "public page search",
+        "per-team fixture list",
+        "direct match data api",
+        "match-page anchor",
+        "5th",
+    ):
+        assert keyword in text, (
+            f"URL rotation wall must document the {keyword!r} strategy; "
+            "the 5 strategies are the stop-condition evidence"
+        )
+
+
+def test_url_rotation_wall_documents_stop_condition() -> None:
+    """Issue #39: the wall reaches the v4 PRD Phase 2 step 2 stop
+    condition. The text 'wall' appears in the title and the body
+    asserts the 5 strategies are the bound on in-FotMob options."""
+    text = URL_ROTATION_WALL.read_text(encoding="utf-8").lower()
+    assert "wall" in text, (
+        "URL rotation wall must include the term 'wall' (the v4 PRD's "
+        "stop condition is 'document the wall and stop')"
+    )
+    assert "stop" in text or "enough" in text, (
+        "URL rotation wall must assert the stop condition (the v4 PRD "
+        "Phase 2 step 2: 'document the wall and stop')"
+    )
+
+
+def test_url_rotation_wall_lists_18_stale_hash_refs() -> None:
+    """Issue #39: the wall documents the per-ref diagnosis. The 18
+    original `match_id` values are listed in the table (the live
+    `matchId` is logged per ref, and the public `resolved_url` is
+    in the JSONL)."""
+    text = URL_ROTATION_WALL.read_text(encoding="utf-8")
+    for mid in (
+        3370565, 2767865, 2767870, 2767869,
+        3231662, 3231660, 3231664,
+        4407868, 4407869, 4407870,
+        3705434, 3705509,
+        4353245,
+        4211901, 4211904, 4772526,
+        4394637, 4394643,
+    ):
+        assert str(mid) in text, (
+            f"URL rotation wall must list the stale-hash ref {mid}; "
+            "the per-ref diagnosis is the Phase 2 step 1 acceptance "
+            "criterion"
+        )
+
+
+def test_url_rotation_wall_cross_references_phase_3_adr() -> None:
+    """Issue #39: the wall cross-references the Phase 3 ADR. The
+    path forward is Phase 3 (issue #51, club Shootout Kicks via
+    FotMob); the 18 stale-hash refs and the 6 empty-shotmap cases
+    are deferred to a future Phase 4 ADR. The cross-ref pins the
+    boundary between this wall and the Phase 3 work."""
+    text = URL_ROTATION_WALL.read_text(encoding="utf-8")
+    assert "phase 3" in text.lower() or "issue #51" in text.lower(), (
+        "URL rotation wall must cross-reference Phase 3 (Issue #51); "
+        "the wall is the stop condition for in-FotMob attempts, and "
+        "Phase 3 is the path forward"
+    )
+    assert (
+        "0004" in text or "phase-3-data-source" in text or "issue #50" in text
+    ), (
+        "URL rotation wall must cross-reference the Phase 3 ADR "
+        "(`docs/adr/0004-phase-3-data-source.md`); the wall defers "
+        "the 6 empty-shotmap + 18 stale-hash cases to a future Phase 4 "
+        "ADR-driven decision"
+    )

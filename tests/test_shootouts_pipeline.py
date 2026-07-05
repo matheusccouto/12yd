@@ -223,6 +223,13 @@ def test_skips_match_when_response_id_differs(
     assert len(results) == 1
     assert results[0].skipped is True
     assert results[0].kicks == []
+    # Issue #39 (Phase 2 step 1): a skipped result captures where the
+    # (seo, h2h) actually resolved to. `live_match_id` is the
+    # response's `pageProps.general.matchId` (the newer match the URL
+    # now serves); `resolved_url` is the public FotMob match page
+    # (browser-verifiable). Both are populated on a stale-hash skip.
+    assert results[0].live_match_id == 3370572
+    assert results[0].resolved_url == "https://www.fotmob.com/matches/argentina-vs-france/1hox8a"
 
 
 def test_processes_match_when_response_id_matches(
@@ -435,7 +442,13 @@ def test_write_diagnostics_writes_one_row_per_skip(tmp_path: Path) -> None:
     )
 
     results = [
-        FetchResult(ref=skipped_ref, kicks=[], skipped=True),
+        FetchResult(
+            ref=skipped_ref,
+            kicks=[],
+            skipped=True,
+            live_match_id=99,
+            resolved_url="https://www.fotmob.com/matches/a/aa",
+        ),
         FetchResult(ref=no_kicks_ref, kicks=[], skipped=False, no_kicks=True),
         FetchResult(
             ref=failed_ref, kicks=[], skipped=False, no_kicks=False, failure_mode="ValueError: bad"
@@ -451,6 +464,15 @@ def test_write_diagnostics_writes_one_row_per_skip(tmp_path: Path) -> None:
     assert rows[0]["failure_mode"] == "stale_hash"
     assert rows[1]["failure_mode"] == "empty_shotmap"
     assert rows[2]["failure_mode"] == "ValueError: bad"
+    # Issue #39: stale-hash rows carry `live_match_id` and `resolved_url`
+    # so a future URL-rotation handler can verify the rotation in a
+    # browser. The two fields are only present on `stale_hash` rows.
+    assert rows[0]["live_match_id"] == 99
+    assert rows[0]["resolved_url"] == "https://www.fotmob.com/matches/a/aa"
+    assert "live_match_id" not in rows[1]
+    assert "resolved_url" not in rows[1]
+    assert "live_match_id" not in rows[2]
+    assert "resolved_url" not in rows[2]
     # Match identity fields are surfaced for debugging.
     assert rows[2]["home"] == "C"
     assert rows[2]["away"] == "D"
