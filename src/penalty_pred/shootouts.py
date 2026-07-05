@@ -496,7 +496,7 @@ def aggregate_per_tournament_success_rate(
         expected = expected_counts.get(pair, 0)
         excluded = excluded_counts.get(pair, 0)
         reachable = max(0, expected - excluded)
-        if expected == 0:
+        if reachable == 0:
             status = "n/a"
         elif match_count >= reachable:
             status = "ok"

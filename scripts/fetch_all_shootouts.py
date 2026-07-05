@@ -32,6 +32,7 @@ from pathlib import Path
 
 from penalty_pred.artifacts import Artifacts
 from penalty_pred.client import FotMobClient
+from penalty_pred.match_ref import MatchRef
 from penalty_pred.rsssf import load_rsssf_html, parse_rsssf_html
 from penalty_pred.shootouts import (
     FetchResult,
@@ -41,14 +42,40 @@ from penalty_pred.shootouts import (
     write_per_tournament_success_rate,
     write_skipped_refs_diagnostics,
 )
-from penalty_pred.tournaments import LEAGUE_SEASONS_PREDICT_WINDOW
-from penalty_pred.validate import validate_shootout_count
+from penalty_pred.tournaments import (
+    INTERNATIONAL_PAIRS,
+    LEAGUE_SEASONS_PREDICT_WINDOW,
+)
+from penalty_pred.validate import (
+    EMPTY_SHOTMAP_EXCLUSIONS,
+    RSSSF_RAW_COUNTS,
+    URL_ROTATION_EXCLUSIONS,
+    validate_shootout_count,
+)
 
 # The RSSSF page is the verification oracle (PRD: "RSSSF is a verification
 # oracle, never a data source"). Saved next to this script as a fallback if
 # the live page is unreachable; the CLI prefers the live page.
 DEFAULT_RSSSF_URL: str = "https://www.rsssf.org/miscellaneous/penaltiestour.html"
 DEFAULT_RSSSF_FIXTURE: Path = Path("docs/samples/rsssf_penaltiestour.html")
+
+
+def _combined_exclusions() -> dict[tuple[int, int], int]:
+    """Per-pair sum of `EMPTY_SHOTMAP_EXCLUSIONS` and `URL_ROTATION_EXCLUSIONS`.
+
+    Both exclusion maps cover the international scope. The aggregate
+    function's `excluded_counts` parameter takes a single
+    `dict[pair, count]` — we sum the two sources here so a pair that
+    has both kinds of FotMob gap (e.g. AFCON 2021, 4 empty-shotmap +
+    2 URL-rotation = 6) is excluded with the right total. A naive
+    `{**A, **B}` would lose one of the two values on overlap.
+    """
+    combined: dict[tuple[int, int], int] = {}
+    for pair, n in EMPTY_SHOTMAP_EXCLUSIONS.items():
+        combined[pair] = combined.get(pair, 0) + n
+    for pair, n in URL_ROTATION_EXCLUSIONS.items():
+        combined[pair] = combined.get(pair, 0) + n
+    return combined
 
 
 def main() -> int:
@@ -135,11 +162,23 @@ def main() -> int:
     # 2. Write the artifacts. Three JSONL files: the kicks (one row per
     # kick), the per-match diagnostics (one row per skip / no-kicks /
     # failure), and the per-tournament success rate (one row per
-    # (league, season) pair).
+    # (league, season) pair). The per-tournament aggregate is built with
+    # the pinned RSSSF counts (`RSSSF_RAW_COUNTS`,
+    # `EMPTY_SHOTMAP_EXCLUSIONS`, `URL_ROTATION_EXCLUSIONS`) so the
+    # per-row `expected_match_count` and `reachable_match_count` fields
+    # reflect the oracle's reach for the international pairs; club
+    # pairs (Phase 3) have no RSSSF oracle yet, so they default to
+    # 0 / 0 / status=`"n/a"` — the per-tournament diagnostic still
+    # surfaces the per-pair kick / match / skip / no-kicks / failed
+    # counts for them.
     all_results = [r for _, results in pair_results for r in results]
     n_kicks = art.write_shootout_kicks(all_kicks, path=args.output)
     n_diag = write_skipped_refs_diagnostics(all_results, path=args.diagnostics)
-    rows = aggregate_per_tournament_success_rate(pair_results)
+    rows = aggregate_per_tournament_success_rate(
+        pair_results,
+        expected_counts=RSSSF_RAW_COUNTS,
+        excluded_counts=_combined_exclusions(),
+    )
     n_rate = write_per_tournament_success_rate(rows, path=args.tournament_success_rate)
     print(
         f"Wrote {n_kicks} shootout kicks to {args.output} "
@@ -156,13 +195,49 @@ def main() -> int:
 
     rsssf_html = _load_rsssf_html(args.rsssf_fixture)
     rsssf_shootouts = parse_rsssf_html(rsssf_html)
+    # The RSSSF oracle covers the 15 in-scope international pairs only.
+    # The 42 Phase 3 club pairs (Copa Libertadores, UCL knockout, etc.)
+    # do not appear on the RSSSF `penaltiestour.html` page, so the
+    # validator is scoped to INTERNATIONAL_PAIRS — otherwise the raw
+    # RSSSF count (42) is mis-compared against the full 57-pair actual.
+    #
+    # The validator's expected count is `raw - no_kicks - skipped`
+    # (the 6 documented empty-shotmap exclusions from Issue #49 plus
+    # the 18 URL-rotation exclusions from Issue #39). We synthesise
+    # dummy `no_kicks_refs` and `skipped_refs` for the validator (the
+    # documented pairs in `EMPTY_SHOTMAP_EXCLUSIONS` and
+    # `URL_ROTATION_EXCLUSIONS`); the actual `no_kicks_refs` /
+    # `skipped_refs` lists from the run cover 78+132 refs across the
+    # 57-pair scope (including club-scope refs that the RSSSF oracle
+    # does not cover and therefore must not subtract from the expected).
+    #
+    # The actual `skipped` / `no_kicks` / `failed` lists are still
+    # written to `discrepancies.json` for diagnostic purposes.
+    n_intl_empty_shotmap = sum(EMPTY_SHOTMAP_EXCLUSIONS.values())
+    intl_dummy_no_kicks = [
+        MatchRef(
+            match_id=900001 + i,
+            seo=f"intl-empty-shotmap-{i}",
+            h2h=f"intl{i:03d}",
+        )
+        for i in range(n_intl_empty_shotmap)
+    ]
+    n_intl_url_rotation = sum(URL_ROTATION_EXCLUSIONS.values())
+    intl_dummy_skipped = [
+        MatchRef(
+            match_id=910001 + i,
+            seo=f"intl-url-rotation-{i}",
+            h2h=f"intls{i:03d}",
+        )
+        for i in range(n_intl_url_rotation)
+    ]
     report = validate_shootout_count(
         args.output,
         rsssf_shootouts,
-        LEAGUE_SEASONS_PREDICT_WINDOW,
+        INTERNATIONAL_PAIRS,
         discrepancies_path=args.discrepancies,
-        skipped_refs=skipped,
-        no_kicks_refs=no_kicks,
+        skipped_refs=intl_dummy_skipped,
+        no_kicks_refs=intl_dummy_no_kicks,
         failed_refs=failed,
     )
     explained = len(skipped) + len(no_kicks) + len(failed)

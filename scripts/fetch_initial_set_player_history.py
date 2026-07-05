@@ -39,7 +39,7 @@ from penalty_pred.client import FotMobClient
 from penalty_pred.config import HISTORY_FLOOR, LOOKBACK_WINDOW_YEARS, today_utc
 from penalty_pred.initial_set import (
     MissingKicker,
-    fetch_all_initial_set_penalty_history,
+    fetch_all_initial_set_penalty_history_parallel,
     iter_initial_set_kickers,
 )
 
@@ -95,6 +95,14 @@ def main() -> int:
         default=HISTORY_FLOOR.isoformat(),
         help=f"Hard lower bound on history dates, ISO 8601 (default: {HISTORY_FLOOR.isoformat()}).",
     )
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=12,
+        help="Max concurrent per-kicker fetches (default: 12). The cold-cache "
+        "all-Initial-Set run drops from ~3h serial to ~15-20 min parallel at "
+        "this value. Set to 1 to disable parallelism.",
+    )
     args = parser.parse_args()
 
     if not args.shootout_kicks.exists():
@@ -125,21 +133,23 @@ def main() -> int:
 
     art = Artifacts()
     # Stream results to disk as we go. A full run on a cold cache takes
-    # ~3h for 1327 kickers; we don't want to lose that to a Ctrl-C or
-    # process kill. The rows are written in initial-set order; the missing
-    # list is rewritten at the end from the in-memory result cache.
+    # ~3h for 1327 kickers (or ~15-20 min with `--max-workers 12`); we don't
+    # want to lose that to a Ctrl-C or process kill. The rows are written
+    # in initial-set order; the missing list is rewritten at the end from
+    # the in-memory result cache.
     n_rows_written = 0
     results: list = []
     progress_every = 25
     t0 = time.monotonic()
     with args.output.open("w", encoding="utf-8") as out_f:
         for i, result in enumerate(
-            fetch_all_initial_set_penalty_history(
+            fetch_all_initial_set_penalty_history_parallel(
                 client,
                 initial_set,
                 target_date=target,
                 lookback_years=args.lookback_years,
                 history_floor=history_floor,
+                max_workers=args.max_workers,
             ),
             start=1,
         ):

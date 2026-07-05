@@ -38,6 +38,7 @@ __all__ = [
     "InitialSetKicker",
     "MissingKicker",
     "fetch_all_initial_set_penalty_history",
+    "fetch_all_initial_set_penalty_history_parallel",
     "iter_initial_set_kickers",
 ]
 
@@ -196,3 +197,75 @@ def fetch_all_initial_set_penalty_history(
             yield InitialSetFetchResult(kicker=kicker, rows=[], error=repr(e))
             continue
         yield InitialSetFetchResult(kicker=kicker, rows=rows, error=None)
+
+
+def fetch_all_initial_set_penalty_history_parallel(
+    client,
+    initial_set: Iterable[InitialSetKicker],
+    target_date: date | None = None,
+    lookback_years: int = LOOKBACK_WINDOW_YEARS,
+    history_floor: date = HISTORY_FLOOR,
+    max_workers: int = 12,
+) -> Iterator[InitialSetFetchResult]:
+    """Parallel fan-out of the per-kicker fetcher across the Initial Set.
+
+    Same external contract as `fetch_all_initial_set_penalty_history` (one
+    `InitialSetFetchResult` per kicker, in input order; the same per-kicker
+    error handling), but uses a `ThreadPoolExecutor` to fetch N Kickers
+    concurrently. The FotMob HTTP client is stateless across calls
+    (per-URL `httpx.Client` in `_cached_get`), so sharing a single client
+    across threads is safe — the on-disk cache writes are URL-keyed and
+    never collide.
+
+    Yields results in completion order (NOT input order — for input order,
+    use the sequential `fetch_all_initial_set_penalty_history`). A slow
+    kicker does not block a fast one — the slowest submission determines
+    the wall time, not the sum of per-kicker times. The first `max_workers`
+    kickers' results become available in roughly the time of the slowest
+    one.
+
+    The completion-order yield is a trade-off: it lets the caller stream
+    results to disk (a 1359-kicker cold-cache run is ~3h serial, ~15-20
+    min parallel, and we don't want to lose that to a Ctrl-C). The
+    downstream writer does NOT depend on input order — the kicker's
+    `player_id` is on every row and on every missing-history record, so
+    the order is recoverable post-hoc.
+
+    Per-kicker fetch errors (transient FotMob 5xx, malformed player
+    pages, etc.) are caught and recorded in `error`; the kicker is
+    reported as missing in that case but the run continues. A successful
+    fetch that returned zero penalty rows in the window has
+    `error=None, rows=[]`.
+
+    `max_workers` defaults to 12 (a balance between FotMob's per-IP
+    rate-limit and the sequential baseline).
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    initial_list = list(initial_set)
+    if not initial_list:
+        return
+
+    def _fetch_one(kicker: InitialSetKicker) -> InitialSetFetchResult:
+        try:
+            rows = list(
+                fetch_player_penalty_history(
+                    client,
+                    player_id=kicker.player_id,
+                    target_date=target_date,
+                    lookback_years=lookback_years,
+                    history_floor=history_floor,
+                )
+            )
+        except Exception as e:  # noqa: BLE001 — boundary: one bad kicker must not abort the run
+            return InitialSetFetchResult(kicker=kicker, rows=[], error=repr(e))
+        return InitialSetFetchResult(kicker=kicker, rows=rows, error=None)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        future_to_kicker = {ex.submit(_fetch_one, k): k for k in initial_list}
+        for future in as_completed(future_to_kicker):
+            kicker = future_to_kicker[future]
+            try:
+                yield future.result()
+            except Exception as e:  # noqa: BLE001 — last-resort boundary
+                yield InitialSetFetchResult(kicker=kicker, rows=[], error=repr(e))

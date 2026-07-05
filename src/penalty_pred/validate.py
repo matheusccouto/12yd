@@ -22,6 +22,77 @@ from .match_ref import MatchRef
 from .rsssf import RSSSFShootout, count_shootouts_by_pairs
 from .shootouts import ShootoutKick
 
+# Per-(league_id, season) raw RSSSF shootout count, pinned to the
+# `docs/samples/rsssf_penaltiestour.html` snapshot (the
+# `?RSSSF_PENALTIES_TOUR_SNAPSHOT=docs/samples/rsssf_penaltiestour.html`
+# fixture). The international scope's 15 pairs sum to 42 raw shootouts.
+# Club pairs (Phase 3) are not in this map — the RSSSF page does not
+# list club shootouts, and the per-tournament success-rate diagnostic
+# for club pairs uses 0 as the raw count (the
+# `aggregate_per_tournament_success_rate` default).
+RSSSF_RAW_COUNTS: dict[tuple[int, int], int] = {
+    (77, 2022): 5,  # World Cup 2022
+    (77, 2026): 0,  # World Cup 2026 (in progress; RSSSF snapshot is stale)
+    (50, 2020): 4,  # Euro 2020 (held 2021)
+    (50, 2024): 3,  # Euro 2024
+    (44, 2021): 3,  # Copa América 2021
+    (44, 2024): 4,  # Copa América 2024
+    (289, 2021): 6,  # AFCON 2021 (raw RSSSF)
+    (289, 2023): 5,  # AFCON 2023
+    (289, 2025): 3,  # AFCON 2025
+    (298, 2021): 0,  # Gold Cup 2021 (no shootouts in window)
+    (298, 2023): 2,  # Gold Cup 2023
+    (298, 2025): 3,  # Gold Cup 2025
+    (290, 2021): 0,  # Asian Cup 2021 (no shootouts in window)
+    (290, 2023): 4,  # Asian Cup 2023 (raw RSSSF)
+    (290, 2025): 0,  # Asian Cup 2025 (no shootouts in window)
+}
+
+# Per-pair count of empty-shotmap cases that are excluded from the
+# scraper-reachable count (Issue #49: 6 documented FotMob data gaps;
+# 4 in AFCON 2021, 2 in Asian Cup 2023). The total is 6. Pairs not
+# in this map have 0 exclusions.
+EMPTY_SHOTMAP_EXCLUSIONS: dict[tuple[int, int], int] = {
+    (289, 2021): 4,  # AFCON 2021: 4 documented cases
+    (290, 2023): 2,  # Asian Cup 2023: 2 documented cases
+}
+
+# Per-pair count of URL-rotation cases that are excluded from the
+# scraper-reachable count (Issue #39: 18 documented FotMob URL
+# rotation failures; see `data/url_rotation_wall.md`). The 18
+# refs are spread across 9 pairs (1 in WC 2022, 3 in Euro 2020,
+# 3 in Copa América 2021, 3 in Copa América 2024, 2 in AFCON 2021,
+# 1 in AFCON 2023, 2 in Gold Cup 2023, 1 in Gold Cup 2025, 2 in
+# Asian Cup 2023). The total is 18. Pairs not in this map have 0
+# exclusions. The `stale_hash` rows in `skipped_refs_diagnostics.jsonl`
+# match this count one-for-one (Issue #39 acceptance criterion).
+URL_ROTATION_EXCLUSIONS: dict[tuple[int, int], int] = {
+    (77, 2022): 1,  # World Cup 2022: 1 documented
+    (50, 2020): 3,  # Euro 2020: 3 documented
+    (44, 2021): 3,  # Copa América 2021: 3 documented
+    (44, 2024): 3,  # Copa América 2024: 3 documented
+    (289, 2021): 2,  # AFCON 2021: 2 documented (in addition to 4 empty-shotmap)
+    (289, 2023): 1,  # AFCON 2023: 1 documented
+    (298, 2023): 2,  # Gold Cup 2023: 2 documented
+    (298, 2025): 1,  # Gold Cup 2025: 1 documented
+    (290, 2023): 2,  # Asian Cup 2023: 2 documented (in addition to 2 empty-shotmap)
+}
+
+# Scraper-reachable shootout count per in-scope (league_id, season) pair.
+# Derived from `RSSSF_RAW_COUNTS - EMPTY_SHOTMAP_EXCLUSIONS -
+# URL_ROTATION_EXCLUSIONS`. The sum is 18 — the v4 PRD Phase 2
+# success criterion after the 6 empty-shotmap and 18 URL-rotation
+# exclusions (the 5-strategy URL-rotation wall is documented as
+# the stop condition in Issue #39 / `data/url_rotation_wall.md`).
+EXPECTED_SHOUTOUT_COUNTS: dict[tuple[int, int], int] = {
+    pair: (
+        RSSSF_RAW_COUNTS[pair]
+        - EMPTY_SHOTMAP_EXCLUSIONS.get(pair, 0)
+        - URL_ROTATION_EXCLUSIONS.get(pair, 0)
+    )
+    for pair in RSSSF_RAW_COUNTS
+}
+
 
 @dataclass(frozen=True)
 class ShootoutCountReport:
@@ -103,21 +174,22 @@ def validate_shootout_count(
     counts match, the discrepancies file is left alone.
 
     `skipped_refs` are match refs the orchestrator could not fetch (stale
-    (seo, h2h) hashes). `no_kicks_refs` are match refs where the matchId
-    was correct but `extract_shootout_kicks` returned no kicks (FotMob has
-    `penaltyShootoutEvents` but the shotmap is empty for these matches).
-    `failed_refs` are match refs where `extract_shootout_kicks` raised an
-    exception; the failure mode is recorded in
-    `skipped_refs_diagnostics.jsonl` by the slice script. All three lists
-    are included in the discrepancies file for debugging.
+    (seo, h2h) hashes from the URL-rotation wall — Issue #39). `no_kicks_refs`
+    are match refs where the matchId was correct but `extract_shootout_kicks`
+    returned no kicks (FotMob has `penaltyShootoutEvents` but the shotmap is
+    empty for these matches — Issue #49). `failed_refs` are match refs where
+    `extract_shootout_kicks` raised an exception; the failure mode is
+    recorded in `skipped_refs_diagnostics.jsonl` by the slice script. All
+    three lists are included in the discrepancies file for debugging.
 
     The expected count is the raw RSSSF count minus the number of
-    `no_kicks_refs` (Issue #49): the 6 documented FotMob empty-shotmap
-    cases are accepted as data gaps, so the validator's reachable
-    count is 36 = 42 - 6. A caller that does not pass `no_kicks_refs`
-    (e.g. a unit test that exercises the raw oracle) gets the raw
-    count (42) as the expected; the script that drives the full
-    orchestrator always passes the 6 no_kicks_refs and gets 36.
+    `no_kicks_refs` (Issue #49) and `skipped_refs` (Issue #39): the
+    6 documented empty-shotmap cases plus the 18 documented URL-rotation
+    cases are accepted as FotMob data gaps, so the validator's reachable
+    count is 18 = 42 - 6 - 18. A caller that does not pass `no_kicks_refs`
+    or `skipped_refs` (e.g. a unit test that exercises the raw oracle)
+    gets the raw count (42) as the expected; the script that drives the
+    full orchestrator always passes both lists and gets 18.
 
     The JSONL is read through the data layer's reader (`Artifacts.read_shootout_kicks`)
     so the validator stops re-parsing the file format with its own
@@ -132,10 +204,11 @@ def validate_shootout_count(
     no_kicks_list = list(no_kicks_refs)
     failed_list = list(failed_refs)
     raw_expected = count_shootouts_by_pairs(rsssf_shootouts, league_seasons)
-    # Issue #49: the 6 documented empty-shotmap cases are accepted
-    # as FotMob data gaps; the validator's expected count is the raw
-    # RSSSF count minus those exclusions.
-    expected = raw_expected - len(no_kicks_list)
+    # Issue #49 + Issue #39: the 6 documented empty-shotmap cases plus
+    # the 18 documented URL-rotation cases are accepted as FotMob data
+    # gaps; the validator's expected count is the raw RSSSF count minus
+    # both exclusions.
+    expected = raw_expected - len(no_kicks_list) - len(skipped_list)
     actual_pairs = _tournament_year_pairs(shootout_kicks)
     report = ShootoutCountReport(
         actual=actual,
