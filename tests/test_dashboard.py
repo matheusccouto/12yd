@@ -23,6 +23,8 @@ from penalty_pred.dashboard import (
     MatchContext,
     is_placeholder_team,
     load_upcoming_knockouts,
+    most_likely_side,
+    opposite_side,
     predictions_for_match,
     recommended_dive,
 )
@@ -437,6 +439,50 @@ def test_recommended_dive_docstring_pins_kicker_pov() -> None:
 
 
 # ---------------------------------------------------------------------------
+# v4 (Issue #48): `opposite_side` and `most_likely_side` — the card's
+# "GK dive ↔ X" hint and the "Kicker will aim: X [%]" headline.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("side", "expected"),
+    [("L", "R"), ("R", "L"), ("C", "C")],
+)
+def test_opposite_side(side: str, expected: str) -> None:
+    """`opposite_side` is the Kicker's mirror: L↔R, C↔C."""
+    assert opposite_side(side) == expected
+
+
+def test_opposite_side_unknown_passthrough() -> None:
+    """An unknown side passes through (the renderer treats the output as a label)."""
+    assert opposite_side("?") == "?"
+
+
+@pytest.mark.parametrize(
+    ("p_L", "p_C", "p_R", "expected"),
+    [
+        (0.55, 0.20, 0.25, "L"),
+        (0.30, 0.25, 0.45, "R"),
+        (0.20, 0.60, 0.20, "C"),
+        # L→C→R tiebreaker mirrors `recommended_dive`'s order.
+        (0.33, 0.33, 0.34, "R"),  # R is the unique max
+        (0.34, 0.33, 0.33, "L"),
+        (0.33, 0.34, 0.33, "C"),
+        (0.33, 0.33, 0.33, "L"),  # all tied → L wins
+    ],
+)
+def test_most_likely_side_argmax(p_L: float, p_C: float, p_R: float, expected: str) -> None:
+    """`most_likely_side` is the argmax; ties break L→C→R (deterministic)."""
+    assert most_likely_side(p_L, p_C, p_R) == expected
+
+
+def test_most_likely_side_docstring_pins_kicker_pov() -> None:
+    """`most_likely_side`'s docstring stays in the Kicker's frame."""
+    assert most_likely_side.__doc__ is not None
+    assert "Kicker" in most_likely_side.__doc__
+
+
+# ---------------------------------------------------------------------------
 # `predictions_for_match` — per-match view over the round-agnostic
 # `predictions.jsonl`
 # ---------------------------------------------------------------------------
@@ -501,11 +547,100 @@ def test_predictions_for_match_sets_recommended_dive() -> None:
     assert kicker.p_R == pytest.approx(0.3)
 
 
-def test_predictions_for_match_sorts_by_name_for_stability() -> None:
-    """`predictions_for_match` returns a stable order (by `player_name`).
-    The previous per-match re-score sorted by `total_penalties` desc;
-    v3 (Issue #36) reads the artifact directly and the artifact
-    doesn't carry `total_penalties`, so the sort key is the name.
+def test_predictions_for_match_sorts_by_total_penalties_desc() -> None:
+    """v4 (Issue #48): cards are sorted by `total_penalties` desc, name asc as tiebreaker.
+
+    The sort reads `total_penalties` from the per-kicker
+    `player_history` length. Most-experienced kickers float to the
+    top of the page; a name tiebreaker keeps the order stable.
+    """
+    from penalty_pred.player_history import PlayerPenalty
+
+    def _row(pid: int, d: str) -> PlayerPenalty:
+        return PlayerPenalty(
+            kicker_id=pid,
+            match_id=100000 + pid,
+            match_date=d,
+            league_id=77,
+            league_name="World Cup",
+            team_id=100,
+            is_home=True,
+            x=1.0,
+            side="L",
+            is_on_target=True,
+            outcome="Goal",
+            shot_type="RightFoot",
+        )
+
+    predictions = [
+        _pred(player_id=1, name="Zara", team_id=100),
+        _pred(player_id=2, name="Aaron", team_id=100),
+        _pred(player_id=3, name="Mike", team_id=100),
+    ]
+    context = MatchContext(
+        match_id=42,
+        kickoff_utc=_NOW + timedelta(days=2),
+        round="1/4",
+        home_team_id=100,
+        home_team_name="H",
+        away_team_id=200,
+        away_team_name="A",
+    )
+    history = {
+        1: [_row(1, "2024-01-01") for _ in range(2)],  # Zara: 2 penalties
+        2: [_row(2, "2024-01-01") for _ in range(8)],  # Aaron: 8 penalties (top)
+        3: [_row(3, "2024-01-01") for _ in range(5)],  # Mike: 5 penalties
+    }
+    out = predictions_for_match(predictions, context, player_history=history)
+    assert [k.player_name for k in out] == ["Aaron", "Mike", "Zara"]
+    assert [k.total_penalties for k in out] == [8, 5, 2]
+
+
+def test_predictions_for_match_name_tiebreaker_when_penalties_equal() -> None:
+    """When two kickers have the same `total_penalties`, name (ascending) is the tiebreaker."""
+    from penalty_pred.player_history import PlayerPenalty
+
+    def _row(pid: int) -> PlayerPenalty:
+        return PlayerPenalty(
+            kicker_id=pid,
+            match_id=100000 + pid,
+            match_date="2024-01-01",
+            league_id=77,
+            league_name="World Cup",
+            team_id=100,
+            is_home=True,
+            x=1.0,
+            side="L",
+            is_on_target=True,
+            outcome="Goal",
+            shot_type="RightFoot",
+        )
+
+    predictions = [
+        _pred(player_id=1, name="Zara", team_id=100),
+        _pred(player_id=2, name="Aaron", team_id=100),
+    ]
+    context = MatchContext(
+        match_id=42,
+        kickoff_utc=_NOW + timedelta(days=2),
+        round="1/4",
+        home_team_id=100,
+        home_team_name="H",
+        away_team_id=200,
+        away_team_name="A",
+    )
+    history = {
+        1: [_row(1) for _ in range(3)],
+        2: [_row(2) for _ in range(3)],
+    }
+    out = predictions_for_match(predictions, context, player_history=history)
+    assert [k.player_name for k in out] == ["Aaron", "Zara"]
+
+
+def test_predictions_for_match_falls_back_to_name_sort_without_history() -> None:
+    """Without `player_history`, `total_penalties` is 0 for every kicker
+    and the sort degrades to name-ascending (the v3 behaviour, kept
+    for backward compatibility with callers that don't load history).
     """
     predictions = [
         _pred(player_id=1, name="Zara", team_id=100),
@@ -521,8 +656,51 @@ def test_predictions_for_match_sorts_by_name_for_stability() -> None:
         away_team_id=200,
         away_team_name="A",
     )
-    out = predictions_for_match(predictions, context)
+    out = predictions_for_match(predictions, context)  # no player_history
     assert [k.player_name for k in out] == ["Aaron", "Mike", "Zara"]
+    assert all(k.total_penalties == 0 for k in out)
+
+
+def test_predictions_for_match_no_history_key_means_zero() -> None:
+    """A kicker with no entry in `player_history` has `total_penalties=0`
+    (the v4 "no history" signal — the card renders three near-equal
+    light cells).
+    """
+    from penalty_pred.player_history import PlayerPenalty
+
+    def _row(pid: int) -> PlayerPenalty:
+        return PlayerPenalty(
+            kicker_id=pid,
+            match_id=100000 + pid,
+            match_date="2024-01-01",
+            league_id=77,
+            league_name="World Cup",
+            team_id=100,
+            is_home=True,
+            x=1.0,
+            side="L",
+            is_on_target=True,
+            outcome="Goal",
+            shot_type="RightFoot",
+        )
+
+    predictions = [
+        _pred(player_id=1, name="With History", team_id=100),
+        _pred(player_id=2, name="No History", team_id=100),
+    ]
+    context = MatchContext(
+        match_id=42,
+        kickoff_utc=_NOW + timedelta(days=2),
+        round="1/4",
+        home_team_id=100,
+        home_team_name="H",
+        away_team_id=200,
+        away_team_name="A",
+    )
+    history = {1: [_row(1) for _ in range(4)]}  # player 2 has no entry
+    out = predictions_for_match(predictions, context, player_history=history)
+    by_id = {k.player_id: k.total_penalties for k in out}
+    assert by_id == {1: 4, 2: 0}
 
 
 def test_predictions_for_match_drops_zero_team_id() -> None:

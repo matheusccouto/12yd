@@ -162,7 +162,13 @@ For any kicker, the model returns P(L), P(C), P(R). The goalkeeper
 dives toward the side with the **lowest** predicted probability — the
 counterfactual save policy. The dashboard at
 [`matheusccouto/12yd`](https://github.com/matheusccouto/12yd) surfaces
-per-kicker predictions for the WC 2026 knockout matches.
+per-kicker predictions for the WC 2026 knockout matches. v4 (Issue
+#48) replaces the v3 dataframe with a card layout: each Kicker gets
+a card with a photo placeholder, name, career-penalty count, a
+Plotly goal drawing (3 coloured segments, star on the most-likely
+side), and a one-line prediction row in the Kicker-PoV frame ("WILL
+AIM L 55% · GK dive ↔ R"). The probabilities and the dive hint stay
+in the Kicker-PoV frame end to end.
 
 ## Feature schema (v3, 17 features)
 

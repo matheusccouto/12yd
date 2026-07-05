@@ -21,17 +21,29 @@ The dashboard's entry points (the functions the PRD names):
   teams decided. The round is not consulted (any round passes, so the
   selector adapts to whatever knockout stage the tournament is in:
   R32, R16, QF, SF, F). Returns a list of `MatchContext`.
-- `predictions_for_match(predictions, context)` — filter the
-  round-agnostic `predictions.jsonl` to the match's two teams and
-  return a list of `KickerPrediction`, sorted by `total_penalties`
-  descending (with name as tiebreaker) for a stable table order.
+- `predictions_for_match(predictions, context, *, player_history=...)` —
+  filter the round-agnostic `predictions.jsonl` to the match's two
+  teams and return a list of `KickerPrediction`, sorted by
+  `total_penalties` descending (with name as tiebreaker) for a stable
+  table order. `total_penalties` is read from `player_history` when
+  provided; the v4 card layout uses it to show "N career penalties"
+  on each card and to rank the most-experienced kickers first.
 - `recommended_dive(p_L, p_C, p_R)` — the keeper's optimal pre-kick
   dive, `argmin` over the three probabilities.
+- `opposite_side(side)` — the Kicker's mirror-side (`L↔R`, `C↔C`),
+  used by the v4 card layout to render the "GK dive ↔ X" hint in the
+  Kicker's PoV.
 
 v3 (Issue #36) collapsed the per-match re-score path: with `b3_round`
 dropped from the model schema, every match shows the same per-kicker
 probabilities from `predictions.jsonl`. The dashboard now reads the
 artifact directly; the round is a display attribute only.
+
+v4 (Issue #48) re-introduces `total_penalties` as a per-kicker field
+on `KickerPrediction`, populated from `player_history` so the card
+layout can show "N career penalties" on each card and sort by
+experience. The card layout itself lives in `app.py`; this module
+stays the library seam.
 
 The `MatchContext` is a pure value object — it carries the match's
 identity (FotMob match id), the two teams (id + name), the kickoff
@@ -40,11 +52,12 @@ time, and the round (kept for display only).
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from .client import FotMobClient
+from .player_history import PlayerPenalty
 from .predict import PredictionRow
 
 
@@ -82,6 +95,11 @@ class KickerPrediction:
     UI sorts by this column descending — the most-experienced kicker
     at the top of the table). The `player_id` is the FotMob
     `playerId`; the UI uses it as a stable row key.
+
+    `total_penalties` is the size of the Kicker's penalty history in
+    `player_history` (the A-group count). The v4 card layout renders
+    it as "N career penalties" on each card; the sort uses it as the
+    primary key.
     """
 
     player_id: int
@@ -229,6 +247,8 @@ def load_upcoming_knockouts(
 def predictions_for_match(
     predictions: Iterable[PredictionRow],
     context: MatchContext,
+    *,
+    player_history: Mapping[int, Sequence[PlayerPenalty]] | None = None,
 ) -> list[KickerPrediction]:
     """Filter the round-agnostic `predictions.jsonl` to the match's two teams.
 
@@ -240,16 +260,29 @@ def predictions_for_match(
     `total_penalties` descending (with name as the tiebreaker for
     stability).
 
-    `total_penalties` is the per-kicker count of the artifact — the
-    A2/A4 source — passed through as a sort key. The UI renders it
-    as the "Penalties" column; readers can compare it to the source
-    `player_history` if they want to confirm the number.
+    `total_penalties` is the per-kicker count of the player's
+    `player_history` — the A2/A4 source. v4 (Issue #48) reintroduces
+    it as a per-kicker field; the v3 dashboard used a constant 0
+    placeholder because the v3 layout was a table where the column
+    was sortable client-side. The v4 card layout renders it as
+    "N career penalties" on each card and uses it as the primary
+    sort key (most-experienced kickers at the top).
+
+    When `player_history` is omitted (the historical v3 callers that
+    didn't read history), every `total_penalties` is 0 and the sort
+    falls back to name (the v3 behaviour). The Streamlit app passes
+    the loaded `player_history.jsonl` so the cards are sorted by
+    experience.
     """
     match_team_ids = {context.home_team_id, context.away_team_id}
     out: list[KickerPrediction] = []
     for r in predictions:
         if r.team_id not in match_team_ids:
             continue
+        if player_history is None:
+            total = 0
+        else:
+            total = len(player_history.get(r.player_id, ()))
         out.append(
             KickerPrediction(
                 player_id=r.player_id,
@@ -257,7 +290,7 @@ def predictions_for_match(
                 team_id=r.team_id,
                 team_name=r.team_name,
                 kicking_foot=r.kicking_foot,
-                total_penalties=0,  # not in the artifact; UI shows via `player_history` if needed
+                total_penalties=total,
                 p_L=r.p_L,
                 p_C=r.p_C,
                 p_R=r.p_R,
@@ -303,11 +336,66 @@ def recommended_dive(p_L: float, p_C: float, p_R: float) -> str:
     return "L"  # unreachable: `min` is one of the three
 
 
+# ---------------------------------------------------------------------------
+# v4 (Issue #48): opposite-side helper for the card's "GK dive ↔ X" hint.
+# ---------------------------------------------------------------------------
+
+
+def opposite_side(side: str) -> str:
+    """The Kicker's mirror-side: `L ↔ R`, `C ↔ C`.
+
+    The v4 card layout surfaces the dive hint as the **opposite** of
+    the Kicker's most-likely aim (e.g. WILL AIM = L 55% → GK dive = R
+    in the Kicker's PoV). The L/R letters are mirror images — the
+    Kicker's L is the Goalkeeper's R, and vice versa. The centre has
+    no mirror; the dive hint for a centre-aim is `C` (the Goalkeeper
+    has nowhere to dive but stays central).
+
+    The function is total over `"L" | "C" | "R"`. Any other input
+    falls through to `side` unchanged — the card renderer treats
+    `opposite_side` output as a display label and the dashboard
+    always passes the canonical L/C/R letters from
+    `recommended_dive` / `argmax`.
+    """
+    if side == "L":
+        return "R"
+    if side == "R":
+        return "L"
+    if side == "C":
+        return "C"
+    return side
+
+
+def most_likely_side(p_L: float, p_C: float, p_R: float) -> str:
+    """The Kicker's most-likely aim: `argmax` over the three probabilities.
+
+    The v4 card layout's prediction row leads with "Kicker will aim:
+    [side] [%]" — the most-likely side, in the Kicker's PoV. Ties
+    are broken by the L→C→R order so the result is deterministic
+    (`most_likely_side(0.33, 0.33, 0.34) == "R"` — R is the unique
+    max).
+
+    This is a *display* helper, not a model policy. The model's
+    deployment policy remains `argmin` (see `recommended_dive`); the
+    card shows the most-likely aim as the headline and the opposite
+    side as the dive hint. When the Kicker's distribution is
+    single-sided, the two are equal (opposite(argmax) = argmin); when
+    the distribution is flatter they may differ.
+    """
+    maximum = max(p_L, p_C, p_R)
+    for side, value in (("L", p_L), ("C", p_C), ("R", p_R)):
+        if value == maximum:
+            return side
+    return "L"  # unreachable: `max` is one of the three
+
+
 __all__ = [
     "KickerPrediction",
     "MatchContext",
     "is_placeholder_team",
     "load_upcoming_knockouts",
+    "most_likely_side",
+    "opposite_side",
     "predictions_for_match",
     "recommended_dive",
 ]
