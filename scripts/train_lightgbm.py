@@ -11,11 +11,13 @@ writes:
   the same training fold for an apples-to-apples comparison), and
   three fixed baselines (random, kicker-most-frequent, actual keeper).
 - `output/lightgbm.pkl` — the LightGBM model fitted on the same
-  151-row pre-2026 training fold that produced the metrics. The
-  artifact and the metrics describe the SAME model (Issue #40: the
-  previous "retrain on all rows" recipe produced an artifact whose
-  in-sample holdout save rate was 0.107, not the 0.464 the card
-  advertised).
+  pre-2026 training fold that produced the metrics. The artifact and
+  the metrics describe the SAME model (Issue #40: the previous
+  "retrain on all rows" recipe produced an artifact whose in-sample
+  holdout save rate was 0.107, not the 0.464 the card advertised).
+  The v3 retrain froze the artifact on a 151-row pre-2026 training
+  fold; the v4 retrain (Issue #51) freezes it on a 211-row pre-2026
+  training fold (437 total rows, 8 LOTO folds, aggregate SE 0.022).
 
 The script is re-runnable: same inputs + same random seed → identical
 output. The LightGBM hyperparameters and the holdout cutoff are
@@ -252,11 +254,13 @@ def main() -> int:
         f"                    rndm   brier={cal.random.brier:.3f} ece={cal.random.ece:.3f}"
     )
 
-    # Issue #40: freeze the deployment artifact on the same 151-row
-    # training fold that produced the metrics, so the artifact and
-    # metrics describe the same model. The previous "retrain on all
-    # rows" recipe produced an in-sample artifact whose holdout save
-    # rate was 0.107, not the 0.464 the card advertised.
+    # Issue #40: freeze the deployment artifact on the same training
+    # fold that produced the metrics, so the artifact and metrics
+    # describe the same model. The previous "retrain on all rows"
+    # recipe produced an in-sample artifact whose holdout save rate
+    # was 0.107, not the 0.464 the card advertised. The v3 retrain
+    # froze the artifact on a 151-row pre-2026 fold; the v4 retrain
+    # (Issue #51) freezes it on a 211-row pre-2026 fold.
     args.model_output.parent.mkdir(parents=True, exist_ok=True)
     art.write_model(
         frozen,

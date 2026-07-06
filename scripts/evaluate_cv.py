@@ -1,12 +1,17 @@
 """Leave-one-group-out cross-validation for the penalty shootout classifier.
 
-Issue #45: the published `model/metrics.json` reports a single 28-row
-holdout (the 2026 WC kicks). At n=28, the standard error on save rate
-is ~0.09, so the difference between the model's 0.464 and the random
-baseline's 0.405 is well within the noise. A leave-one-tournament-out
-cross-validation gives 6 folds (one per `tournament_name`) for an
-aggregate holdout of ~150-180 kicks with an aggregate SE of ~0.04 —
-a 6x tighter claim.
+Issue #45: the published `model/metrics.json` reports a single 2026+
+holdout. The v3 holdout was 28 rows (the 2026 WC kicks); at n=28 the
+standard error on save rate is ~0.09, so the difference between the
+model's 0.464 and the random baseline's 0.405 is well within the
+noise. The v4 holdout (Issue #51) is 226 rows; at n=226 the SE on
+save rate is ~0.032, so the v4 model's 0.345 vs random's 0.437 is a
+reliable 2.9-SE gap. A leave-one-tournament-out cross-validation
+gives 6 folds (one per `tournament_name`) on the v3 dataset for an
+aggregate holdout of ~150-180 kicks with an aggregate SE of ~0.04;
+the v4 dataset (8 folds, one per `tournament_name` across 8
+national-team + club tournaments) brings the aggregate to 437 rows
+with an aggregate SE of 0.022 — a 6x tighter claim.
 
 The script reads `output/training_table.jsonl`, runs a
 leave-one-tournament-out CV for both the LightGBM (slice #8) and the
