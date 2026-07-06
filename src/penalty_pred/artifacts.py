@@ -16,32 +16,50 @@ directly. Migration notes:
 - Adding a new artifact is one new path accessor + one read/write pair
   in this module. Renaming an artifact is one rename in this module.
 
-The on-disk layout (relative to `root`):
+The on-disk layout (relative to `root`), v4 retrain (Issue #51):
 
-- `shootout_kicks.jsonl` — 179 target kicks
-- `player_history.jsonl` — 745 rows of per-kicker penalty history
-- `missing_history.jsonl` — 1063 kickers with zero penalty rows
-- `wc2026_roster.jsonl` — 1243 unique players across 48 teams
-- `training_table.jsonl` — 179 rows of 17-feature rows (v3, Issue #41
+- `shootout_kicks.jsonl` — 437 target kicks across 25 shootouts in 8
+  national-team + club tournaments, 2021–2026 (the v3 179-row scope
+  plus 258 new club-scope rows from Phase 3)
+- `player_history.jsonl` — per-kicker penalty history (the A1/A2/A3/A4
+  inputs), filtered to each kicker's target-kick date minus the
+  5-year lookback window. The Phase 3 ingest fetched 1359 unique
+  kickers (the v2 1327 plus 32 from the club-scope shootouts); 261
+  have at least one penalty row, 1098 have zero (the prior-only
+  kickers)
+- `missing_history.jsonl` — 1098 kickers with no penalty history in
+  the lookback window
+- `wc2026_roster.jsonl` — the WC 2026 squad list (1247 unique
+  players across 48 teams; the prediction roster)
+- `training_table.jsonl` — 437 rows of 17-feature rows (v3, Issue #41
   dropped the `age` column)
-- `predictions.jsonl` — 1243 rows of per-player predictions
+- `predictions.jsonl` — 1247 rows of per-player round-agnostic
+  predictions (the dashboard reads this directly — v3 dropped the
+  per-match re-score path; v4 keeps the round-agnostic schema)
 - `lightgbm.pkl` — the frozen LightGBM model
 - `baseline.pkl` — the baseline logreg model
-- `metrics.json` — the held-out metrics report
-- `discrepancies.json` — the RSSSF vs. scraper divergence report
-- `skipped_refs_diagnostics.jsonl` — one record per non-empty
-  skip / no-kicks / failure result, with the `failure_mode` discriminator
-  (`stale_hash` | `empty_shotmap` | `ExceptionClass: message`).
-- `tournament_success_rate.jsonl` — one `TournamentSuccessRate` row per
-  (league, season) pair, with the scraper's match / kick counts, the
-  per-state breakdown (skipped, no-kicks, failed), and the expected /
-  reachable counts from the RSSSF oracle. Companion to
-  `skipped_refs_diagnostics.jsonl` — the per-match file surfaces the
-  why, this file surfaces the per-tournament rollup.
-- `cv_metrics.json` — the leave-one-tournament-out cross-validation
-  report (Issue #45), with per-fold metrics and the aggregate
-  summary. Also embedded as the `cv` block in `metrics.json` so the
-  dashboard's metrics card can render the CV without a separate fetch.
+- `metrics.json` — the held-out metrics report (log loss, accuracy,
+  save rate, the calibration block per Issue #43, and the LOTO CV
+  block per Issues #45 + #51)
+- `cv_metrics.json` — the standalone LOTO CV artifact (the same
+  payload that's embedded in `metrics.json` under the `cv` key,
+  written separately so the dashboard or a future tool can load the
+  CV without parsing the rest of the metrics report)
+- `discrepancies.json` — the RSSSF-vs-scraper divergence report
+  (scraper-reachable total: 18 international + 4 club + 7 n/a + 6
+  missing = 25 distinct matches in the 57-pair scope, after the
+  URL-rotation wall + empty-shotmap exclusions)
+- `skipped_refs_diagnostics.jsonl` — per-match skip / no-kicks /
+  failure records with the `failure_mode` discriminator
+  (`stale_hash` | `empty_shotmap` | `ExceptionClass: message`). The
+  18 URL-rotation wall and 6 empty-shotmap cases are documented here
+- `tournament_success_rate.jsonl` — one `TournamentSuccessRate` row
+  per (league, season) pair (Issue #52 close-out; the v4 Phase 2
+  acceptance criterion), with the scraper's match / kick counts, the
+  per-state breakdown, and the expected / reachable counts from the
+  RSSSF oracle. Companion to `skipped_refs_diagnostics.jsonl` — the
+  per-match file surfaces the why, this file surfaces the
+  per-tournament rollup
 
 The cache directory (separate from `root`):
 

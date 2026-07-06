@@ -107,9 +107,10 @@ def main() -> int:
     )
 
     # Metadata fetcher (cache-warm from the player-history slice; the
-    # 1243-player roster was fully fetched then). A cold cache would
-    # take ~3h; on a warm cache, the in-process cost is dominated by
-    # JSON parsing.
+    # 1247-player WC 2026 roster was fully fetched then). A cold cache
+    # would take ~15-20 min with the v4 parallel orchestrator
+    # (`--max-workers 12`); on a warm cache, the in-process cost is
+    # dominated by JSON parsing.
     client = FotMobClient(cache_dir=args.cache_dir)
     metadata_fetcher = fetcher_from_client(client)
 
