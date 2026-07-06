@@ -49,6 +49,7 @@ from penalty_pred.player_history import PlayerMetadata
 from penalty_pred.predict import (
     PredictionRow,
     build_prediction_features,
+    count_kickers_with_history,
     predict_kicker,
     predict_roster,
 )
@@ -451,6 +452,109 @@ def test_predict_roster_preserves_team_metadata() -> None:
     assert out[0].team_id == 6710
     assert out[0].team_name == "France"
     assert out[0].country_code == "FRA"
+
+
+# ---------------------------------------------------------------------------
+# count_kickers_with_history
+# ---------------------------------------------------------------------------
+
+
+def test_count_kickers_with_history_reports_roster_intersection_with_dict() -> None:
+    """`count_kickers_with_history` counts the roster kickers whose
+    `player_id` is a key in the `player_history` dict (a key exists
+    iff the kicker has ≥ 1 row in the JSONL, per `load_player_history`).
+
+    v3 (Issue #36) replaced the v2 inferred `kicking_foot` (the
+    per-penalty `shotType` mode) with the *declared* `preferred_foot`
+    from `PlayerMetadata`. The v2 `"Unknown"` no-history sentinel is
+    gone — every roster player has a real declared foot (one of
+    `left` / `right` / `both` / `""`). The previous
+    `sum(1 for r in predictions if r.kicking_foot != "Unknown")` was
+    therefore always 100%. This helper is the v3 replacement: count
+    from the dict, not the row.
+
+    Edge cases pinned by this test:
+    - Empty dict → 0.
+    - 1 of 3 kickers in dict → 1.
+    - Empty list as a value → 0 (the JSONL never writes empty lists,
+      but a defensive count should still be 0 if the dict contains one).
+    - All 3 kickers in dict → 3.
+    - A kicker with rows but not in the roster → does not inflate the
+      count (the count is the *roster*'s intersection with the dict,
+      not the dict's size).
+    """
+    roster = [
+        _roster_player(player_id=1, player_name="Alpha"),
+        _roster_player(player_id=2, player_name="Bravo"),
+        _roster_player(player_id=3, player_name="Charlie"),
+    ]
+
+    assert count_kickers_with_history(roster, {}) == 0
+
+    history_one = {1: [_penalty(1, "2024-01-01T00:00:00+00:00", side="L")]}
+    assert count_kickers_with_history(roster, history_one) == 1
+
+    history_empty = {1: []}
+    assert count_kickers_with_history(roster, history_empty) == 0
+
+    history_full = {
+        1: [_penalty(1, "2024-01-01T00:00:00+00:00", side="L")],
+        2: [_penalty(2, "2024-02-01T00:00:00+00:00", side="R")],
+        3: [_penalty(3, "2024-03-01T00:00:00+00:00", side="C")],
+    }
+    assert count_kickers_with_history(roster, history_full) == 3
+
+    history_extra = {
+        1: [_penalty(1, "2024-01-01T00:00:00+00:00", side="L")],
+        99: [],
+    }
+    assert count_kickers_with_history(roster, history_extra) == 1
+
+
+def test_count_kickers_with_history_independent_of_kicking_foot_field() -> None:
+    """The v3 `PredictionRow.kicking_foot` field is the declared
+    preferred foot (`left` / `right` / `both` / `""`), never the v2
+    `"Unknown"` no-history sentinel. The count is independent of the
+    `kicking_foot` values: a roster where every row has `kicking_foot`
+    set still reports the actual history coverage.
+
+    Pins the regression where `sum(1 for r in predictions if
+    r.kicking_foot != "Unknown")` always reported 100% (see Issue #53).
+    """
+    roster = [
+        _roster_player(player_id=1, player_name="Alpha"),
+        _roster_player(player_id=2, player_name="Bravo"),
+    ]
+    stub = _StubModel(np.array([0.5, 0.25, 0.25]))
+
+    def fetch(pid: int) -> PlayerMetadata | None:
+        if pid == 1:
+            return PlayerMetadata(
+                player_id=1,
+                player_name="Alpha",
+                position_key="striker",
+                birth_date="1990-01-01",
+                preferred_foot="left",
+            )
+        if pid == 2:
+            return PlayerMetadata(
+                player_id=2,
+                player_name="Bravo",
+                position_key="striker",
+                birth_date="1990-01-01",
+                preferred_foot="right",
+            )
+        return None
+
+    preds = predict_roster(
+        model=stub,
+        roster=roster,
+        player_history={},
+        metadata_fetcher=fetch,
+        target_date=TARGET_DATE,
+    )
+    assert [p.kicking_foot for p in preds] == ["left", "right"]
+    assert count_kickers_with_history(roster, {}) == 0
 
 
 # ---------------------------------------------------------------------------

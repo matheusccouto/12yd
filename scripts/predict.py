@@ -25,7 +25,7 @@ from penalty_pred.client import FotMobClient
 from penalty_pred.config import today_utc
 from penalty_pred.features import fetcher_from_client, load_player_history
 from penalty_pred.model import load_artifact
-from penalty_pred.predict import load_roster, predict_roster
+from penalty_pred.predict import count_kickers_with_history, load_roster, predict_roster
 
 
 def main() -> int:
@@ -119,7 +119,15 @@ def main() -> int:
 
     # Write
     n = art.write_predictions(predictions, path=args.output)
-    n_with_history = sum(1 for r in predictions if r.kicking_foot != "Unknown")
+    # v3 (Issue #36): `kicking_foot` is now the declared preferred foot
+    # (one of left/right/both/""), never the v2 `"Unknown"` sentinel, so
+    # the old `r.kicking_foot != "Unknown"` check was always True.
+    # Count from the `player_history` dict instead — a kicker has
+    # history iff the dict has a non-empty list for their `player_id`.
+    # The JSONL groups by `kicker_id`, and `load_player_history` reads
+    # only non-empty lists, so key existence ≡ `len > 0` for this data
+    # layer (the helper's `len > 0` is a defensive guard).
+    n_with_history = count_kickers_with_history(roster, history)
     n_no_history = n - n_with_history
     print(
         f"Wrote {n} predictions to {args.output}.\n"

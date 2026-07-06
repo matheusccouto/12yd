@@ -259,11 +259,41 @@ def predict_roster(
     return out
 
 
+def count_kickers_with_history(
+    roster: Sequence[RosterPlayer],
+    player_history: Mapping[int, Sequence[PlayerPenalty]],
+) -> int:
+    """Count the roster kickers with at least one row in `player_history`.
+
+    A kicker has history iff their `player_id` is a key in the dict AND
+    the list for that key is non-empty. `load_player_history` groups
+    the per-kicker JSONL by `kicker_id`; a key exists iff the kicker
+    has ≥ 1 row in the lookback window (empty lists are not written by
+    `fetch_initial_set_player_history.py`, so the `len > 0` check is
+    defensive — equivalent to `in dict` for the current data layer).
+
+    v3 (Issue #36) replaced the v2 inferred `kicking_foot` (the
+    per-penalty `shotType` mode) with the *declared* `preferred_foot`
+    from `PlayerMetadata`. The v2 `"Unknown"` no-history sentinel is
+    gone — every roster player has a real declared foot (one of
+    `left` / `right` / `both` / `""`). The previous
+    `sum(1 for r in predictions if r.kicking_foot != "Unknown")` always
+    reported 100% with history. This helper is the replacement: count
+    from the dict, not the row.
+
+    Used by the predict slice for the "model sees the prior" stat
+    (~86% of the 1247-player WC 2026 roster has no penalty history in
+    the 5-year lookback window, per the v3 review).
+    """
+    return sum(1 for kicker in roster if player_history.get(kicker.player_id))
+
+
 __all__ = [
     "CLASSES",
     "PRIOR_PROB",
     "PredictionRow",
     "build_prediction_features",
+    "count_kickers_with_history",
     "load_player_history",
     "load_roster",
     "predict_kicker",
