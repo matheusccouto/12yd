@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -194,7 +195,7 @@ def test_scope_excludes_domestic_only_extended_leagues() -> None:
     ids=[f"{lid}-{s}" for lid, s in INTERNATIONAL_PAIRS],
 )
 def test_each_in_scope_pair_matches_rsssf_count(
-    rsssf_shootouts: list[object], league_id: int, season: int
+    rsssf_shootouts: list[RSSSFShootout], league_id: int, season: int
 ) -> None:
     """Each in-scope international (league, season) matches the RSSSF
     oracle's **raw** shootout count (which can be 0 for legitimately
@@ -881,11 +882,11 @@ def test_url_rotation_wall_cross_references_phase_3_adr() -> None:
 TOURNAMENT_SUCCESS_RATE_PATH: Path = Path("output/tournament_success_rate.jsonl")
 
 
-def _load_tournament_success_rate() -> list[dict[str, object]] | None:
+def _load_tournament_success_rate() -> list[dict[str, Any]] | None:
     """Read the per-tournament success-rate JSONL, or `None` if absent."""
     if not TOURNAMENT_SUCCESS_RATE_PATH.exists():
         return None
-    out: list[dict[str, object]] = []
+    out: list[dict[str, Any]] = []
     for line in TOURNAMENT_SUCCESS_RATE_PATH.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:

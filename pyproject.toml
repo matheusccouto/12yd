@@ -38,7 +38,7 @@ ignore = ["E501"]
 "tests/**" = ["E402"]
 
 [tool.ty.environment]
-root = ["./src"]
+root = ["./src", "./", "./tests"]
 python = "./.venv"
 python-version = "3.12"
 

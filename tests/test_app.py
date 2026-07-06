@@ -442,7 +442,7 @@ def test_app_renders_v4_layout_with_mocked_dependencies() -> None:
     def _mock_read_predictions(*_a, **_kw):
         from penalty_pred.predict import PredictionRow
 
-        return [PredictionRow(**p) for p in predictions_data]
+        return [PredictionRow(**p) for p in predictions_data]  # ty: ignore[invalid-argument-type]
 
     def _mock_read_player_history(*_a, **_kw):
         from penalty_pred.player_history import PlayerPenalty

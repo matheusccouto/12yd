@@ -106,7 +106,7 @@ _NO_KICKS_REFS: list[MatchRef] = [
 ]
 
 
-def test_match_when_counts_align(tmp_path: Path, rsssf_shootouts: list[object]) -> None:
+def test_match_when_counts_align(tmp_path: Path, rsssf_shootouts: list[RSSSFShootout]) -> None:
     """A JSONL with 36 distinct match_ids (the scraper-reachable count)
     across the in-scope pairs should match the validator's expected
     count. Issue #49: the raw RSSSF count is 42, but 6 of those are
@@ -129,7 +129,7 @@ def test_match_when_counts_align(tmp_path: Path, rsssf_shootouts: list[object]) 
 
 
 def test_raw_expected_is_42_without_no_kicks_refs(
-    tmp_path: Path, rsssf_shootouts: list[object]
+    tmp_path: Path, rsssf_shootouts: list[RSSSFShootout]
 ) -> None:
     """A caller that does not pass `no_kicks_refs` (e.g. a unit test
     that exercises the raw oracle) gets the raw count (42) as the
@@ -150,7 +150,7 @@ def test_raw_expected_is_42_without_no_kicks_refs(
 
 
 def test_no_kicks_refs_subtracted_from_expected(
-    tmp_path: Path, rsssf_shootouts: list[object]
+    tmp_path: Path, rsssf_shootouts: list[RSSSFShootout]
 ) -> None:
     """The validator subtracts `len(no_kicks_refs)` from the raw RSSSF
     expected count. With the 6 documented exclusions passed, expected
@@ -200,7 +200,9 @@ def test_reachable_count_is_36() -> None:
     assert reachable == 36
 
 
-def test_mismatch_writes_discrepancies(tmp_path: Path, rsssf_shootouts: list[object]) -> None:
+def test_mismatch_writes_discrepancies(
+    tmp_path: Path, rsssf_shootouts: list[RSSSFShootout]
+) -> None:
     """A JSONL with 1 match should not match, and a discrepancies file is written."""
     kicks = _kicks_for_pairs([("World Cup", 2022, 1)])
     jsonl = tmp_path / "kicks.jsonl"
@@ -224,7 +226,9 @@ def test_mismatch_writes_discrepancies(tmp_path: Path, rsssf_shootouts: list[obj
     assert payload["actual_pairs"] == [{"tournament": "World Cup", "year": 2022}]
 
 
-def test_match_skips_discrepancy_writing(tmp_path: Path, rsssf_shootouts: list[object]) -> None:
+def test_match_skips_discrepancy_writing(
+    tmp_path: Path, rsssf_shootouts: list[RSSSFShootout]
+) -> None:
     """When counts match (after the no_kicks_refs adjustment for the
     6 documented empty-shotmap cases), the discrepancies file is NOT created.
     Issue #49: the 6 exclusions are passed so the 36 reachable entries
@@ -245,7 +249,9 @@ def test_match_skips_discrepancy_writing(tmp_path: Path, rsssf_shootouts: list[o
     assert not disc.exists()
 
 
-def test_match_counts_distinct_match_ids(tmp_path: Path, rsssf_shootouts: list[object]) -> None:
+def test_match_counts_distinct_match_ids(
+    tmp_path: Path, rsssf_shootouts: list[RSSSFShootout]
+) -> None:
     """Two rows with the same match_id count as one shootout match."""
     kick = _kicks_for_pairs([("World Cup", 2022, 1)])[0]
     kicks = [kick, kick]
@@ -256,7 +262,7 @@ def test_match_counts_distinct_match_ids(tmp_path: Path, rsssf_shootouts: list[o
 
 
 def test_skipped_refs_included_in_discrepancies(
-    tmp_path: Path, rsssf_shootouts: list[object]
+    tmp_path: Path, rsssf_shootouts: list[RSSSFShootout]
 ) -> None:
     """When the JSONL is short of the expected count, skipped_refs are
     serialised in discrepancies.json for debugging."""
@@ -297,7 +303,7 @@ def test_skipped_refs_included_in_discrepancies(
 
 
 def test_no_kicks_refs_included_in_discrepancies(
-    tmp_path: Path, rsssf_shootouts: list[object]
+    tmp_path: Path, rsssf_shootouts: list[RSSSFShootout]
 ) -> None:
     """`no_kicks_refs` are also serialised in discrepancies.json."""
     from penalty_pred.match_ref import MatchRef
@@ -344,7 +350,7 @@ def test_delta_property(tmp_path: Path) -> None:
 
 
 def test_failed_refs_included_in_discrepancies(
-    tmp_path: Path, rsssf_shootouts: list[object]
+    tmp_path: Path, rsssf_shootouts: list[RSSSFShootout]
 ) -> None:
     """`failed_refs` are serialised in discrepancies.json alongside
     `skipped_refs` and `no_kicks_refs` so the slice operator can

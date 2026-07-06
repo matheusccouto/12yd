@@ -10,22 +10,49 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from penalty_pred.match_ref import MatchRef, parse_page_url
-from penalty_pred.shootouts import extract_shootout_match_fixtures
+from penalty_pred.shootouts import ShootoutKick, extract_shootout_match_fixtures
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SLIM_FIXTURE = REPO_ROOT / "docs" / "samples" / "league_wc_2022_slim.json"
 
 
+def _stub_kick(match_id: int) -> ShootoutKick:
+    """A minimal ShootoutKick placeholder — the diagnostics helpers don't inspect
+    the kick fields, only the FetchResult's outer shape, so a 1-kick stub
+    suffices."""
+    return ShootoutKick(
+        match_id=match_id,
+        match_date="2022-12-18T15:00:00+00:00",
+        tournament_id=77,
+        tournament_name="World Cup",
+        round="Final",
+        kick_number=1,
+        kicker_id=match_id,
+        kicker_name=f"Stub {match_id}",
+        team_id=match_id,
+        is_home=True,
+        x=0.5,
+        side="L",
+        is_on_target=True,
+        outcome="Goal",
+        pen_score_before=[0, 0],
+        pen_score_after=[0, 0],
+        match_score_home=0,
+        match_score_away=0,
+    )
+
+
 @pytest.fixture(scope="module")
-def slim_season() -> list[dict[str, object]]:
+def slim_season() -> list[dict[str, Any]]:
     if not SLIM_FIXTURE.exists():
         pytest.skip(f"Slim fixture not present at {SLIM_FIXTURE}")
     data = json.loads(SLIM_FIXTURE.read_text())
-    return list(data["pageProps"]["fixtures"]["allMatches"])  # type: ignore[index]
+    return list(data["pageProps"]["fixtures"]["allMatches"])
 
 
 # --- parse_page_url ---------------------------------------------------------
@@ -68,14 +95,14 @@ def test_parse_page_url_no_anchor_in_path_raises() -> None:
 # --- extract_shootout_match_fixtures ----------------------------------------
 
 
-def test_filter_returns_only_penalties_short(slim_season: list[dict[str, object]]) -> None:
+def test_filter_returns_only_penalties_short(slim_season: list[dict[str, Any]]) -> None:
     refs = extract_shootout_match_fixtures(slim_season)
     assert len(refs) == 3
     for ref in refs:
         assert isinstance(ref, MatchRef)
 
 
-def test_filter_preserves_fixture_order(slim_season: list[dict[str, object]]) -> None:
+def test_filter_preserves_fixture_order(slim_season: list[dict[str, Any]]) -> None:
     refs = extract_shootout_match_fixtures(slim_season)
     ids = [r.match_id for r in refs]
     # The 3 shootouts in our slim fixture are at indices 0, 1, 2 (3 shootouts
@@ -84,7 +111,7 @@ def test_filter_preserves_fixture_order(slim_season: list[dict[str, object]]) ->
     assert ids == [3370555, 3370556, 3370565]
 
 
-def test_filter_populates_seo_h2h_from_pageurl(slim_season: list[dict[str, object]]) -> None:
+def test_filter_populates_seo_h2h_from_pageurl(slim_season: list[dict[str, Any]]) -> None:
     refs = extract_shootout_match_fixtures(slim_season)
     seo_h2h = [(r.seo, r.h2h) for r in refs]
     assert seo_h2h[0] == ("japan-vs-croatia", "2cq9vk")
@@ -92,12 +119,12 @@ def test_filter_populates_seo_h2h_from_pageurl(slim_season: list[dict[str, objec
     assert seo_h2h[2] == ("brazil-vs-croatia", "2swyz6")
 
 
-def test_filter_skips_non_shootout_fixtures(slim_season: list[dict[str, object]]) -> None:
+def test_filter_skips_non_shootout_fixtures(slim_season: list[dict[str, Any]]) -> None:
     """The slim fixture has 2 non-shootout entries appended for the filter test."""
     # Sanity: 2 non-shootouts in the input.
     non_shootouts = [
         m for m in slim_season if m["status"]["reason"]["shortKey"] != "penalties_short"
-    ]  # type: ignore[index]
+    ]
     assert len(non_shootouts) == 2
     # The filter drops them all.
     assert len(extract_shootout_match_fixtures(slim_season)) == 3
@@ -290,7 +317,7 @@ def test_marks_match_as_no_kicks_when_shotmap_empty(
     from penalty_pred.match_ref import MatchRef
     from penalty_pred.shootouts import fetch_all_shootout_kicks_with_skips
 
-    data = copy.deepcopy(sample_2022_final)
+    data: dict[str, Any] = copy.deepcopy(sample_2022_final)
     shots = data["pageProps"]["content"]["shotmap"]["shots"]
     data["pageProps"]["content"]["shotmap"]["shots"] = [
         s for s in shots if s.get("period") != "PenaltyShootout"
@@ -342,7 +369,7 @@ def test_extractor_exception_recorded_as_failure_mode(
 
     # Drop one event from the match — that makes the shotmap/events
     # counts disagree and `extract_shootout_kicks` raises ValueError.
-    data = copy.deepcopy(sample_2022_final)
+    data: dict[str, Any] = copy.deepcopy(sample_2022_final)
     events = data["pageProps"]["content"]["matchFacts"]["events"]["penaltyShootoutEvents"]
     data["pageProps"]["content"]["matchFacts"]["events"]["penaltyShootoutEvents"] = events[:-1]
 
@@ -407,8 +434,8 @@ def test_orchestrator_continues_after_failed_match(
     )
 
     # Good data for the good ref, broken data for the bad ref.
-    good_data = copy.deepcopy(sample_2022_final)
-    bad_data = copy.deepcopy(sample_2022_final)
+    good_data: dict[str, Any] = copy.deepcopy(sample_2022_final)
+    bad_data: dict[str, Any] = copy.deepcopy(sample_2022_final)
     bad_data["pageProps"]["general"]["matchId"] = "3370573"
     events = bad_data["pageProps"]["content"]["matchFacts"]["events"]["penaltyShootoutEvents"]
     bad_data["pageProps"]["content"]["matchFacts"]["events"]["penaltyShootoutEvents"] = events[:-1]
@@ -474,7 +501,12 @@ def test_write_diagnostics_writes_one_row_per_skip(tmp_path: Path) -> None:
             ref=failed_ref, kicks=[], skipped=False, no_kicks=False, failure_mode="ValueError: bad"
         ),
         # Successful: 8 kicks (placeholder list, the helper does not inspect them).
-        FetchResult(ref=ok_ref, kicks=[{"match_id": 4}], skipped=False, no_kicks=False),
+        FetchResult(
+            ref=ok_ref,
+            kicks=[_stub_kick(4)],
+            skipped=False,
+            no_kicks=False,
+        ),
     ]
     path = tmp_path / "diag.jsonl"
     n = write_skipped_refs_diagnostics(results, path=path)
@@ -538,7 +570,7 @@ def test_aggregate_per_tournament_writes_one_row_per_pair(tmp_path: Path) -> Non
     results_1 = [
         FetchResult(
             ref=MatchRef(match_id=1, seo="a", h2h="aa"),
-            kicks=[{"match_id": 1}],
+            kicks=[_stub_kick(1)],
             skipped=False,
             no_kicks=False,
         ),
@@ -553,7 +585,7 @@ def test_aggregate_per_tournament_writes_one_row_per_pair(tmp_path: Path) -> Non
     results_2 = [
         FetchResult(
             ref=MatchRef(match_id=3, seo="c", h2h="cc"),
-            kicks=[{"match_id": 3}],
+            kicks=[_stub_kick(3)],
             skipped=False,
             no_kicks=False,
         ),
@@ -620,7 +652,7 @@ def test_aggregate_per_tournament_status_states(tmp_path: Path) -> None:
     def ok(pair: tuple[int, int], expected: int) -> FetchResult:
         return FetchResult(
             ref=MatchRef(match_id=expected, seo="s", h2h="h"),
-            kicks=[{"match_id": expected}],
+            kicks=[_stub_kick(expected)],
             skipped=False,
             no_kicks=False,
         )
@@ -669,13 +701,13 @@ def test_aggregate_per_tournament_respects_excluded_counts() -> None:
     results = [
         FetchResult(
             ref=MatchRef(match_id=1, seo="a", h2h="aa"),
-            kicks=[{"match_id": 1}],
+            kicks=[_stub_kick(1)],
             skipped=False,
             no_kicks=False,
         ),
         FetchResult(
             ref=MatchRef(match_id=2, seo="b", h2h="bb"),
-            kicks=[{"match_id": 2}],
+            kicks=[_stub_kick(2)],
             skipped=False,
             no_kicks=False,
         ),

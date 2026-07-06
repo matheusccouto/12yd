@@ -134,7 +134,7 @@ def test_training_row_is_frozen() -> None:
     """TrainingRow is a frozen dataclass; every field is immutable."""
     row = _make_row()
     with pytest.raises((AttributeError, Exception)):
-        row.label = "R"  # type: ignore[misc]
+        row.label = "R"  # ty: ignore[invalid-assignment]
 
 
 # ---------------------------------------------------------------------------

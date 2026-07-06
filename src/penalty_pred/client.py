@@ -14,11 +14,24 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import httpx
 
 from .config import HTTP_TIMEOUT_SECONDS, USER_AGENT
+
+
+class FotMobClientLike(Protocol):
+    """The minimum surface `load_upcoming_knockouts` (and other callers) need.
+
+    `FotMobClient` satisfies it natively. Tests pass a `FakeFotMobClient`
+    that returns a canned payload — no HTTP, no disk cache. The Protocol
+    keeps the caller's type hint accurate (a `get` method that takes a
+    path + params and returns the parsed JSON) without forcing the test
+    fake to inherit from the concrete dataclass.
+    """
+
+    def get(self, path: str, params: Mapping[str, str] | None = None) -> Any: ...
 
 
 @dataclass

@@ -413,6 +413,7 @@ def test_calibration_report_roundtrip() -> None:
     baseline = CalibrationMetrics(brier=0.652, ece=0.063, n_bins=10)
     random = CalibrationMetrics(brier=0.667, ece=0.063, n_bins=10)
     rep = CalibrationReport(model=model, baseline=baseline, random=random)
+    assert rep.baseline is not None
     payload = {
         "model": asdict(rep.model),
         "baseline": asdict(rep.baseline),
@@ -531,6 +532,7 @@ def test_evaluate_predictions_returns_full_report() -> None:
     assert report.model.n_kicks == 4
     assert report.random_baseline.n_kicks == 4
     # random log_loss is ln(3) — uniform prior.
+    assert report.random_baseline.log_loss is not None
     assert math.isclose(report.random_baseline.log_loss, math.log(3.0))
     # kicker_most_frequent and actual_keeper have no log_loss / accuracy.
     assert report.kicker_most_frequent_baseline.log_loss is None

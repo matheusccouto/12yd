@@ -1072,6 +1072,7 @@ def test_training_table_a1_monotonicity_smoke() -> None:
             if not line:
                 continue
             row = json.loads(line)
+            assert isinstance(row, dict)
             by_kicker.setdefault(int(row["kicker_id"]), []).append(row)
 
     n_checked = 0
@@ -1079,9 +1080,9 @@ def test_training_table_a1_monotonicity_smoke() -> None:
     for _kicker_id, rows in by_kicker.items():
         rows.sort(key=lambda r: (r["match_date"], r["match_id"], r["kick_number"]))
         for row in rows:
-            p5 = float(row["p_L_5"])
-            p10 = float(row["p_L_10"])
-            p20 = float(row["p_L_20"])
+            p5 = float(row["p_L_5"])  # ty: ignore[invalid-argument-type]
+            p10 = float(row["p_L_10"])  # ty: ignore[invalid-argument-type]
+            p20 = float(row["p_L_20"])  # ty: ignore[invalid-argument-type]
             # Skip degenerate (uniform-prior) cases — no signal.
             if p5 == p10 == p20 and p5 == 1 / 3:
                 continue

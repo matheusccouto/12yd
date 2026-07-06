@@ -56,7 +56,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from .client import FotMobClient
+from .client import FotMobClientLike
 from .player_history import PlayerPenalty
 from .predict import PredictionRow
 
@@ -165,7 +165,7 @@ def _parse_kickoff_utc(value: str) -> datetime | None:
 
 
 def load_upcoming_knockouts(
-    client: FotMobClient,
+    client: FotMobClientLike,
     *,
     now: datetime | None = None,
     league_id: int = 77,

@@ -54,7 +54,7 @@ SAMPLE_MATCH_PATH = (
 
 
 @pytest.fixture(scope="module")
-def sample_wc_2026_league() -> Mapping[str, object]:
+def sample_wc_2026_league() -> Mapping[str, Any]:
     """The slim WC 2026 league fixture list (3 matches, including a placeholder)."""
     if not SAMPLE_LEAGUE_PATH.exists():
         pytest.skip(f"Sample not present at {SAMPLE_LEAGUE_PATH}")
@@ -62,7 +62,7 @@ def sample_wc_2026_league() -> Mapping[str, object]:
 
 
 @pytest.fixture(scope="module")
-def sample_wc_2026_match() -> Mapping[str, object]:
+def sample_wc_2026_match() -> Mapping[str, Any]:
     """The trimmed WC 2026 Mexico vs South Africa match JSON (lineup only)."""
     if not SAMPLE_MATCH_PATH.exists():
         pytest.skip(f"Sample not present at {SAMPLE_MATCH_PATH}")
@@ -72,8 +72,8 @@ def sample_wc_2026_match() -> Mapping[str, object]:
 def _stub_client(
     monkeypatch: pytest.MonkeyPatch,
     *,
-    league_fixtures: Mapping[str, object],
-    matches: list[Mapping[str, object]],
+    league_fixtures: Mapping[str, Any],
+    matches: list[Mapping[str, Any]],
 ) -> tuple[Path, list[str]]:
     """Patch the FotMobClient to return canned data per URL."""
     cache_dir = Path("/tmp/opencode/roster_cache")
@@ -121,7 +121,7 @@ def test_wc_2026_league_constant() -> None:
 
 
 def test_iter_roster_match_refs_yields_one_per_match(
-    sample_wc_2026_league: Mapping[str, object],
+    sample_wc_2026_league: Mapping[str, Any],
 ) -> None:
     """The slim fixture has 3 matches — 2 real group-stage + 1 knockout placeholder."""
     fixtures = sample_wc_2026_league["pageProps"]["fixtures"]["allMatches"]
@@ -139,7 +139,7 @@ def test_iter_roster_match_refs_yields_one_per_match(
 
 
 def test_iter_roster_match_refs_skips_placeholder_match(
-    sample_wc_2026_league: Mapping[str, object],
+    sample_wc_2026_league: Mapping[str, Any],
 ) -> None:
     """The 3rd match in the slim fixture is a knockout placeholder match;
     it is still included in the refs (it carries a real (seo, h2h)),
@@ -195,7 +195,7 @@ def test_iter_roster_match_refs_skips_malformed_page_url() -> None:
 
 
 def test_extract_lineup_players_mexico_vs_south_africa(
-    sample_wc_2026_match: Mapping[str, object],
+    sample_wc_2026_match: Mapping[str, Any],
 ) -> None:
     """The Mexico vs South Africa match has 11 starters + 15 subs per team = 26 each."""
     lineup = sample_wc_2026_match["pageProps"]["content"]["lineup"]
@@ -335,8 +335,8 @@ def test_write_and_read_jsonl_roundtrip(tmp_path: Path) -> None:
 
 def test_fetch_wc_2026_roster_dedupes_across_matches(
     monkeypatch: pytest.MonkeyPatch,
-    sample_wc_2026_league: Mapping[str, object],
-    sample_wc_2026_match: Mapping[str, object],
+    sample_wc_2026_league: Mapping[str, Any],
+    sample_wc_2026_match: Mapping[str, Any],
 ) -> None:
     """A player who appears in two matches is yielded once.
 
@@ -383,8 +383,8 @@ def test_fetch_wc_2026_roster_dedupes_across_matches(
 
 def test_fetch_wc_2026_roster_skips_stale_h2h(
     monkeypatch: pytest.MonkeyPatch,
-    sample_wc_2026_league: Mapping[str, object],
-    sample_wc_2026_match: Mapping[str, object],
+    sample_wc_2026_league: Mapping[str, Any],
+    sample_wc_2026_match: Mapping[str, Any],
 ) -> None:
     """If the per-match response's matchId differs from the ref's matchId
     (stale (seo, h2h) hash), the match is skipped silently.

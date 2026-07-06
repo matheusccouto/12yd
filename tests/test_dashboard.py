@@ -36,7 +36,7 @@ from penalty_pred.predict import PredictionRow
 
 
 class FakeFotMobClient:
-    """A minimal `FotMobClient` substitute that returns a canned payload.
+    """A minimal `FotMobClientLike` substitute that returns a canned payload.
 
     The dashboard's `load_upcoming_knockouts` calls `client.get(path, params)`,
     so the fake just needs to support that one method. The canned
@@ -45,9 +45,9 @@ class FakeFotMobClient:
 
     def __init__(self, payload: Mapping[str, Any]) -> None:
         self.payload = payload
-        self.calls: list[tuple[str, dict[str, str] | None]] = []
+        self.calls: list[tuple[str, Mapping[str, str] | None]] = []
 
-    def get(self, path: str, params: dict[str, str] | None = None) -> Any:
+    def get(self, path: str, params: Mapping[str, str] | None = None) -> Any:
         self.calls.append((path, params))
         return self.payload
 
@@ -435,6 +435,7 @@ def test_recommended_dive_docstring_pins_kicker_pov() -> None:
     L/C/R labels to the Goalkeeper's PoV (the v3 dashboard's
     "Recommended Dive" column invited exactly that re-reading).
     """
+    assert recommended_dive.__doc__ is not None
     assert "Kicker-PoV" in recommended_dive.__doc__
 
 
