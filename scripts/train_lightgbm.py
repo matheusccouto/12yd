@@ -44,6 +44,7 @@ from penalty_pred.model import (
     LOGREG_DEFAULTS,
     NUMERIC_FEATURES,
     RANDOM_SEED,
+    PredictProba,
     build_feature_matrix,
     fit_lightgbm,
     fit_logistic_regression,
@@ -58,7 +59,7 @@ def _train_logreg_on_fold(
     *,
     C: float,
     class_weight: str,
-) -> object:
+) -> PredictProba:
     """Train the logreg baseline on the same training fold as the
     LightGBM, so the report's `baseline` section is a fair comparison.
 
@@ -231,19 +232,23 @@ def main() -> int:
     art.write_metrics(report, path=args.metrics_output)
     cal = report.calibration
     assert cal is not None  # evaluate_predictions always sets it for non-empty holdouts
+    baseline_metrics = report.baseline
+    cal_baseline = cal.baseline
+    assert baseline_metrics is not None  # train_lightgbm always fits a baseline on the same fold
+    assert cal_baseline is not None  # the calibration report mirrors the optional baseline
     print(
         f"Wrote {args.metrics_output} (held-out metrics).\n"
         f"  model (lightgbm): log_loss={report.model.log_loss:.3f} "
         f"acc={report.model.accuracy:.3f} save_rate={report.model.save_rate:.3f}\n"
-        f"  baseline (logreg): log_loss={report.baseline.log_loss:.3f} "
-        f"acc={report.baseline.accuracy:.3f} save_rate={report.baseline.save_rate:.3f}\n"
+        f"  baseline (logreg): log_loss={baseline_metrics.log_loss:.3f} "
+        f"acc={baseline_metrics.accuracy:.3f} save_rate={baseline_metrics.save_rate:.3f}\n"
         f"  random:           log_loss={report.random_baseline.log_loss:.3f} "
         f"acc={report.random_baseline.accuracy:.3f} "
         f"save_rate={report.random_baseline.save_rate:.3f}\n"
         f"  kmf:              save_rate={report.kicker_most_frequent_baseline.save_rate}\n"
         f"  keeper:           save_rate={report.actual_keeper_baseline.save_rate}\n"
         f"  calibration:      model  brier={cal.model.brier:.3f} ece={cal.model.ece:.3f}\n"
-        f"                    base   brier={cal.baseline.brier:.3f} ece={cal.baseline.ece:.3f}\n"
+        f"                    base   brier={cal_baseline.brier:.3f} ece={cal_baseline.ece:.3f}\n"
         f"                    rndm   brier={cal.random.brier:.3f} ece={cal.random.ece:.3f}"
     )
 
