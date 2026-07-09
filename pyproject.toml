@@ -16,6 +16,26 @@ dependencies = [
     "streamlit>=1.30",
 ]
 
+[tool.poetry]
+name = "penalty-pred"
+version = "0.1.0"
+description = "Predict penalty shootout kick side from a kicker's history (FotMob data, LightGBM classifier)."
+authors = ["matheusccouto"]
+readme = "README.md"
+packages = [{include = "penalty_pred", from = "src"}]
+
+[tool.poetry.dependencies]
+python = ">=3.12"
+httpx = ">=0.27"
+huggingface_hub = ">=0.20"
+numpy = ">=2.0"
+pandas = ">=2.0"
+packaging = ">=24.0"
+plotly = ">=6.0"
+scikit-learn = ">=1.5"
+lightgbm = ">=4.5"
+streamlit = ">=1.30"
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
