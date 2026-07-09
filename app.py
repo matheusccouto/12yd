@@ -215,11 +215,11 @@ def render_card(kicker: KickerPrediction) -> None:
         st.markdown(f"**{kicker.player_name}** · {kicker.total_penalties} pen")
         cols = st.columns(3)
         with cols[0]:
-            st.metric("Left", f"{kicker.p_L * 100:.0f}%", delta="best" if most_likely == "L" else None, delta_color="green", border=True)
+            st.metric("Left", f"{kicker.p_L * 100:.0f}%", delta="most likely" if most_likely == "L" else None, delta_color="green", border=True, height=135, delta_arrow="off")
         with cols[1]:
-            st.metric("Center", f"{kicker.p_C * 100:.0f}%", delta="best" if most_likely == "C" else None, delta_color="green", border=True)
+            st.metric("Center", f"{kicker.p_C * 100:.0f}%", delta="most likely" if most_likely == "C" else None, delta_color="green", border=True, height=135, delta_arrow="off")
         with cols[2]:
-            st.metric("Right", f"{kicker.p_R * 100:.0f}%", delta="best" if most_likely == "R" else None, delta_color="green", border=True)
+            st.metric("Right", f"{kicker.p_R * 100:.0f}%", delta="most likely" if most_likely == "R" else None, delta_color="green", border=True, height=135, delta_arrow="off")
 
 
 def render_team_block(
