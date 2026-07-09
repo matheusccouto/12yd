@@ -1,4 +1,4 @@
-"""Tests for the FotMob HTTP client (cache + ETag + gzip)."""
+"""Tests for the FotMob HTTP client (cache + ETag + gzip + buildId-strip)."""
 
 from __future__ import annotations
 
@@ -37,8 +37,6 @@ class _StubResponse:
 def _stub_httpx_client(
     monkeypatch, response: _StubResponse, captures: list[str] | None = None
 ) -> None:
-    """Patch httpx.Client to return a fixed response and skip the network."""
-
     class _StubHTTP:
         def __init__(self, *_args: Any, **_kwargs: Any) -> None:
             pass
@@ -49,6 +47,9 @@ def _stub_httpx_client(
         def __exit__(self, *_args: Any) -> None:
             return None
 
+        def close(self) -> None:
+            pass
+
         def get(self, url: str, headers: dict[str, str] | None = None) -> _StubResponse:
             if captures is not None:
                 captures.append(url)
@@ -58,7 +59,6 @@ def _stub_httpx_client(
 
 
 def test_discover_build_id_caches_per_client(tmp_path: Path, monkeypatch) -> None:
-    """The BuildId is discovered once per client and reused on subsequent calls."""
     discover_calls: list[str] = []
 
     def fake_discover(c: FotMobClient) -> str:
@@ -77,7 +77,6 @@ def test_discover_build_id_caches_per_client(tmp_path: Path, monkeypatch) -> Non
 
 
 def test_distinct_clients_discover_independently(tmp_path: Path, monkeypatch) -> None:
-    """Two FotMobClient instances each discover their own BuildId."""
     state = {"count": 0}
 
     def fake_discover(c: FotMobClient) -> str:
@@ -98,24 +97,19 @@ def test_distinct_clients_discover_independently(tmp_path: Path, monkeypatch) ->
 
 
 def test_gzipped_disk_cache_is_deterministic(tmp_path: Path) -> None:
-    """Writing the same payload twice produces the same on-disk size."""
     payload = b'{"hello": "world"}'
     gz_path = tmp_path / "x.json.gz"
     gz_path.write_bytes(gzip.compress(payload))
     first_size = gz_path.stat().st_size
     gz_path.write_bytes(gzip.compress(payload))
     assert gz_path.stat().st_size == first_size
-    # Roundtrip is lossless.
     assert gzip.decompress(gz_path.read_bytes()) == payload
 
 
 def test_304_response_serves_from_disk_cache(tmp_path: Path, monkeypatch) -> None:
-    """A 304 returns the cached body without refetching."""
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
-    # Pin the build id by using a fake discover.
     monkeypatch.setattr(client_module, "_discover_build_id", lambda c: "fake-build-id")
-    # Pre-seed a cache file so the 304 handler has something to load.
     body = b'{"x": 1}'
     url = "https://www.fotmob.com/_next/data/fake-build-id/matches/x/y.json"
     cache_key = client_module._cache_key(url)
@@ -132,10 +126,6 @@ def test_304_response_serves_from_disk_cache(tmp_path: Path, monkeypatch) -> Non
 
 
 def test_get_handles_url_with_query_string_and_trailing_slash(tmp_path: Path, monkeypatch) -> None:
-    """`client.get` accepts paths whose query string or trailing slash
-    would create filesystem-unsafe characters in the cache key. The
-    public interface succeeds without raising; the cache file is
-    created under the (filesystem-safe) cache key."""
     monkeypatch.setattr(client_module, "_discover_build_id", lambda c: "fake-build-id")
     payload = b'{"ok": true}'
     _stub_httpx_client(
@@ -145,8 +135,6 @@ def test_get_handles_url_with_query_string_and_trailing_slash(tmp_path: Path, mo
     client = FotMobClient(cache_dir=tmp_path)
     result = client.get("leagues/77/overview/world-cup?tz=UTC&date=20240101")
     assert result == {"ok": True}
-    # The cache file is created under the sanitized key (no `/` or `?`
-    # in the file name). One .json.gz body + one .etag sidecar.
     cache_files = list(tmp_path.glob("*.json.gz"))
     assert len(cache_files) == 1
     assert "/" not in cache_files[0].name
@@ -154,9 +142,6 @@ def test_get_handles_url_with_query_string_and_trailing_slash(tmp_path: Path, mo
 
 
 def test_get_decompresses_gzipped_response_body(tmp_path: Path, monkeypatch) -> None:
-    """`client.get` decompresses a gzipped body (the `content-encoding`
-    header is set). The parsed JSON is the decompressed payload, not
-    the raw gzip bytes."""
     monkeypatch.setattr(client_module, "_discover_build_id", lambda c: "fake-build-id")
     payload = b'{"decompressed": true}'
     gz = gzip.compress(payload)
@@ -171,17 +156,11 @@ def test_get_decompresses_gzipped_response_body(tmp_path: Path, monkeypatch) -> 
     client = FotMobClient(cache_dir=tmp_path)
     result = client.get("matches/x/y")
     assert result == {"decompressed": True}
-    # The on-disk cache holds the gzipped payload (so the second
-    # request is a 304, not a re-fetch).
     cache_file = next(tmp_path.glob("*.json.gz"))
     assert gzip.decompress(cache_file.read_bytes()) == payload
 
 
 def test_get_handles_uncompressed_body_with_gzip_header(tmp_path: Path, monkeypatch) -> None:
-    """Some FotMob responses set `content-encoding: gzip` but ship
-    already-uncompressed bytes. `client.get` parses the JSON without
-    double-decompressing (it detects gzip by magic bytes, not by
-    header)."""
     monkeypatch.setattr(client_module, "_discover_build_id", lambda c: "fake-build-id")
     payload = b'{"uncompressed": true}'
     _stub_httpx_client(
@@ -195,7 +174,80 @@ def test_get_handles_uncompressed_body_with_gzip_header(tmp_path: Path, monkeypa
     client = FotMobClient(cache_dir=tmp_path)
     result = client.get("matches/x/y")
     assert result == {"uncompressed": True}
-    # The cache stores the bytes verbatim (the on-disk round-trip is
-    # the same as the round-trip via gzip.compress + gzip.decompress).
     cache_file = next(tmp_path.glob("*.json.gz"))
     assert json.loads(gzip.decompress(cache_file.read_bytes())) == {"uncompressed": True}
+
+
+# ---------------------------------------------------------------------------
+# buildId-strip tests (PRD-v5 linchpin fix)
+# ---------------------------------------------------------------------------
+
+
+def test_cache_key_strips_build_id() -> None:
+    url_a = "https://www.fotmob.com/_next/data/abc123/matches/x/y.json"
+    url_b = "https://www.fotmob.com/_next/data/def456/matches/x/y.json"
+    assert client_module._cache_key(url_a) == client_module._cache_key(url_b)
+
+
+def test_cache_key_strips_build_id_for_league_paths() -> None:
+    url_a = "https://www.fotmob.com/_next/data/build-20250101/leagues/77/overview/world-cup.json"
+    url_b = "https://www.fotmob.com/_next/data/build-20250709/leagues/77/overview/world-cup.json"
+    assert client_module._cache_key(url_a) == client_module._cache_key(url_b)
+
+
+def test_cache_key_strips_build_id_for_player_paths() -> None:
+    url_a = "https://www.fotmob.com/_next/data/X1Y2Z3/players/12345.json"
+    url_b = "https://www.fotmob.com/_next/data/A9B8C7/players/12345.json"
+    assert client_module._cache_key(url_a) == client_module._cache_key(url_b)
+
+
+def test_cache_key_different_resources_produce_different_keys() -> None:
+    url_a = "https://www.fotmob.com/_next/data/abc/matches/1.json"
+    url_b = "https://www.fotmob.com/_next/data/abc/matches/2.json"
+    assert client_module._cache_key(url_a) != client_module._cache_key(url_b)
+
+
+def test_cache_key_non_next_data_urls_unchanged() -> None:
+    url = "https://www.fotmob.com/players/12345"
+    assert client_module._cache_key(url) == client_module._cache_key(url)
+
+
+# ---------------------------------------------------------------------------
+# shared httpx.Client tests (PRD-v5)
+# ---------------------------------------------------------------------------
+
+
+def test_shared_http_client_reused_across_calls(tmp_path: Path, monkeypatch) -> None:
+    """Two `client.get` calls use the same httpx.Client instance."""
+    monkeypatch.setattr(client_module, "_discover_build_id", lambda c: "fake-build-id")
+    instance_count = [0]
+
+    class _StubHTTP:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            instance_count[0] += 1
+
+        def __enter__(self) -> _StubHTTP:
+            return self
+
+        def __exit__(self, *_args: Any) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+        def get(self, url: str, headers: dict[str, str] | None = None) -> _StubResponse:
+            return _StubResponse(status_code=200, body=b"{}", headers={"etag": "abc"})
+
+    monkeypatch.setattr(client_module.httpx, "Client", _StubHTTP)
+    c = FotMobClient(cache_dir=tmp_path)
+    c.get("matches/x/y")
+    c.get("matches/a/b")
+    assert instance_count[0] == 1
+
+
+def test_close_releases_http_client(tmp_path: Path) -> None:
+    c = FotMobClient(cache_dir=tmp_path)
+    http = c._ensure_http()
+    assert c._http is not None
+    c.close()
+    assert c._http is None

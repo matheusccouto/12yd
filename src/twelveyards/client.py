@@ -1,8 +1,9 @@
 """HTTP client for FotMob with gzip, ETag revalidation, and persistent disk cache.
 
-PRD: BuildId discovery is one-time per client; cached for the lifetime of the
-FotMobClient instance. ETag revalidation means 304 responses return zero bytes
-on cache hit. Persistent disk cache bypasses the 1h CloudFront TTL
+PRD-v5: BuildId-stripped cache keys so cached responses survive FotMob
+deployment rotations. A shared httpx.Client (lazy-init, per-instance) reuses
+one connection pool across all calls instead of creating a new TLS session
+per request. Persistent disk cache bypasses the 1h CloudFront TTL
 (docs/fotmob.md).
 """
 
@@ -22,15 +23,6 @@ from .config import HTTP_TIMEOUT_SECONDS, USER_AGENT
 
 
 class FotMobClientLike(Protocol):
-    """The minimum surface `load_upcoming_knockouts` (and other callers) need.
-
-    `FotMobClient` satisfies it natively. Tests pass a `FakeFotMobClient`
-    that returns a canned payload — no HTTP, no disk cache. The Protocol
-    keeps the caller's type hint accurate (a `get` method that takes a
-    path + params and returns the parsed JSON) without forcing the test
-    fake to inherit from the concrete dataclass.
-    """
-
     def get(self, path: str, params: Mapping[str, str] | None = None) -> Any: ...
 
 
@@ -38,18 +30,18 @@ class FotMobClientLike(Protocol):
 class FotMobClient:
     cache_dir: Path
     timeout: float = HTTP_TIMEOUT_SECONDS
-    # Discovered BuildId (instance-level). Populated lazily on first use.
     build_id: str | None = field(default=None, init=False)
+    _http: httpx.Client | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-    def get(self, path: str, params: Mapping[str, str] | None = None) -> Any:
-        """GET a `__next/data` path under the cached BuildId.
+    def _ensure_http(self) -> httpx.Client:
+        if self._http is None:
+            self._http = httpx.Client(timeout=self.timeout, follow_redirects=True)
+        return self._http
 
-        `path` is the post-buildId segment, e.g. `matches/argentina-vs-france/1hox8a`.
-        Returns the parsed JSON body. 304 responses are served from disk cache.
-        """
+    def get(self, path: str, params: Mapping[str, str] | None = None) -> Any:
         if self.build_id is None:
             self.build_id = _discover_build_id(self)
         url = f"https://www.fotmob.com/_next/data/{self.build_id}/{path}.json"
@@ -57,12 +49,16 @@ class FotMobClient:
             url = f"{url}?{'&'.join(f'{k}={v}' for k, v in params.items())}"
         return _cached_get(self, url)
 
+    def close(self) -> None:
+        if self._http is not None:
+            self._http.close()
+            self._http = None
+
 
 def _discover_build_id(client: FotMobClient) -> str:
-    """Fetch https://www.fotmob.com/ once and extract buildId from __NEXT_DATA__."""
     headers = {"User-Agent": USER_AGENT, "Accept-Encoding": "gzip"}
-    with httpx.Client(timeout=client.timeout, follow_redirects=True) as http:
-        response = http.get("https://www.fotmob.com/", headers=headers)
+    http = client._ensure_http()
+    response = http.get("https://www.fotmob.com/", headers=headers)
     response.raise_for_status()
     match = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.+?)</script>', response.text, re.DOTALL)
     if match is None:
@@ -72,26 +68,28 @@ def _discover_build_id(client: FotMobClient) -> str:
 
 
 def _cache_key(url: str) -> Path:
-    """Deterministic cache file path for a URL (filesystem-safe)."""
-    sanitized = re.sub(r"[^A-Za-z0-9._-]", "_", url)
+    """Deterministic cache file path for a URL, with buildId stripped.
+
+    FotMob's /_next/data/<buildId>/ segment rotates every few hours.
+    Stripping the buildId means the same logical resource has the same
+    cache key across deployments, so ETag revalidation survives rotations.
+    """
+    stripped = re.sub(r"/_next/data/[^/]+/", "/_next/data/_/", url)
+    sanitized = re.sub(r"[^A-Za-z0-9._-]", "_", stripped)
     if len(sanitized) > 200:
         sanitized = sanitized[:200]
     return Path(sanitized + ".json.gz")
 
 
 def _cached_get(client: FotMobClient, url: str) -> Any:
-    """HTTP GET with ETag revalidation and gzipped disk cache."""
     cache_file = client.cache_dir / _cache_key(url)
     etag_file = cache_file.with_suffix(".etag")
     headers: dict[str, str] = {"User-Agent": USER_AGENT, "Accept-Encoding": "gzip"}
     if etag_file.exists():
         headers["If-None-Match"] = etag_file.read_text(encoding="utf-8").strip()
 
-    # Decode the body ourselves: httpx auto-decompresses by default, but the
-    # `content-encoding` header is sometimes present on already-uncompressed
-    # bodies, so we need to detect gzip by magic bytes to avoid double-decompress.
-    with httpx.Client(timeout=client.timeout, follow_redirects=True) as http:
-        response = http.get(url, headers=headers)
+    http = client._ensure_http()
+    response = http.get(url, headers=headers)
     if response.status_code == 304:
         return _load_cached(cache_file)
 
@@ -105,7 +103,6 @@ def _cached_get(client: FotMobClient, url: str) -> Any:
 
 def _decompress(response: httpx.Response) -> bytes:
     raw = bytes(response.content)
-    # Sniff gzip magic bytes: 0x1f 0x8b.
     if len(raw) >= 2 and raw[0] == 0x1F and raw[1] == 0x8B:
         return gzip.decompress(raw)
     return raw
