@@ -32,7 +32,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-import altair as alt
 import pandas as pd
 import streamlit as st
 from huggingface_hub import hf_hub_download
@@ -207,26 +206,16 @@ def render_card(kicker: KickerPrediction) -> None:
 
     The card is a `st.container(border=True)` with:
     - Line 1: Player name + penalty count (inline)
-    - Line 2: An Altair bar chart with Left/Center/Right bars, y-axis fixed 0–100.
+    - Line 2: A `st.bar_chart` with Left/Center/Right bars.
+      `sort=False` keeps the data order (Left, Center, Right).
     """
     with st.container(border=True):
         st.markdown(f"**{kicker.player_name}** · {kicker.total_penalties} pen")
         df = pd.DataFrame(
-            {
-                "side": ["Left", "Center", "Right"],
-                "probability": [kicker.p_L * 100, kicker.p_C * 100, kicker.p_R * 100],
-            }
+            {"probability": [kicker.p_L * 100, kicker.p_C * 100, kicker.p_R * 100]},
+            index=["Left", "Center", "Right"],
         )
-        chart = (
-            alt.Chart(df)
-            .mark_bar()
-            .encode(
-                x=alt.X("side:N", title=None, axis=alt.Axis(labelFontSize=12)),
-                y=alt.Y("probability:Q", title=None, scale=alt.Scale(domain=[0, 100]), axis=alt.Axis(labelFontSize=11)),
-            )
-            .properties(height=180)
-        )
-        st.altair_chart(chart, use_container_width=True)
+        st.bar_chart(df, sort=False, height=180)
 
 
 def render_team_block(
