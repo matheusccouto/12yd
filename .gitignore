@@ -234,4 +234,3 @@ __marimo__/
 .streamlit/secrets.toml
 .playwright-cli/
 .playwright/
-.agents/

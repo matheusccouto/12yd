@@ -1,4 +1,4 @@
-"""Streamlit dashboard entry point — v6 blue colormap cards (Issue #48).
+"""Streamlit dashboard entry point — v7 metric cards with delta (Issue #48).
 
 A single-page Streamlit app on Streamlit Cloud that surfaces live
 shootout predictions. At load time, the app fetches the WC 2026
@@ -8,14 +8,14 @@ pick a match from a sidebar selectbox. For the selected match, the
 app loads `predictions.jsonl` and `player_history.jsonl` from
 Hugging Face, joins the two to compute the per-kicker career penalty
 count, filters to the match's two teams, and renders a **card per
-kicker**: name + career penalty count + three color-coded probability
-metric cards (white → dark blue continuous colormap).
+kicker**: name + career penalty count + three metric cards for L/C/R
+probabilities, with a green "best" delta on the most-likely side.
 
-The v6 design uses native Streamlit elements plus `st.html` for the
-colored metric cards. Each card is a bordered container with:
+The v7 design uses only native Streamlit elements. Each card is a
+bordered container with:
 - Line 1: Player name + penalty count (inline)
-- Line 2: Three metric cards with a continuous blue colormap
-  (0% = white, 100% = dark navy blue) for L/C/R probabilities
+- Line 2: Three `st.metric` cards for L/C/R probabilities.
+  The highest probability gets a green "best" delta indicator.
 
 The data + match-filter logic lives in `penalty_pred.dashboard` —
 this file is a thin Streamlit layer over the library, so the same
@@ -42,6 +42,7 @@ from penalty_pred.dashboard import (
     KickerPrediction,
     MatchContext,
     load_upcoming_knockouts,
+    most_likely_side,
     predictions_for_match,
 )
 from penalty_pred.player_history import PlayerPenalty
@@ -201,56 +202,24 @@ def _kicker_badge_color(team_name: str) -> _BadgeColor:
     return _TEAM_COLORS.get(team_name, _NEUTRAL_COLOR)
 
 
-def _color_for_probability(p: float) -> str:
-    """Return an rgb color based on probability - continuous blue scale (white→dark blue)."""
-    r = int(255 + (10 - 255) * p)
-    g = int(255 + (30 - 255) * p)
-    b = int(255 + (100 - 255) * p)
-    return f"rgb({r}, {g}, {b})"
-
-
-def _bg_for_probability(p: float) -> str:
-    """Return a very light tinted background color."""
-    r = int(255 + (200 - 255) * p)
-    g = int(255 + (215 - 255) * p)
-    b = int(255 + (240 - 255) * p)
-    return f"rgb({r}, {g}, {b})"
-
-
-def _probability_card_html(label: str, p: float) -> str:
-    """Create a colored metric card using HTML."""
-    color = _color_for_probability(p)
-    bg = _bg_for_probability(p)
-    pct = f"{p * 100:.0f}%"
-    return (
-        f'<div style="border: 1px solid #e5e7eb; border-radius: 6px; '
-        f'padding: 12px; text-align: center; background: {bg};">'
-        f'<div style="font-size: 0.875rem; color: #6b7280; margin-bottom: 4px;">{label}</div>'
-        f'<div style="font-size: 1.5rem; font-weight: 700; color: {color};">{pct}</div>'
-        f"</div>"
-    )
-
-
 def render_card(kicker: KickerPrediction) -> None:
-    """Render one kicker card: name + penalties inline, three colored metric cards.
+    """Render one kicker card: name + penalties inline, three metric cards.
 
     The card is a `st.container(border=True)` with:
     - Line 1: Player name + penalty count (inline)
-    - Line 2: Three metric cards with a continuous blue colormap
-      (0% = white, 100% = dark navy blue) for L/C/R probabilities
-
-    The metric cards use `st.html` for custom styling (colored
-    backgrounds and text) while the rest uses native Streamlit elements.
+    - Line 2: Three metric cards for L/C/R probabilities.
+      The highest probability gets a green "best" delta.
     """
+    most_likely = most_likely_side(kicker.p_L, kicker.p_C, kicker.p_R)
     with st.container(border=True):
         st.markdown(f"**{kicker.player_name}** · {kicker.total_penalties} pen")
         cols = st.columns(3)
         with cols[0]:
-            st.html(_probability_card_html("Left", kicker.p_L))
+            st.metric("Left", f"{kicker.p_L * 100:.0f}%", delta="best" if most_likely == "L" else None, delta_color="green", border=True)
         with cols[1]:
-            st.html(_probability_card_html("Center", kicker.p_C))
+            st.metric("Center", f"{kicker.p_C * 100:.0f}%", delta="best" if most_likely == "C" else None, delta_color="green", border=True)
         with cols[2]:
-            st.html(_probability_card_html("Right", kicker.p_R))
+            st.metric("Right", f"{kicker.p_R * 100:.0f}%", delta="best" if most_likely == "R" else None, delta_color="green", border=True)
 
 
 def render_team_block(
