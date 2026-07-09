@@ -31,8 +31,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from penalty_pred.artifacts import Artifacts
-from penalty_pred.model import (
+from twelveyards.artifacts import Artifacts
+from twelveyards.model import (
     CATEGORICAL_FEATURES,
     FEATURE_COLUMNS,
     LIGHTGBM_DEFAULTS,

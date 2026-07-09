@@ -43,17 +43,17 @@ from typing import Any
 import numpy as np
 import pytest
 
-from penalty_pred.artifacts import Artifacts
-from penalty_pred.features import PRIOR_PROB
-from penalty_pred.player_history import PlayerMetadata
-from penalty_pred.predict import (
+from twelveyards.artifacts import Artifacts
+from twelveyards.features import PRIOR_PROB
+from twelveyards.player_history import PlayerMetadata
+from twelveyards.predict import (
     PredictionRow,
     build_prediction_features,
     count_kickers_with_history,
     predict_kicker,
     predict_roster,
 )
-from penalty_pred.rosters import RosterPlayer
+from twelveyards.rosters import RosterPlayer
 from tests._factories import (
     PREDICTION_ROW_FIELDS,
     make_history_row,
@@ -186,7 +186,7 @@ def test_build_prediction_features_returns_unified_training_row() -> None:
         metadata=_metadata(player_id=42),
         target_date=TARGET_DATE,
     )
-    from penalty_pred.model import FEATURE_COLUMNS
+    from twelveyards.model import FEATURE_COLUMNS
 
     # All 18 feature columns are accessible as fields.
     for col in FEATURE_COLUMNS:
@@ -210,7 +210,7 @@ def test_predict_kicker_propagates_tournament_kind_international() -> None:
     prediction slice hard-codes `tournament_id=77` (the FotMob WC
     league id), so the lookup returns `"international"`.
     """
-    from penalty_pred.predict import predict_kicker
+    from twelveyards.predict import predict_kicker
 
     stub = _StubModel(np.array([0.4, 0.2, 0.4]))
     pred = predict_kicker(
@@ -293,7 +293,7 @@ def test_predict_kicker_passes_correct_features_to_model() -> None:
     """The features the model receives are the canonical 18 columns
     in `FEATURE_COLUMNS` order (v3 dropped B3), with the A1 prior for
     a no-history kicker. Inspect the captured `X`."""
-    from penalty_pred.model import FEATURE_COLUMNS
+    from twelveyards.model import FEATURE_COLUMNS
 
     stub = _StubModel(np.array([1 / 3, 1 / 3, 1 / 3]))
     predict_kicker(
@@ -660,11 +660,11 @@ def test_live_deterministic_run() -> None:
     test fast; the orchestrator is pure (same inputs → same outputs)
     and the full pipeline is idempotent by the same argument.
     """
-    from penalty_pred.client import FotMobClient
-    from penalty_pred.config import DEFAULT_CACHE_DIR
-    from penalty_pred.features import fetcher_from_client, load_player_history
-    from penalty_pred.model import load_artifact
-    from penalty_pred.predict import load_roster, predict_roster
+    from twelveyards.client import FotMobClient
+    from twelveyards.config import DEFAULT_CACHE_DIR
+    from twelveyards.features import fetcher_from_client, load_player_history
+    from twelveyards.model import load_artifact
+    from twelveyards.predict import load_roster, predict_roster
 
     art = load_artifact(Artifacts().lightgbm_model)
     model = art["model"]

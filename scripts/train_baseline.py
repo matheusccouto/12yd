@@ -27,9 +27,9 @@ from pathlib import Path
 
 import numpy as np
 
-from penalty_pred.artifacts import Artifacts
-from penalty_pred.evaluate import evaluate_predictions
-from penalty_pred.model import (
+from twelveyards.artifacts import Artifacts
+from twelveyards.evaluate import evaluate_predictions
+from twelveyards.model import (
     CLASSES,
     FEATURE_COLUMNS,
     HOLDOUT_CUTOFF_DATE,

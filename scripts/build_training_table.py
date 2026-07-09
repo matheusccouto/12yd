@@ -20,9 +20,9 @@ import argparse
 import sys
 from pathlib import Path
 
-from penalty_pred.artifacts import Artifacts
-from penalty_pred.client import FotMobClient
-from penalty_pred.features import (
+from twelveyards.artifacts import Artifacts
+from twelveyards.client import FotMobClient
+from twelveyards.features import (
     build_training_table,
     fetcher_from_client,
     load_player_history,

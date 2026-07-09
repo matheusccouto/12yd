@@ -14,7 +14,7 @@ The v3 model loses to a uniform-random dive policy on the LOTO CV aggregate (0.3
 
 The `ShootoutKick` and `TrainingRow` types are unchanged in their existing fields. The only new field is `tournament_kind: Literal["international", "club"]` on `TrainingRow` (default `"international"` for the existing rows, derived from the league registry at extraction time). The `tournament_kind` is propagated to the `predictions.jsonl` artifact only as a per-kicker metadata field (not as a model input) so the dashboard can surface the kind on the per-kicker card in a future iteration. The 17 model features (A1 rolling side counts, A2 last_side, A3 preferred_foot, A4 career_penalty_count, B1 kick_number, B2 score+is_decisive, C1 position) carry over unchanged. No new client, no new feature, no new categorical level.
 
-The `LEAGUE_SEASONS_PREDICT_WINDOW` constant in `src/penalty_pred/tournaments.py` is extended with the 5–6 new club (league_id, season) pairs; the per-tournament tests in `tests/test_tournaments.py` add a parallel `CLUB_EXPECTED_SHOOTOUT_COUNTS` map (the per-(league, season) RSSSF count) and a per-pair `CLUB_EXCLUDED_EMPTY_SHOTMAP` map (mirroring the existing `EXCLUDED_EMPTY_SHOTMAP` for international tournaments, in case any club tournaments have empty FotMob shotmaps — the diagnostic file `data/skipped_refs_diagnostics.jsonl` is reused as-is). `RSSSF_TO_LEAGUE_NAME` adds the 5–6 new heading strings (Copa Libertadores, UEFA Champions League, etc.) to the existing 6-heading international map.
+The `LEAGUE_SEASONS_PREDICT_WINDOW` constant in `src/twelveyards/tournaments.py` is extended with the 5–6 new club (league_id, season) pairs; the per-tournament tests in `tests/test_tournaments.py` add a parallel `CLUB_EXPECTED_SHOOTOUT_COUNTS` map (the per-(league, season) RSSSF count) and a per-pair `CLUB_EXCLUDED_EMPTY_SHOTMAP` map (mirroring the existing `EXCLUDED_EMPTY_SHOTMAP` for international tournaments, in case any club tournaments have empty FotMob shotmaps — the diagnostic file `data/skipped_refs_diagnostics.jsonl` is reused as-is). `RSSSF_TO_LEAGUE_NAME` adds the 5–6 new heading strings (Copa Libertadores, UEFA Champions League, etc.) to the existing 6-heading international map.
 
 The new JSONL rows (`data/shootout_kicks.jsonl`) carry the same shape as the existing rows; the on-disk format is unchanged. The only consumer-visible change is the new `tournament_kind` field on the `TrainingRow` (and the corresponding column in the training table if a CSV export is added later — not in Phase 3).
 
@@ -26,7 +26,7 @@ The cross-tournament aggregate is the v3 headline (`docs/model-card-v3.md` § "C
 
 ## Per-tournament handling — what changes in the leagues registry
 
-The new club tournaments register in `src/penalty_pred/leagues.py::EXTENDED_LEAGUES` (the existing player-history-fetcher table; the shootout scraper iterates `LEAGUES`, not `EXTENDED_LEAGUES`). The new `League` records are:
+The new club tournaments register in `src/twelveyards/leagues.py::EXTENDED_LEAGUES` (the existing player-history-fetcher table; the shootout scraper iterates `LEAGUES`, not `EXTENDED_LEAGUES`). The new `League` records are:
 
 - `League(41, "copa-libertadores", "Copa Libertadores")`
 - `League(42, "champions-league", "Champions League")` (the player-history fetcher already has this; we promote it to the shootout scraper's `LEAGUES` list and add the slug)
@@ -54,9 +54,9 @@ The new club tournaments register in `src/penalty_pred/leagues.py::EXTENDED_LEAG
 - `docs/model-review.md` Topic 5 (the LOTO CV statistical-power analysis; the 179-row noise floor; the 28-row holdout's "model beats random" claim that the cross-tournament aggregate does not support)
 - `docs/model-card-v3.md` § "Cross-validation" (the existing 6-fold LOTO CV; the 0.374 aggregate save rate; the 0.036 aggregate SE)
 - `data/empty_shotmap_documentation.md` (Issue #49; the 6 documented FotMob data gaps; the rationale for not closing them in Phase 3)
-- `src/penalty_pred/tournaments.py::LEAGUE_SEASONS_PREDICT_WINDOW` (the existing 15-pair scope that Phase 3 extends)
-- `src/penalty_pred/leagues.py::LEAGUES` (the existing 6-tournament shootout list that Phase 3 extends; the existing 19-tournament `EXTENDED_LEAGUES` table the player-history fetcher already uses)
-- `src/penalty_pred/features.py::TrainingRow` (the unified training-row type; the only Phase 3 change is the new `tournament_kind` field)
-- `src/penalty_pred/shootouts.py::extract_shootout_kicks` (the existing extractor; runs unchanged on club Shootout Kicks)
+- `src/twelveyards/tournaments.py::LEAGUE_SEASONS_PREDICT_WINDOW` (the existing 15-pair scope that Phase 3 extends)
+- `src/twelveyards/leagues.py::LEAGUES` (the existing 6-tournament shootout list that Phase 3 extends; the existing 19-tournament `EXTENDED_LEAGUES` table the player-history fetcher already uses)
+- `src/twelveyards/features.py::TrainingRow` (the unified training-row type; the only Phase 3 change is the new `tournament_kind` field)
+- `src/twelveyards/shootouts.py::extract_shootout_kicks` (the existing extractor; runs unchanged on club Shootout Kicks)
 - `docs/adr/0001-hugging-face-for-persistence.md`, `docs/adr/0002-streamlit-cloud-for-hosting.md`, `docs/adr/0003-single-hf-repo-with-subpaths.md` (the existing ADRs; this one follows the same format with a longer rationale section because the source decision is the most consequential of the four)
 - Issue #50 (this ADR), Issue #51 (the implementation that follows the decision), Issue #49 (the empty-shotmap documentation that informs the 6-case gap), Issue #37 / #39 (the URL-rotation fix that closed the 18-shootout gap before Phase 3 starts)

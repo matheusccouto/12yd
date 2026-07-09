@@ -70,13 +70,13 @@ Three phases, ordered by dependency.
 ### Phase 2 — Streamlit dashboard
 
 34. As a viewer, I want a Streamlit app at `matheusccouto/12yd` (deployed to Streamlit Cloud) that lists upcoming 2026 World Cup knockout matches (any round) and shows per-kicker P(L), P(C), P(R) for a selected match, so I can pick a side to dive during a live shootout.
-35. As a viewer, I want the app to fetch the WC 2026 fixture list from FotMob at load time (via `huggingface_hub.hf_hub_download` for the model and `penalty_pred.client.FotMobClient` for the fixtures), so the schedule is always fresh within the cache window.
+35. As a viewer, I want the app to fetch the WC 2026 fixture list from FotMob at load time (via `huggingface_hub.hf_hub_download` for the model and `twelveyards.client.FotMobClient` for the fixtures), so the schedule is always fresh within the cache window.
 36. As a viewer, I want only matches where both teams are decided to appear in the selector, so the app doesn't show "Winner Group A vs Winner Group B" placeholders.
 37. As a viewer, I want the per-kicker predictions to be re-scored with the match's actual round (e.g. "Quarter-finals" for an R16 match, "Final" for the F), so I see round-specific predictions, not the round-agnostic ones from `predictions.jsonl`.
 38. As a viewer, I want the re-score to use the existing `predict.py` path extended with a `predict_roster_with_context(roster, history, model, context)` entry point, so the dashboard reuses the library instead of duplicating the predict logic.
 39. As a viewer, I want the per-kicker table to show name, team, kicking foot, P(L), P(C), P(R), and the recommended dive (`argmin` of the three), so I can read the recommendation at a glance.
 40. As a viewer, I want both teams' kickers on the same page (sorted by `total_penalties` descending), so a head-to-head comparison takes one screen.
-41. As a maintainer, I want a thin `app.py` at the repo root (Streamlit Cloud's default entry point) that imports the dashboard logic from `src/penalty_pred/dashboard.py`, so the dashboard's tests can run without launching Streamlit.
+41. As a maintainer, I want a thin `app.py` at the repo root (Streamlit Cloud's default entry point) that imports the dashboard logic from `src/twelveyards/dashboard.py`, so the dashboard's tests can run without launching Streamlit.
 42. As a maintainer, I want the dashboard's data loading and re-scoring logic in the library, with the UI as a thin layer, so the same code can be unit-tested (re-scoring, fixture filtering, TBD-hiding) and exercised end-to-end through Streamlit.
 
 ## Implementation Decisions
@@ -85,21 +85,21 @@ Three phases, ordered by dependency.
 
 **Module layout (one new module, six modifications):**
 
-- **New: `src/penalty_pred/fotmob_parsing.py`.** Owns `coerce_int(value)`, `parse_match_date(value)`, `SHOTMAP_EVENT_TYPE_TO_OUTCOME`, and any other FotMob-shape coercion. Both `shootouts.py` and `player_history.py` import from this module; the duplicates are deleted.
-- **New: `src/penalty_pred/match_ref.py`.** Owns `parse_page_url` (the `_PAGE_URL_RE` regex moves here) and a single `MatchRef` dataclass. The `MatchRef` has optional fields for the data each consumer needs: `home_team_id`/`home_team_name`/`away_team_id`/`away_team_name` (roster), `round_name`/`score_str` (shootout), `match_date` (both). A single `MatchRef.from_fixture(fixture)` builder replaces `ShootoutMatchRef.from_fixture` and `_extract_roster_match_refs`.
-- **New: `src/penalty_pred/artifacts.py`.** Owns the on-disk layout. `Artifacts(root=Path("output"), cache_dir=Path("data/fotmob_cache"))` exposes path accessors (`artifacts.shootout_kicks`, `artifacts.lightgbm_model`, etc.), typed read/write methods (`artifacts.read_shootout_kicks()`, `artifacts.write_predictions(rows)`), and a `artifacts.fotmob_client()` factory. The 5 `write_jsonl` and 3 `read_jsonl` functions are deleted; the 9 `Path("output/...")` defaults in the slice scripts are replaced with `Artifacts()` defaults.
-- **New: `src/penalty_pred/dashboard.py`** (Phase 2; built on top of `Artifacts` and the extended `predict.py`).
-- **Modified: `src/penalty_pred/client.py`.** `build_id` becomes an instance field, set lazily on first `get()`. The module-level `_build_id_cache` and `reset_build_id_cache()` are deleted. The autouse fixture in `tests/test_client.py` is deleted.
-- **Modified: `src/penalty_pred/player_history.py` → split into `player_history.py` (FotMob fan-out, ~400 lines) and `initial_set.py` (JSONL merge + Initial Set assembly, ~150 lines).** The per-kicker orchestrator takes `Iterable[InitialSetKicker]`; the script does the JSONL read once and passes typed iterables down.
-- **Modified: `src/penalty_pred/predict.py`.** Adds `PredictionTarget` value object (9 fields, exactly the model inputs); adds `predict_roster_with_context(roster, history, model, context)`. The synthetic `ShootoutKick` construction is removed.
-- **Modified: `src/penalty_pred/features.py`.** The feature builder accepts `PredictionTarget` (or, equivalently, the model's row type) instead of `ShootoutKick`. The synthetic-kick construction moves to a test fixture.
-- **Modified: `src/penalty_pred/model.py`.** `TrainingTableRow` and `TrainingRow` collapse to one type (or, equivalently, the feature builder emits the model's row type). `build_feature_matrix` and `rows_to_predict_matrix` collapse to one. `predict_proba` is removed; the model artifacts implement a `PredictProba` protocol. `_training_row_from_table_row` is removed.
-- **Modified: `src/penalty_pred/shootouts.py`.** `_int`, `_parse_match_date`, `_SHOTMAP_EVENT_TYPE_TO_OUTCOME`, `parse_page_url`, `_PAGE_URL_RE` deleted (moved to `fotmob_parsing` / `match_ref`). `fetch_season_fixtures` is consumed by `rosters.py` via `match_ref` / `fotmob_parsing`, not duplicated. `fetch_match_data` inlined at its single call site in `scripts/fetch_2022_final.py`. `fetch_all_shootout_kicks` (the pass-through) deleted. `ShootoutMatchRef` deleted in favour of `match_ref.MatchRef`. `LEAGUE_SEASONS_PREDICT_WINDOW` lifted to `tournaments.py`.
-- **Modified: `src/penalty_pred/rosters.py`.** `_int` deleted. `RosterMatchRef` deleted in favour of `match_ref.MatchRef`. The defensive local `from .shootouts import parse_page_url` lifted to module top (no cycle).
-- **Modified: `src/penalty_pred/rsssf.py`.** The defensive local `from .leagues import LEAGUE_BY_ID` lifted to module top. `RSSSF_TO_LEAGUE_NAME` lifted to `tournaments.py` (this module is now pure parsing).
-- **Modified: `src/penalty_pred/coordinates.py`.** `SIDE_LEFT`, `SIDE_CENTER`, `SIDE_RIGHT`, and the `Side = str` alias deleted (no callers).
-- **Modified: `src/penalty_pred/evaluate.py`.** `kicker_most_frequent_save_rate` either renamed to `last_side_save_rate` or rewritten to compute the per-kicker mode.
-- **New: `src/penalty_pred/tournaments.py`.** Owns `LEAGUE_SEASONS_PREDICT_WINDOW`, `WC_2026_SEASON`, and the `RSSSF_TO_LEAGUE_NAME` heading map. Adding a tournament edits one module.
+- **New: `src/twelveyards/fotmob_parsing.py`.** Owns `coerce_int(value)`, `parse_match_date(value)`, `SHOTMAP_EVENT_TYPE_TO_OUTCOME`, and any other FotMob-shape coercion. Both `shootouts.py` and `player_history.py` import from this module; the duplicates are deleted.
+- **New: `src/twelveyards/match_ref.py`.** Owns `parse_page_url` (the `_PAGE_URL_RE` regex moves here) and a single `MatchRef` dataclass. The `MatchRef` has optional fields for the data each consumer needs: `home_team_id`/`home_team_name`/`away_team_id`/`away_team_name` (roster), `round_name`/`score_str` (shootout), `match_date` (both). A single `MatchRef.from_fixture(fixture)` builder replaces `ShootoutMatchRef.from_fixture` and `_extract_roster_match_refs`.
+- **New: `src/twelveyards/artifacts.py`.** Owns the on-disk layout. `Artifacts(root=Path("output"), cache_dir=Path("data/fotmob_cache"))` exposes path accessors (`artifacts.shootout_kicks`, `artifacts.lightgbm_model`, etc.), typed read/write methods (`artifacts.read_shootout_kicks()`, `artifacts.write_predictions(rows)`), and a `artifacts.fotmob_client()` factory. The 5 `write_jsonl` and 3 `read_jsonl` functions are deleted; the 9 `Path("output/...")` defaults in the slice scripts are replaced with `Artifacts()` defaults.
+- **New: `src/twelveyards/dashboard.py`** (Phase 2; built on top of `Artifacts` and the extended `predict.py`).
+- **Modified: `src/twelveyards/client.py`.** `build_id` becomes an instance field, set lazily on first `get()`. The module-level `_build_id_cache` and `reset_build_id_cache()` are deleted. The autouse fixture in `tests/test_client.py` is deleted.
+- **Modified: `src/twelveyards/player_history.py` → split into `player_history.py` (FotMob fan-out, ~400 lines) and `initial_set.py` (JSONL merge + Initial Set assembly, ~150 lines).** The per-kicker orchestrator takes `Iterable[InitialSetKicker]`; the script does the JSONL read once and passes typed iterables down.
+- **Modified: `src/twelveyards/predict.py`.** Adds `PredictionTarget` value object (9 fields, exactly the model inputs); adds `predict_roster_with_context(roster, history, model, context)`. The synthetic `ShootoutKick` construction is removed.
+- **Modified: `src/twelveyards/features.py`.** The feature builder accepts `PredictionTarget` (or, equivalently, the model's row type) instead of `ShootoutKick`. The synthetic-kick construction moves to a test fixture.
+- **Modified: `src/twelveyards/model.py`.** `TrainingTableRow` and `TrainingRow` collapse to one type (or, equivalently, the feature builder emits the model's row type). `build_feature_matrix` and `rows_to_predict_matrix` collapse to one. `predict_proba` is removed; the model artifacts implement a `PredictProba` protocol. `_training_row_from_table_row` is removed.
+- **Modified: `src/twelveyards/shootouts.py`.** `_int`, `_parse_match_date`, `_SHOTMAP_EVENT_TYPE_TO_OUTCOME`, `parse_page_url`, `_PAGE_URL_RE` deleted (moved to `fotmob_parsing` / `match_ref`). `fetch_season_fixtures` is consumed by `rosters.py` via `match_ref` / `fotmob_parsing`, not duplicated. `fetch_match_data` inlined at its single call site in `scripts/fetch_2022_final.py`. `fetch_all_shootout_kicks` (the pass-through) deleted. `ShootoutMatchRef` deleted in favour of `match_ref.MatchRef`. `LEAGUE_SEASONS_PREDICT_WINDOW` lifted to `tournaments.py`.
+- **Modified: `src/twelveyards/rosters.py`.** `_int` deleted. `RosterMatchRef` deleted in favour of `match_ref.MatchRef`. The defensive local `from .shootouts import parse_page_url` lifted to module top (no cycle).
+- **Modified: `src/twelveyards/rsssf.py`.** The defensive local `from .leagues import LEAGUE_BY_ID` lifted to module top. `RSSSF_TO_LEAGUE_NAME` lifted to `tournaments.py` (this module is now pure parsing).
+- **Modified: `src/twelveyards/coordinates.py`.** `SIDE_LEFT`, `SIDE_CENTER`, `SIDE_RIGHT`, and the `Side = str` alias deleted (no callers).
+- **Modified: `src/twelveyards/evaluate.py`.** `kicker_most_frequent_save_rate` either renamed to `last_side_save_rate` or rewritten to compute the per-kicker mode.
+- **New: `src/twelveyards/tournaments.py`.** Owns `LEAGUE_SEASONS_PREDICT_WINDOW`, `WC_2026_SEASON`, and the `RSSSF_TO_LEAGUE_NAME` heading map. Adding a tournament edits one module.
 - **New: `tests/_factories.py`.** One builder per row type (`make_training_row`, `make_history_row`, `make_metadata`). Imports the schema from `dataclasses.fields(TrainingTableRow)`. The 4 private `_make_row` / `_make_features` helpers are deleted.
 - **Modified: `tests/test_*.py`.** Live smoke tests use `Artifacts` defaults (not `Path("output/...")` directly). Private-coupled tests (`_coerce_lightgbm_categoricals`, `_cache_key`, `_decompress`) are replaced with public-interface tests (`predict_proba`, `client.get`, gzip roundtrip).
 
@@ -161,7 +161,7 @@ Three phases, ordered by dependency.
 
 **Module layout:**
 
-- **New: `src/penalty_pred/dashboard.py`.** The dashboard's data and re-scoring logic. Functions:
+- **New: `src/twelveyards/dashboard.py`.** The dashboard's data and re-scoring logic. Functions:
   - `load_upcoming_knockouts(client) -> list[MatchContext]` — fetches the WC 2026 fixture list, filters to upcoming + knockout + both teams decided
   - `predict_match(roster, history, model, context) -> list[KickerPrediction]` — re-scores the match's likely kickers with the match's actual round (B3)
   - `recommended_dive(p_L, p_C, p_R) -> str` — `argmin` over the three
@@ -170,7 +170,7 @@ Three phases, ordered by dependency.
   - Loads the roster and player history from HF
   - Builds a `FotMobClient` and calls `load_upcoming_knockouts`
   - Renders the selectbox + per-kicker table
-- **Modified: `src/penalty_pred/predict.py`.** Adds `predict_roster_with_context(roster, history, model, context)`. The existing `predict_roster(roster, history, model)` becomes a thin wrapper that uses an empty context (backward compatible with the v1 slice).
+- **Modified: `src/twelveyards/predict.py`.** Adds `predict_roster_with_context(roster, history, model, context)`. The existing `predict_roster(roster, history, model)` becomes a thin wrapper that uses an empty context (backward compatible with the v1 slice).
 
 **Match filter:**
 
@@ -179,7 +179,7 @@ Three phases, ordered by dependency.
 
 **Fixture source:**
 
-- Live FotMob fetch via `penalty_pred.client.FotMobClient` at dashboard load. The `leagues/77/overview/world-cup` endpoint is the source of truth. The persistent ETag/gzip cache means re-loads are 304 hits.
+- Live FotMob fetch via `twelveyards.client.FotMobClient` at dashboard load. The `leagues/77/overview/world-cup` endpoint is the source of truth. The persistent ETag/gzip cache means re-loads are 304 hits.
 - No pre-fetch; no `data/wc2026_fixtures.jsonl` artifact.
 
 **Re-score path (round-aware):**

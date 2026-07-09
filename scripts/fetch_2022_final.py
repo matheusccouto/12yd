@@ -11,9 +11,9 @@ import argparse
 import sys
 from pathlib import Path
 
-from penalty_pred.artifacts import Artifacts
-from penalty_pred.client import FotMobClient
-from penalty_pred.shootouts import extract_shootout_kicks
+from twelveyards.artifacts import Artifacts
+from twelveyards.client import FotMobClient
+from twelveyards.shootouts import extract_shootout_kicks
 
 # 2022 FIFA World Cup Final: Argentina vs France, matchId 3370572.
 # Slug segments are taken from the match pageUrl; seo/h2h are stable for the lifetime

@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from penalty_pred.artifacts import Artifacts
-from penalty_pred.shootouts import extract_shootout_kicks
+from twelveyards.artifacts import Artifacts
+from twelveyards.shootouts import extract_shootout_kicks
 
 # The 8 kickers in canonical shootout order. (3 from France took penalties but
 # Mbappé is counted once here; the actual 8-kicker list is below.)

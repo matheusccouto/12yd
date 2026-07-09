@@ -1,4 +1,4 @@
-"""Tests for the tournament scope (`src/penalty_pred/tournaments.py`).
+"""Tests for the tournament scope (`src/twelveyards/tournaments.py`).
 
 PRD: the in-scope tournaments live in `LEAGUE_SEASONS_PREDICT_WINDOW` and
 the RSSSF page is the verification oracle. The scope is a *superset* of
@@ -31,13 +31,13 @@ from typing import Any
 
 import pytest
 
-from penalty_pred.rsssf import (
+from twelveyards.rsssf import (
     RSSSFShootout,
     count_shootouts_by_pairs,
     load_rsssf_html,
     parse_rsssf_html,
 )
-from penalty_pred.tournaments import (
+from twelveyards.tournaments import (
     CLUB_PAIRS,
     INTERNATIONAL_PAIRS,
     LEAGUE_SEASONS_PREDICT_WINDOW,
@@ -158,7 +158,7 @@ def test_scope_covers_all_thirteen_in_scope_leagues() -> None:
     The 12 `domestic_only` extended leagues (LaLiga, Premier League,
     etc.) are NOT in the scope — they are player-history only.
     """
-    from penalty_pred.leagues import CLUB_LEAGUES, LEAGUES
+    from twelveyards.leagues import CLUB_LEAGUES, LEAGUES
 
     scope_leagues = {lid for lid, _ in LEAGUE_SEASONS_PREDICT_WINDOW}
     expected = {league.league_id for league in LEAGUES} | {
@@ -179,7 +179,7 @@ def test_scope_excludes_domestic_only_extended_leagues() -> None:
     `kind="club"`. The 12 remaining `EXTENDED_LEAGUES` are
     `kind="domestic_only"` and remain out of scope.
     """
-    from penalty_pred.leagues import EXTENDED_LEAGUES
+    from twelveyards.leagues import EXTENDED_LEAGUES
 
     scope_leagues = {lid for lid, _ in LEAGUE_SEASONS_PREDICT_WINDOW}
     extended_ids = {league.league_id for league in EXTENDED_LEAGUES}
@@ -495,7 +495,7 @@ def test_rsssf_heading_map_covers_six_in_scope_tournaments() -> None:
 
 def test_rsssf_heading_values_match_league_names() -> None:
     """Each heading value is the FotMob league name (matches `LEAGUES`)."""
-    from penalty_pred.leagues import LEAGUES
+    from twelveyards.leagues import LEAGUES
 
     fotmob_names = {league.name for league in LEAGUES}
     assert set(RSSSF_TO_LEAGUE_NAME.values()) == fotmob_names
@@ -528,7 +528,7 @@ def test_tournament_kind_lookup_international() -> None:
     attribute on `TrainingRow` and `PredictionRow`. The international
     tournaments keep the existing 6 IDs.
     """
-    from penalty_pred.tournaments import TOURNAMENT_KIND_BY_LEAGUE_ID
+    from twelveyards.tournaments import TOURNAMENT_KIND_BY_LEAGUE_ID
 
     expected_international = {77, 50, 44, 298, 290, 289}
     for league_id in expected_international:
@@ -548,7 +548,7 @@ def test_tournament_kind_lookup_club() -> None:
     del Rey) carry the `"club"` kind; the model treats this as
     metadata, not a model input.
     """
-    from penalty_pred.tournaments import TOURNAMENT_KIND_BY_LEAGUE_ID
+    from twelveyards.tournaments import TOURNAMENT_KIND_BY_LEAGUE_ID
 
     expected_clubs = {41, 42, 125, 132, 133, 137, 138}
     for league_id in expected_clubs:
@@ -564,8 +564,8 @@ def test_tournament_kind_lookup_excludes_domestic_only() -> None:
     are NOT in the lookup — they are player-history only and
     never appear in the shootout scope.
     """
-    from penalty_pred.leagues import EXTENDED_LEAGUES
-    from penalty_pred.tournaments import TOURNAMENT_KIND_BY_LEAGUE_ID
+    from twelveyards.leagues import EXTENDED_LEAGUES
+    from twelveyards.tournaments import TOURNAMENT_KIND_BY_LEAGUE_ID
 
     for league in EXTENDED_LEAGUES:
         assert league.league_id not in TOURNAMENT_KIND_BY_LEAGUE_ID, (
@@ -579,7 +579,7 @@ def test_club_leagues_tuple() -> None:
     shootouts (Phase 3, Issue #51). Each entry has `kind="club"`.
     The 7 league IDs match the Phase 3 ADR's per-tournament list.
     """
-    from penalty_pred.leagues import CLUB_LEAGUES
+    from twelveyards.leagues import CLUB_LEAGUES
 
     assert len(CLUB_LEAGUES) == 7
     for league in CLUB_LEAGUES:
@@ -604,7 +604,7 @@ def test_rsssf_to_club_league_name_covers_seven_tournaments() -> None:
     has no club shootout coverage (see `test_club_pairs_have_no_rsssf_coverage`),
     but the map is the shape for a future Phase 4 ingest.
     """
-    from penalty_pred.tournaments import RSSSF_TO_CLUB_LEAGUE_NAME
+    from twelveyards.tournaments import RSSSF_TO_CLUB_LEAGUE_NAME
 
     assert set(RSSSF_TO_CLUB_LEAGUE_NAME.keys()) == {
         "Copa Libertadores",
@@ -622,8 +622,8 @@ def test_rsssf_to_club_league_name_values_match_club_league_names() -> None:
     league name (matches `CLUB_LEAGUES`). A drift between the
     map and the league table is a code bug.
     """
-    from penalty_pred.leagues import CLUB_LEAGUES
-    from penalty_pred.tournaments import RSSSF_TO_CLUB_LEAGUE_NAME
+    from twelveyards.leagues import CLUB_LEAGUES
+    from twelveyards.tournaments import RSSSF_TO_CLUB_LEAGUE_NAME
 
     fotmob_names = {league.name for league in CLUB_LEAGUES}
     assert set(RSSSF_TO_CLUB_LEAGUE_NAME.values()) == fotmob_names

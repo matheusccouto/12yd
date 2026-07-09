@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from penalty_pred.dashboard import (
+from twelveyards.dashboard import (
     MatchContext,
     is_placeholder_team,
     load_upcoming_knockouts,
@@ -28,7 +28,7 @@ from penalty_pred.dashboard import (
     predictions_for_match,
     recommended_dive,
 )
-from penalty_pred.predict import PredictionRow
+from twelveyards.predict import PredictionRow
 
 # ---------------------------------------------------------------------------
 # Fixtures: minimal FotMob fixture payloads + a fake FotMobClient.
@@ -555,7 +555,7 @@ def test_predictions_for_match_sorts_by_total_penalties_desc() -> None:
     `player_history` length. Most-experienced kickers float to the
     top of the page; a name tiebreaker keeps the order stable.
     """
-    from penalty_pred.player_history import PlayerPenalty
+    from twelveyards.player_history import PlayerPenalty
 
     def _row(pid: int, d: str) -> PlayerPenalty:
         return PlayerPenalty(
@@ -599,7 +599,7 @@ def test_predictions_for_match_sorts_by_total_penalties_desc() -> None:
 
 def test_predictions_for_match_name_tiebreaker_when_penalties_equal() -> None:
     """When two kickers have the same `total_penalties`, name (ascending) is the tiebreaker."""
-    from penalty_pred.player_history import PlayerPenalty
+    from twelveyards.player_history import PlayerPenalty
 
     def _row(pid: int) -> PlayerPenalty:
         return PlayerPenalty(
@@ -667,7 +667,7 @@ def test_predictions_for_match_no_history_key_means_zero() -> None:
     (the v4 "no history" signal — the card renders three near-equal
     light cells).
     """
-    from penalty_pred.player_history import PlayerPenalty
+    from twelveyards.player_history import PlayerPenalty
 
     def _row(pid: int) -> PlayerPenalty:
         return PlayerPenalty(

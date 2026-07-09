@@ -9,8 +9,8 @@ from typing import Any, cast
 
 import httpx
 
-from penalty_pred import client as client_module
-from penalty_pred.client import FotMobClient
+from twelveyards import client as client_module
+from twelveyards.client import FotMobClient
 
 
 class _StubResponse:

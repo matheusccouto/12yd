@@ -82,7 +82,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 
 # Re-export the unified row type and `CLASSES` so callers can keep
-# using `from penalty_pred.model import TrainingRow, CLASSES` (the
+# using `from twelveyards.model import TrainingRow, CLASSES` (the
 # import path the model layer and tests have always used).
 from .features import CLASSES, TrainingRow  # noqa: F401 — re-exported
 

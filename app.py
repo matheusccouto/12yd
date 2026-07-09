@@ -16,7 +16,7 @@ bordered container with:
 - Line 1: Player name + penalty count (inline)
 - Line 2: A `st.bar_chart` with Left/Center/Right bars, y-axis fixed 0–100.
 
-The data + match-filter logic lives in `penalty_pred.dashboard` —
+The data + match-filter logic lives in `twelveyards.dashboard` —
 this file is a thin Streamlit layer over the library, so the same
 code can be unit-tested (the library) and exercised end-to-end (the
 app).
@@ -36,15 +36,15 @@ import pandas as pd
 import streamlit as st
 from huggingface_hub import hf_hub_download
 
-from penalty_pred.artifacts import Artifacts
-from penalty_pred.client import FotMobClient
-from penalty_pred.dashboard import (
+from twelveyards.artifacts import Artifacts
+from twelveyards.client import FotMobClient
+from twelveyards.dashboard import (
     KickerPrediction,
     MatchContext,
     load_upcoming_knockouts,
     predictions_for_match,
 )
-from penalty_pred.player_history import PlayerPenalty
+from twelveyards.player_history import PlayerPenalty
 
 _BadgeColor = Literal[
     "red", "orange", "yellow", "blue", "green", "violet", "gray", "grey", "primary"

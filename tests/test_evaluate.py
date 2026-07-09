@@ -35,8 +35,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from penalty_pred.artifacts import Artifacts
-from penalty_pred.evaluate import (
+from twelveyards.artifacts import Artifacts
+from twelveyards.evaluate import (
     BaselineMetrics,
     CalibrationMetrics,
     CalibrationReport,
@@ -1062,7 +1062,7 @@ def test_metrics_report_from_dict_roundtrips_cv_block() -> None:
 def test_artifacts_cv_metrics_roundtrip(tmp_path: Path) -> None:
     """`Artifacts.read_cv` / `Artifacts.write_cv` roundtrip a `CVReport`
     through the `cv_metrics.json` artifact without loss."""
-    from penalty_pred.artifacts import Artifacts
+    from twelveyards.artifacts import Artifacts
 
     art = Artifacts(root=tmp_path, cache_dir=tmp_path / "cache")
     fold = CVFold("Test", 4, 4, 0.5, 1.0, 0.4, 0.42)

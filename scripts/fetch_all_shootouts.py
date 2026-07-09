@@ -30,11 +30,11 @@ import argparse
 import sys
 from pathlib import Path
 
-from penalty_pred.artifacts import Artifacts
-from penalty_pred.client import FotMobClient
-from penalty_pred.match_ref import MatchRef
-from penalty_pred.rsssf import load_rsssf_html, parse_rsssf_html
-from penalty_pred.shootouts import (
+from twelveyards.artifacts import Artifacts
+from twelveyards.client import FotMobClient
+from twelveyards.match_ref import MatchRef
+from twelveyards.rsssf import load_rsssf_html, parse_rsssf_html
+from twelveyards.shootouts import (
     FetchResult,
     aggregate_per_tournament_success_rate,
     fetch_all_shootout_kicks_with_skips,
@@ -42,11 +42,11 @@ from penalty_pred.shootouts import (
     write_per_tournament_success_rate,
     write_skipped_refs_diagnostics,
 )
-from penalty_pred.tournaments import (
+from twelveyards.tournaments import (
     INTERNATIONAL_PAIRS,
     LEAGUE_SEASONS_PREDICT_WINDOW,
 )
-from penalty_pred.validate import (
+from twelveyards.validate import (
     EMPTY_SHOTMAP_EXCLUSIONS,
     RSSSF_RAW_COUNTS,
     URL_ROTATION_EXCLUSIONS,
@@ -267,7 +267,7 @@ def _load_rsssf_html(fixture_path: Path) -> str:
     # avoid coupling to the FotMob client (RSSSF is not a FotMob endpoint).
     import httpx
 
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; penalty-pred)"}
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; twelveyards)"}
     with httpx.Client(timeout=15.0, follow_redirects=True) as http:
         response = http.get(DEFAULT_RSSSF_URL, headers=headers)
     response.raise_for_status()

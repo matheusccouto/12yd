@@ -32,7 +32,7 @@ from .rosters import RosterPlayer
 from .shootouts import ShootoutKick
 
 # Re-exported so callers that imported the Initial Set types from
-# `penalty_pred.player_history` (the pre-split location) keep working.
+# `twelveyards.player_history` (the pre-split location) keep working.
 __all__ = [
     "InitialSetFetchResult",
     "InitialSetKicker",

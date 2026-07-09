@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from penalty_pred.coordinates import LEFT_MAX, RIGHT_MIN, side
+from twelveyards.coordinates import LEFT_MAX, RIGHT_MIN, side
 
 
 @pytest.mark.parametrize(

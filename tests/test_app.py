@@ -37,14 +37,14 @@ from app import (
     _kicker_color,
     goal_drawing_figure,
 )
-from penalty_pred.dashboard import (
+from twelveyards.dashboard import (
     KickerPrediction,
     MatchContext,
     most_likely_side,
     opposite_side,
     predictions_for_match,
 )
-from penalty_pred.predict import PredictionRow
+from twelveyards.predict import PredictionRow
 
 # ---------------------------------------------------------------------------
 # Inline Plotly helper — the v4 card's goal-drawing figure
@@ -295,7 +295,7 @@ def test_card_layout_no_history_renders_with_zero_total() -> None:
     which is the v4 "no history" signal — the card renders three
     near-equal light cells and a "0 career penalties" caption.
     """
-    from penalty_pred.player_history import PlayerPenalty
+    from twelveyards.player_history import PlayerPenalty
 
     def _row(pid: int) -> PlayerPenalty:
         return PlayerPenalty(
@@ -440,12 +440,12 @@ def test_app_renders_v4_layout_with_mocked_dependencies() -> None:
         }
 
     def _mock_read_predictions(*_a, **_kw):
-        from penalty_pred.predict import PredictionRow
+        from twelveyards.predict import PredictionRow
 
         return [PredictionRow(**p) for p in predictions_data]  # ty: ignore[invalid-argument-type]
 
     def _mock_read_player_history(*_a, **_kw):
-        from penalty_pred.player_history import PlayerPenalty
+        from twelveyards.player_history import PlayerPenalty
 
         rows: list[PlayerPenalty] = []
         for pid, count in [(1, 12), (2, 14)]:

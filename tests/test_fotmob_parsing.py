@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from penalty_pred.fotmob_parsing import (
+from twelveyards.fotmob_parsing import (
     SHOTMAP_EVENT_TYPE_TO_OUTCOME,
     coerce_int,
     parse_match_date,

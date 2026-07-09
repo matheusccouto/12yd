@@ -1,1 +1,1 @@
-"""Tests package for the penalty_pred project."""
+"""Tests package for the twelveyards project."""

@@ -20,12 +20,12 @@ import sys
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
-from penalty_pred.artifacts import Artifacts
-from penalty_pred.client import FotMobClient
-from penalty_pred.config import today_utc
-from penalty_pred.features import fetcher_from_client, load_player_history
-from penalty_pred.model import load_artifact
-from penalty_pred.predict import count_kickers_with_history, load_roster, predict_roster
+from twelveyards.artifacts import Artifacts
+from twelveyards.client import FotMobClient
+from twelveyards.config import today_utc
+from twelveyards.features import fetcher_from_client, load_player_history
+from twelveyards.model import load_artifact
+from twelveyards.predict import count_kickers_with_history, load_roster, predict_roster
 
 
 def main() -> int:

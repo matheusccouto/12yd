@@ -37,11 +37,11 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
-from penalty_pred.artifacts import Artifacts
-from penalty_pred.evaluate import cross_validate
-from penalty_pred.model import fit_lightgbm as _fit_lightgbm
-from penalty_pred.model import fit_logistic_regression as _fit_logreg
-from penalty_pred.model import (
+from twelveyards.artifacts import Artifacts
+from twelveyards.evaluate import cross_validate
+from twelveyards.model import fit_lightgbm as _fit_lightgbm
+from twelveyards.model import fit_logistic_regression as _fit_logreg
+from twelveyards.model import (
     is_on_target_by_key,
     load_training_table,
 )

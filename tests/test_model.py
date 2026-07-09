@@ -31,8 +31,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from penalty_pred.artifacts import Artifacts
-from penalty_pred.model import (
+from twelveyards.artifacts import Artifacts
+from twelveyards.model import (
     CATEGORICAL_FEATURES,
     CLASSES,
     FEATURE_COLUMNS,
@@ -293,7 +293,7 @@ def test_is_on_target_by_key_builds_lookup() -> None:
     """`is_on_target_by_key` builds the lookup from any iterable of
     objects with `match_id`, `kick_number`, `is_on_target` (the
     `ShootoutKick` dataclass is the canonical caller)."""
-    from penalty_pred.shootouts import ShootoutKick
+    from twelveyards.shootouts import ShootoutKick
 
     kicks = [
         ShootoutKick(

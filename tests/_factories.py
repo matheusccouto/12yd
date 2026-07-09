@@ -1,4 +1,4 @@
-"""Centralised test data factories for the penalty_pred test suite.
+"""Centralised test data factories for the twelveyards test suite.
 
 One builder per row type. The schema constants (`*_FIELDS`) are derived
 from `dataclasses.fields(...)` so adding a field to a row type is a
@@ -38,13 +38,13 @@ from __future__ import annotations
 
 from dataclasses import fields as _fields
 
-from penalty_pred.features import TrainingRow
-from penalty_pred.initial_set import InitialSetKicker, MissingKicker
-from penalty_pred.player_history import PlayerMetadata, PlayerPenalty
-from penalty_pred.predict import PredictionRow
-from penalty_pred.rosters import RosterPlayer
-from penalty_pred.shootouts import ShootoutKick
-from penalty_pred.tournaments import TournamentKind
+from twelveyards.features import TrainingRow
+from twelveyards.initial_set import InitialSetKicker, MissingKicker
+from twelveyards.player_history import PlayerMetadata, PlayerPenalty
+from twelveyards.predict import PredictionRow
+from twelveyards.rosters import RosterPlayer
+from twelveyards.shootouts import ShootoutKick
+from twelveyards.tournaments import TournamentKind
 
 # ---------------------------------------------------------------------------
 # Schema constants (derived from the dataclasses — adding a field is

@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from penalty_pred.artifacts import Artifacts
-from penalty_pred.evaluate import BaselineMetrics, MetricsReport
+from twelveyards.artifacts import Artifacts
+from twelveyards.evaluate import BaselineMetrics, MetricsReport
 from tests._factories import (
     make_history_row,
     make_missing_kicker,
@@ -81,7 +81,7 @@ def test_custom_root_redirects_every_artifact() -> None:
 def test_fotmob_client_factory_uses_cache_dir() -> None:
     """`fotmob_client()` returns a `FotMobClient` whose `cache_dir`
     matches the adapter's `cache_dir`."""
-    from penalty_pred.client import FotMobClient
+    from twelveyards.client import FotMobClient
 
     art = Artifacts(cache_dir=Path("/tmp/foo_cache"))
     client = art.fotmob_client()
@@ -347,7 +347,7 @@ def test_tournament_success_rate_round_trip(tmp_path: Path) -> None:
     adapter's read/write pair. A small fixture covers the four
     `status` values (`"ok"`, `"partial"`, `"missing"`, `"n/a"`) so
     the JSONL shape is pinned at the seam."""
-    from penalty_pred.shootouts import TournamentSuccessRate
+    from twelveyards.shootouts import TournamentSuccessRate
 
     art = Artifacts(root=tmp_path)
     rows = [

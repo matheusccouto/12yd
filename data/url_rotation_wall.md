@@ -178,7 +178,7 @@ moves on with honest data rather than an open-ended grind.
   reachable count: 36 in total)
 - `tests/test_validate.py::test_match_when_counts_align` (the validator
   pins `actual == 36`; a regression to 18/30/34 is caught)
-- `src/penalty_pred/shootouts.py::FetchResult` (`live_match_id` and
+- `src/twelveyards/shootouts.py::FetchResult` (`live_match_id` and
   `resolved_url` fields; populated on stale-hash skips)
-- `src/penalty_pred/shootouts.py::write_skipped_refs_diagnostics`
+- `src/twelveyards/shootouts.py::write_skipped_refs_diagnostics`
   (writes the new fields to the JSONL for `stale_hash` rows)

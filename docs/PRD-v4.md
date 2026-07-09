@@ -146,7 +146,7 @@ Issues #42 (drop A1) and #46 (anti-classifier) stay open and move to v5. They do
 **Modules touched across v4:**
 
 - `app.py` (dashboard rendering — full rewrite of the table into cards)
-- `src/penalty_pred/dashboard.py` (docstring update on `recommended_dive`)
+- `src/twelveyards/dashboard.py` (docstring update on `recommended_dive`)
 - The shootout-orchestration module (Phase 2 — one focused helper)
 - The tournaments test module (Phase 2 — `EXPECTED_SHOOTOUT_COUNTS` map adjusts to 36)
 - `docs/model-card-v3.md` and `docs/model-review.md` (Kicker-PoV frame pin, one sentence each)

@@ -10,12 +10,12 @@ from pathlib import Path
 
 import pytest
 
-from penalty_pred.artifacts import Artifacts
-from penalty_pred.match_ref import MatchRef
-from penalty_pred.rsssf import RSSSFShootout, load_rsssf_html, parse_rsssf_html
-from penalty_pred.shootouts import ShootoutKick
-from penalty_pred.tournaments import LEAGUE_SEASONS_PREDICT_WINDOW
-from penalty_pred.validate import validate_shootout_count
+from twelveyards.artifacts import Artifacts
+from twelveyards.match_ref import MatchRef
+from twelveyards.rsssf import RSSSFShootout, load_rsssf_html, parse_rsssf_html
+from twelveyards.shootouts import ShootoutKick
+from twelveyards.tournaments import LEAGUE_SEASONS_PREDICT_WINDOW
+from twelveyards.validate import validate_shootout_count
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RSSSF_FIXTURE = REPO_ROOT / "docs" / "samples" / "rsssf_penaltiestour.html"
@@ -266,7 +266,7 @@ def test_skipped_refs_included_in_discrepancies(
 ) -> None:
     """When the JSONL is short of the expected count, skipped_refs are
     serialised in discrepancies.json for debugging."""
-    from penalty_pred.match_ref import MatchRef
+    from twelveyards.match_ref import MatchRef
 
     kicks = _kicks_for_pairs([("World Cup", 2022, 1)])
     jsonl = tmp_path / "kicks.jsonl"
@@ -306,7 +306,7 @@ def test_no_kicks_refs_included_in_discrepancies(
     tmp_path: Path, rsssf_shootouts: list[RSSSFShootout]
 ) -> None:
     """`no_kicks_refs` are also serialised in discrepancies.json."""
-    from penalty_pred.match_ref import MatchRef
+    from twelveyards.match_ref import MatchRef
 
     kicks = _kicks_for_pairs([("World Cup", 2022, 1)])
     jsonl = tmp_path / "kicks.jsonl"
@@ -355,7 +355,7 @@ def test_failed_refs_included_in_discrepancies(
     """`failed_refs` are serialised in discrepancies.json alongside
     `skipped_refs` and `no_kicks_refs` so the slice operator can
     investigate extractor exceptions."""
-    from penalty_pred.match_ref import MatchRef
+    from twelveyards.match_ref import MatchRef
 
     kicks = _kicks_for_pairs([("World Cup", 2022, 1)])
     jsonl = tmp_path / "kicks.jsonl"

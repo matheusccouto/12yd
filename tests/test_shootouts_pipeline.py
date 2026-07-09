@@ -14,8 +14,8 @@ from typing import Any
 
 import pytest
 
-from penalty_pred.match_ref import MatchRef, parse_page_url
-from penalty_pred.shootouts import ShootoutKick, extract_shootout_match_fixtures
+from twelveyards.match_ref import MatchRef, parse_page_url
+from twelveyards.shootouts import ShootoutKick, extract_shootout_match_fixtures
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SLIM_FIXTURE = REPO_ROOT / "docs" / "samples" / "league_wc_2022_slim.json"
@@ -168,7 +168,7 @@ def test_from_fixture_team_names() -> None:
 
 
 def test_league_seasons_constant_has_all_in_scope_tournaments() -> None:
-    from penalty_pred.tournaments import LEAGUE_SEASONS_PREDICT_WINDOW
+    from twelveyards.tournaments import LEAGUE_SEASONS_PREDICT_WINDOW
 
     leagues = {lid for lid, _ in LEAGUE_SEASONS_PREDICT_WINDOW}
     # Phase 3 (Issue #51): the scope now covers the 6 in-scope
@@ -177,10 +177,10 @@ def test_league_seasons_constant_has_all_in_scope_tournaments() -> None:
     # DFB-Pokal, Coppa Italia, Copa del Rey). The shootout scraper
     # iterates `LEAGUE_SEASONS_PREDICT_WINDOW`, which is the union of
     # `INTERNATIONAL_PAIRS` and `CLUB_PAIRS` in
-    # `src/penalty_pred/tournaments.py`. The 12 `domestic_only`
+    # `src/twelveyards/tournaments.py`. The 12 `domestic_only`
     # extended leagues (LaLiga, Premier League, etc.) are NOT in
     # scope — they are player-history only.
-    from penalty_pred.leagues import CLUB_LEAGUES, LEAGUES
+    from twelveyards.leagues import CLUB_LEAGUES, LEAGUES
 
     expected = {league.league_id for league in LEAGUES} | {
         league.league_id for league in CLUB_LEAGUES
@@ -198,7 +198,7 @@ def test_league_seasons_constant_covers_predict_window() -> None:
     Italia, Copa del Rey — each over FotMob seasons 2021–2026). The
     total is 57 pairs across 13 tournaments.
     """
-    from penalty_pred.tournaments import LEAGUE_SEASONS_PREDICT_WINDOW
+    from twelveyards.tournaments import LEAGUE_SEASONS_PREDICT_WINDOW
 
     expected: set[tuple[int, int]] = {
         (77, 2022),  # World Cup 2022
@@ -231,7 +231,7 @@ def test_league_seasons_constant_covers_predict_window() -> None:
 def test_predict_window_bounds_returns_pair() -> None:
     from datetime import UTC, datetime
 
-    from penalty_pred.shootouts import predict_window_bounds
+    from twelveyards.shootouts import predict_window_bounds
 
     start, end = predict_window_bounds()
     assert isinstance(start, datetime)
@@ -249,9 +249,9 @@ def test_skips_match_when_response_id_differs(
 ) -> None:
     """A (seo, h2h) that resolves to a different matchId in the response
     (e.g. FotMob has reused the hash) is reported as `skipped=True`."""
-    from penalty_pred.client import FotMobClient
-    from penalty_pred.match_ref import MatchRef
-    from penalty_pred.shootouts import fetch_all_shootout_kicks_with_skips
+    from twelveyards.client import FotMobClient
+    from twelveyards.match_ref import MatchRef
+    from twelveyards.shootouts import fetch_all_shootout_kicks_with_skips
 
     # The sample is the 2022 final (matchId 3370572). Pretend the ref's
     # matchId is different from what the response says.
@@ -283,9 +283,9 @@ def test_processes_match_when_response_id_matches(
     tmp_path: Path, monkeypatch, sample_2022_final: dict[str, object]
 ) -> None:
     """A ref whose (seo, h2h) resolves to the right matchId is processed."""
-    from penalty_pred.client import FotMobClient
-    from penalty_pred.match_ref import MatchRef
-    from penalty_pred.shootouts import fetch_all_shootout_kicks_with_skips
+    from twelveyards.client import FotMobClient
+    from twelveyards.match_ref import MatchRef
+    from twelveyards.shootouts import fetch_all_shootout_kicks_with_skips
 
     real_ref = MatchRef(
         match_id=3370572,
@@ -313,9 +313,9 @@ def test_marks_match_as_no_kicks_when_shotmap_empty(
     # shotmap has 0 entries with period == "PenaltyShootout".
     import copy
 
-    from penalty_pred.client import FotMobClient
-    from penalty_pred.match_ref import MatchRef
-    from penalty_pred.shootouts import fetch_all_shootout_kicks_with_skips
+    from twelveyards.client import FotMobClient
+    from twelveyards.match_ref import MatchRef
+    from twelveyards.shootouts import fetch_all_shootout_kicks_with_skips
 
     data: dict[str, Any] = copy.deepcopy(sample_2022_final)
     shots = data["pageProps"]["content"]["shotmap"]["shots"]
@@ -335,7 +335,7 @@ def test_marks_match_as_no_kicks_when_shotmap_empty(
         score_str="3 - 3",
     )
 
-    from penalty_pred import client as client_module
+    from twelveyards import client as client_module
 
     def fake_get(self, path: str, params: dict | None = None) -> object:
         return data
@@ -363,9 +363,9 @@ def test_extractor_exception_recorded_as_failure_mode(
     """
     import copy
 
-    from penalty_pred.client import FotMobClient
-    from penalty_pred.match_ref import MatchRef
-    from penalty_pred.shootouts import fetch_all_shootout_kicks_with_skips
+    from twelveyards.client import FotMobClient
+    from twelveyards.match_ref import MatchRef
+    from twelveyards.shootouts import fetch_all_shootout_kicks_with_skips
 
     # Drop one event from the match — that makes the shotmap/events
     # counts disagree and `extract_shootout_kicks` raises ValueError.
@@ -384,7 +384,7 @@ def test_extractor_exception_recorded_as_failure_mode(
         score_str="3 - 3",
     )
 
-    from penalty_pred import client as client_module
+    from twelveyards import client as client_module
 
     def fake_get(self, path: str, params: dict | None = None) -> object:
         return data
@@ -408,9 +408,9 @@ def test_orchestrator_continues_after_failed_match(
     """A failed match does not abort subsequent matches in the run."""
     import copy
 
-    from penalty_pred.client import FotMobClient
-    from penalty_pred.match_ref import MatchRef
-    from penalty_pred.shootouts import fetch_all_shootout_kicks_with_skips
+    from twelveyards.client import FotMobClient
+    from twelveyards.match_ref import MatchRef
+    from twelveyards.shootouts import fetch_all_shootout_kicks_with_skips
 
     good_ref = MatchRef(
         match_id=3370572,
@@ -440,7 +440,7 @@ def test_orchestrator_continues_after_failed_match(
     events = bad_data["pageProps"]["content"]["matchFacts"]["events"]["penaltyShootoutEvents"]
     bad_data["pageProps"]["content"]["matchFacts"]["events"]["penaltyShootoutEvents"] = events[:-1]
 
-    from penalty_pred import client as client_module
+    from twelveyards import client as client_module
 
     def fake_get(self, path: str, params: dict | None = None) -> object:
         if "1hox8a" in path:
@@ -466,8 +466,8 @@ def test_write_diagnostics_writes_one_row_per_skip(tmp_path: Path) -> None:
     `skipped` / `no_kicks` / failed result, with the `failure_mode`
     discriminator. Successful results are not written.
     """
-    from penalty_pred.match_ref import MatchRef
-    from penalty_pred.shootouts import FetchResult, write_skipped_refs_diagnostics
+    from twelveyards.match_ref import MatchRef
+    from twelveyards.shootouts import FetchResult, write_skipped_refs_diagnostics
 
     skipped_ref = MatchRef(
         match_id=1, seo="a", h2h="aa", round_name="QF", match_date="2022-07-01T15:00:00Z"
@@ -536,8 +536,8 @@ def test_write_diagnostics_creates_parent_dir(tmp_path: Path) -> None:
     """`write_skipped_refs_diagnostics` creates the parent directory if
     it does not exist (consistent with the other `Artifacts.write_*`
     methods)."""
-    from penalty_pred.match_ref import MatchRef
-    from penalty_pred.shootouts import FetchResult, write_skipped_refs_diagnostics
+    from twelveyards.match_ref import MatchRef
+    from twelveyards.shootouts import FetchResult, write_skipped_refs_diagnostics
 
     skipped_ref = MatchRef(match_id=1, seo="a", h2h="aa")
     path = tmp_path / "nested" / "diag.jsonl"
@@ -557,7 +557,7 @@ def test_aggregate_per_tournament_writes_one_row_per_pair(tmp_path: Path) -> Non
     `write_per_tournament_success_rate` writes one JSONL record per
     row. The output complements `write_skipped_refs_diagnostics`
     (per-match why) with a per-tournament rollup (v4 PRD Phase 2)."""
-    from penalty_pred.shootouts import (
+    from twelveyards.shootouts import (
         FetchResult,
         TournamentSuccessRate,
         aggregate_per_tournament_success_rate,
@@ -644,7 +644,7 @@ def test_aggregate_per_tournament_status_states(tmp_path: Path) -> None:
     Cup 2021); a row is `"missing"` iff match_count is 0 and the
     pair has reachable matches; a row is `"partial"` otherwise.
     """
-    from penalty_pred.shootouts import (
+    from twelveyards.shootouts import (
         FetchResult,
         aggregate_per_tournament_success_rate,
     )
@@ -692,7 +692,7 @@ def test_aggregate_per_tournament_respects_excluded_counts() -> None:
     `expected_counts` value. A pair with `expected=6, excluded=4` has
     `reachable=2`; the row reports `reachable_match_count=2` and the
     status uses the reachable (not raw) threshold."""
-    from penalty_pred.shootouts import (
+    from twelveyards.shootouts import (
         FetchResult,
         aggregate_per_tournament_success_rate,
     )
@@ -729,7 +729,7 @@ def test_write_per_tournament_creates_parent_dir(tmp_path: Path) -> None:
     """`write_per_tournament_success_rate` creates the parent directory
     if it does not exist (consistent with `write_skipped_refs_diagnostics`
     and the other `Artifacts.write_*` methods)."""
-    from penalty_pred.shootouts import (
+    from twelveyards.shootouts import (
         TournamentSuccessRate,
         write_per_tournament_success_rate,
     )

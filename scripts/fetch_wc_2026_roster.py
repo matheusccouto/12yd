@@ -28,10 +28,10 @@ import argparse
 import sys
 from pathlib import Path
 
-from penalty_pred.artifacts import Artifacts
-from penalty_pred.client import FotMobClient
-from penalty_pred.rosters import fetch_wc_2026_roster
-from penalty_pred.tournaments import WC_2026_LEAGUE, WC_2026_SEASON
+from twelveyards.artifacts import Artifacts
+from twelveyards.client import FotMobClient
+from twelveyards.rosters import fetch_wc_2026_roster
+from twelveyards.tournaments import WC_2026_LEAGUE, WC_2026_SEASON
 
 
 def main() -> int:
@@ -74,7 +74,7 @@ def main() -> int:
     # Reuse the rosters module's league abstraction indirectly: we accept
     # CLI overrides so the script can be re-parameterised for a different
     # tournament (e.g. Euro 2024) without code changes.
-    from penalty_pred.leagues import League
+    from twelveyards.leagues import League
 
     league = League(args.league_id, args.slug, "")
     rows = fetch_wc_2026_roster(client, league, args.season)

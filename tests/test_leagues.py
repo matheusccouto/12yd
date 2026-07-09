@@ -11,7 +11,7 @@ uses the full `LEAGUE_BY_ID` for slug lookups.
 
 from __future__ import annotations
 
-from penalty_pred.leagues import (
+from twelveyards.leagues import (
     CLUB_LEAGUE_IDS,
     CLUB_LEAGUES,
     EXTENDED_LEAGUES,

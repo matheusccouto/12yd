@@ -18,7 +18,7 @@ uv run python scripts/fetch_2022_final.py
 
 ## Layout
 
-- `src/penalty_pred/` — library code (HTTP client, leagues, shootout extractor, coordinates, config).
+- `src/twelveyards/` — library code (HTTP client, leagues, shootout extractor, coordinates, config).
 - `scripts/` — thin CLI entry points per issue.
 - `tests/` — pytest suite.
 - `data/fotmob_cache/` — persistent HTTP cache (gitignored).

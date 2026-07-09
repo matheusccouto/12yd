@@ -37,8 +37,8 @@ from pathlib import Path
 
 import pytest
 
-from penalty_pred.artifacts import Artifacts
-from penalty_pred.features import (
+from twelveyards.artifacts import Artifacts
+from twelveyards.features import (
     PRIOR_PROB,
     BGroupContext,
     KickIndex,
@@ -54,8 +54,8 @@ from penalty_pred.features import (
     load_player_history,
     side_distribution,
 )
-from penalty_pred.player_history import PlayerMetadata
-from penalty_pred.shootouts import ShootoutKick
+from twelveyards.player_history import PlayerMetadata
+from twelveyards.shootouts import ShootoutKick
 from tests._factories import (
     TRAINING_ROW_FIELDS,
     make_history_row,

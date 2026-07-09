@@ -34,10 +34,10 @@ import time
 from datetime import date
 from pathlib import Path
 
-from penalty_pred.artifacts import Artifacts
-from penalty_pred.client import FotMobClient
-from penalty_pred.config import HISTORY_FLOOR, LOOKBACK_WINDOW_YEARS, today_utc
-from penalty_pred.initial_set import (
+from twelveyards.artifacts import Artifacts
+from twelveyards.client import FotMobClient
+from twelveyards.config import HISTORY_FLOOR, LOOKBACK_WINDOW_YEARS, today_utc
+from twelveyards.initial_set import (
     MissingKicker,
     fetch_all_initial_set_penalty_history_parallel,
     iter_initial_set_kickers,

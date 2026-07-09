@@ -139,9 +139,9 @@ and is human-readable for review.
 - `docs/PRD-v4.md` Phase 2 step 3
 - `docs/model-review.md` Topic 1.4 (the 86.6% no-history prediction rows,
   the noise floor the documentation helps characterise)
-- `src/penalty_pred/shootouts.py::FetchResult` (`no_kicks=True`,
+- `src/twelveyards/shootouts.py::FetchResult` (`no_kicks=True`,
   `failure_mode="empty_shotmap"`)
-- `src/penalty_pred/shootouts.py::write_skipped_refs_diagnostics`
+- `src/twelveyards/shootouts.py::write_skipped_refs_diagnostics`
   (the JSONL writer that records these in
   `data/skipped_refs_diagnostics.jsonl` on a fresh re-run)
 - `tests/test_tournaments.py::EXPECTED_SHOOTOUT_COUNTS` (the per-pair

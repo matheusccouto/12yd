@@ -29,17 +29,17 @@ from typing import Any
 
 import pytest
 
-from penalty_pred.artifacts import Artifacts
-from penalty_pred.client import FotMobClient
-from penalty_pred.leagues import LEAGUE_BY_ID
-from penalty_pred.match_ref import MatchRef
-from penalty_pred.rosters import (
+from twelveyards.artifacts import Artifacts
+from twelveyards.client import FotMobClient
+from twelveyards.leagues import LEAGUE_BY_ID
+from twelveyards.match_ref import MatchRef
+from twelveyards.rosters import (
     RosterPlayer,
     extract_lineup_players,
     fetch_wc_2026_roster,
     iter_roster_match_refs,
 )
-from penalty_pred.tournaments import WC_2026_LEAGUE, WC_2026_SEASON
+from twelveyards.tournaments import WC_2026_LEAGUE, WC_2026_SEASON
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SAMPLE_LEAGUE_PATH = REPO_ROOT / "docs" / "samples" / "league_wc_2026_slim.json"
@@ -94,7 +94,7 @@ def _stub_client(
         msg = f"stub: unknown path {path!r}"
         raise AssertionError(msg)
 
-    from penalty_pred import client as client_module
+    from twelveyards import client as client_module
 
     monkeypatch.setattr(client_module, "_discover_build_id", lambda c: "stub-build")
     monkeypatch.setattr(client_module.FotMobClient, "get", fake_get)

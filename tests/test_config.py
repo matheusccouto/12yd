@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from penalty_pred import config
+from twelveyards import config
 
 
 def test_predict_window_is_a_date() -> None:

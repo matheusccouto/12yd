@@ -22,9 +22,9 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from penalty_pred.artifacts import Artifacts
-from penalty_pred.client import FotMobClient
-from penalty_pred.player_history import fetch_player_penalty_history
+from twelveyards.artifacts import Artifacts
+from twelveyards.client import FotMobClient
+from twelveyards.player_history import fetch_player_penalty_history
 
 # Default test case (PRD story 7): Lionel Messi, target date 2022-12-18.
 DEFAULT_PLAYER_ID: int = 30981

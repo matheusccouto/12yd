@@ -27,18 +27,18 @@ from typing import Any
 
 import pytest
 
-from penalty_pred.artifacts import Artifacts
-from penalty_pred.client import FotMobClient
-from penalty_pred.initial_set import (
+from twelveyards.artifacts import Artifacts
+from twelveyards.client import FotMobClient
+from twelveyards.initial_set import (
     InitialSetFetchResult,
     InitialSetKicker,
     MissingKicker,
     fetch_all_initial_set_penalty_history,
     iter_initial_set_kickers,
 )
-from penalty_pred.player_history import fetch_player_data
-from penalty_pred.rosters import RosterPlayer
-from penalty_pred.shootouts import ShootoutKick
+from twelveyards.player_history import fetch_player_data
+from twelveyards.rosters import RosterPlayer
+from twelveyards.shootouts import ShootoutKick
 from tests._factories import (
     MISSING_KICKER_FIELDS,
     PLAYER_PENALTY_FIELDS,
@@ -180,7 +180,7 @@ def _stub_player_only(monkeypatch: pytest.MonkeyPatch, player_page: Mapping[str,
     """Patch FotMobClient.get to return the player page for any path
     starting with `players/`. Other paths raise (caller should not
     need them)."""
-    from penalty_pred import client as client_module
+    from twelveyards import client as client_module
 
     def fake_get(self: FotMobClient, path: str, params: dict | None = None) -> Any:
         if path.startswith("players/"):
@@ -200,7 +200,7 @@ def test_fetch_player_data_with_empty_slug_uses_no_slug_url(
     `players/{id}/{slug}`. FotMob does not use the slug for routing;
     the player_id is the authoritative key."""
     seen_paths: list[str] = []
-    from penalty_pred import client as client_module
+    from twelveyards import client as client_module
 
     def fake_get(self: FotMobClient, path: str, params: dict | None = None) -> Any:
         seen_paths.append(path)
@@ -221,7 +221,7 @@ def test_fetch_player_data_with_slug_keeps_url_with_slug(
     `players/42/lionel-messi`. Slug is preserved for cache stability
     when the caller knows it."""
     seen_paths: list[str] = []
-    from penalty_pred import client as client_module
+    from twelveyards import client as client_module
 
     def fake_get(self: FotMobClient, path: str, params: dict | None = None) -> Any:
         seen_paths.append(path)
@@ -347,7 +347,7 @@ def _stub_two_kickers(
         msg = f"stub: unknown path {path!r}"
         raise AssertionError(msg)
 
-    from penalty_pred import client as client_module
+    from twelveyards import client as client_module
 
     monkeypatch.setattr(client_module, "_discover_build_id", lambda c: "stub-build")
     monkeypatch.setattr(client_module.FotMobClient, "get", fake_get)
@@ -414,7 +414,7 @@ def test_fetch_all_initial_set_continues_on_per_kicker_error(
         msg = f"stub: unknown path {path!r}"
         raise AssertionError(msg)
 
-    from penalty_pred import client as client_module
+    from twelveyards import client as client_module
 
     monkeypatch.setattr(client_module, "_discover_build_id", lambda c: "stub-build")
     monkeypatch.setattr(client_module.FotMobClient, "get", fake_get)
@@ -436,7 +436,7 @@ def test_fetch_all_initial_set_continues_on_per_kicker_error(
 
 def test_fetch_all_initial_set_empty_input(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """An empty Initial Set yields no results (no FotMob calls)."""
-    from penalty_pred import client as client_module
+    from twelveyards import client as client_module
 
     urls_called: list[str] = []
 
@@ -518,7 +518,7 @@ def test_fetch_initial_set_script_accepts_reparameterisation_flags() -> None:
     import subprocess
     import sys
 
-    from penalty_pred.config import HISTORY_FLOOR, LOOKBACK_WINDOW_YEARS
+    from twelveyards.config import HISTORY_FLOOR, LOOKBACK_WINDOW_YEARS
 
     repo_root = Path(__file__).resolve().parent.parent
     result = subprocess.run(

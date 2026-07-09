@@ -9,13 +9,13 @@ from pathlib import Path
 
 import pytest
 
-from penalty_pred.rsssf import (
+from twelveyards.rsssf import (
     RSSSFShootout,
     count_shootouts_by_pairs,
     load_rsssf_html,
     parse_rsssf_html,
 )
-from penalty_pred.tournaments import LEAGUE_SEASONS_PREDICT_WINDOW, RSSSF_TO_LEAGUE_NAME
+from twelveyards.tournaments import LEAGUE_SEASONS_PREDICT_WINDOW, RSSSF_TO_LEAGUE_NAME
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RSSSF_FIXTURE = REPO_ROOT / "docs" / "samples" / "rsssf_penaltiestour.html"
