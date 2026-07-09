@@ -36,7 +36,7 @@ from pathlib import Path
 
 from twelveyards.artifacts import Artifacts
 from twelveyards.client import FotMobClient
-from twelveyards.config import HISTORY_FLOOR, LOOKBACK_WINDOW_YEARS, today_utc
+from twelveyards.config import LOOKBACK_WINDOW_YEARS, SCRAPE_FLOOR, today_utc
 from twelveyards.initial_set import (
     MissingKicker,
     fetch_all_initial_set_penalty_history_parallel,
@@ -92,8 +92,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--history-floor",
-        default=HISTORY_FLOOR.isoformat(),
-        help=f"Hard lower bound on history dates, ISO 8601 (default: {HISTORY_FLOOR.isoformat()}).",
+        default=SCRAPE_FLOOR.isoformat(),
+        help=f"Hard lower bound on history dates, ISO 8601 (default: {SCRAPE_FLOOR.isoformat()}).",
     )
     parser.add_argument(
         "--max-workers",

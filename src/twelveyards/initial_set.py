@@ -26,7 +26,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import date
 
-from .config import HISTORY_FLOOR, LOOKBACK_WINDOW_YEARS
+from .config import LOOKBACK_WINDOW_YEARS, SCRAPE_FLOOR
 from .player_history import PlayerPenalty, fetch_player_penalty_history
 from .rosters import RosterPlayer
 from .shootouts import ShootoutKick
@@ -160,7 +160,7 @@ def fetch_all_initial_set_penalty_history(
     initial_set: Iterable[InitialSetKicker],
     target_date: date | None = None,
     lookback_years: int = LOOKBACK_WINDOW_YEARS,
-    history_floor: date = HISTORY_FLOOR,
+    history_floor: date = SCRAPE_FLOOR,
 ) -> Iterator[InitialSetFetchResult]:
     """Fan out the per-kicker fetcher across the Initial Set.
 
@@ -204,7 +204,7 @@ def fetch_all_initial_set_penalty_history_parallel(
     initial_set: Iterable[InitialSetKicker],
     target_date: date | None = None,
     lookback_years: int = LOOKBACK_WINDOW_YEARS,
-    history_floor: date = HISTORY_FLOOR,
+    history_floor: date = SCRAPE_FLOOR,
     max_workers: int = 12,
 ) -> Iterator[InitialSetFetchResult]:
     """Parallel fan-out of the per-kicker fetcher across the Initial Set.

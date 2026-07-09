@@ -7,19 +7,24 @@ from datetime import date
 from twelveyards import config
 
 
-def test_predict_window_is_a_date() -> None:
-    assert isinstance(config.PREDICT_WINDOW_START, date)
+def test_scrape_floor_is_a_date() -> None:
+    assert isinstance(config.SCRAPE_FLOOR, date)
 
 
-def test_history_floor_is_before_predict_window() -> None:
-    """The History Floor must be ≤ the Prediction Window start so that
-    every target shootout kick has ≥ a few years of pre-window history."""
-    assert config.HISTORY_FLOOR < config.PREDICT_WINDOW_START
+def test_train_floor_is_a_date() -> None:
+    assert isinstance(config.TRAIN_FLOOR, date)
 
 
-def test_history_floor_matches_prd() -> None:
-    """PRD: current History Floor is 2016-01-01."""
-    assert config.HISTORY_FLOOR == date(2016, 1, 1)
+def test_scrape_floor_is_before_train_floor() -> None:
+    assert config.SCRAPE_FLOOR < config.TRAIN_FLOOR
+
+
+def test_scrape_floor_matches_prd() -> None:
+    assert config.SCRAPE_FLOOR == date(2016, 1, 1)
+
+
+def test_train_floor_matches_prd() -> None:
+    assert config.TRAIN_FLOOR == date(2021, 1, 1)
 
 
 def test_lookback_window_is_an_int() -> None:

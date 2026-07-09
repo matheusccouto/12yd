@@ -4,6 +4,9 @@ progress.txt
 # Runtime artifacts
 data/fotmob_cache/
 data/*.jsonl
+!data/wc2026_roster.jsonl
+!data/player_history.jsonl
+!data/predictions.jsonl
 data/*.json
 output/
 

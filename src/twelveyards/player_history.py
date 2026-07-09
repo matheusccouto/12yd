@@ -31,7 +31,7 @@ from email.utils import parsedate_to_datetime
 from typing import Any
 
 from .client import FotMobClient
-from .config import HISTORY_FLOOR, LOOKBACK_WINDOW_YEARS
+from .config import LOOKBACK_WINDOW_YEARS, SCRAPE_FLOOR
 from .coordinates import side
 from .fotmob_parsing import (
     SHOTMAP_EVENT_TYPE_TO_OUTCOME,
@@ -396,7 +396,7 @@ def extract_player_penalties_from_match(
 def compute_lookback_window(
     target_date: date,
     lookback_years: int = LOOKBACK_WINDOW_YEARS,
-    history_floor: date = HISTORY_FLOOR,
+    history_floor: date = SCRAPE_FLOOR,
 ) -> tuple[date, date]:
     """Compute the (start, end) date bounds of the Lookback Window for `target_date`.
 
@@ -420,7 +420,7 @@ def fetch_player_penalty_history(
     player_slug: str = "",
     target_date: date | None = None,
     lookback_years: int = LOOKBACK_WINDOW_YEARS,
-    history_floor: date = HISTORY_FLOOR,
+    history_floor: date = SCRAPE_FLOOR,
 ) -> Iterator[PlayerPenalty]:
     """Yield every penalty the player took in the Lookback Window.
 
