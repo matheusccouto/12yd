@@ -1,4 +1,4 @@
-"""Streamlit dashboard entry point — v7 metric cards with delta (Issue #48).
+"""Streamlit dashboard entry point — v8 bar chart cards (Issue #48).
 
 A single-page Streamlit app on Streamlit Cloud that surfaces live
 shootout predictions. At load time, the app fetches the WC 2026
@@ -8,14 +8,13 @@ pick a match from a sidebar selectbox. For the selected match, the
 app loads `predictions.jsonl` and `player_history.jsonl` from
 Hugging Face, joins the two to compute the per-kicker career penalty
 count, filters to the match's two teams, and renders a **card per
-kicker**: name + career penalty count + three metric cards for L/C/R
-probabilities, with a green "best" delta on the most-likely side.
+kicker**: name + career penalty count + a bar chart showing L/C/R
+probabilities on a fixed 0–100 scale.
 
-The v7 design uses only native Streamlit elements. Each card is a
+The v8 design uses only native Streamlit elements. Each card is a
 bordered container with:
 - Line 1: Player name + penalty count (inline)
-- Line 2: Three `st.metric` cards for L/C/R probabilities.
-  The highest probability gets a green "best" delta indicator.
+- Line 2: A `st.bar_chart` with Left/Center/Right bars, y-axis fixed 0–100.
 
 The data + match-filter logic lives in `penalty_pred.dashboard` —
 this file is a thin Streamlit layer over the library, so the same
@@ -33,6 +32,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
+import altair as alt
+import pandas as pd
 import streamlit as st
 from huggingface_hub import hf_hub_download
 
@@ -42,7 +43,6 @@ from penalty_pred.dashboard import (
     KickerPrediction,
     MatchContext,
     load_upcoming_knockouts,
-    most_likely_side,
     predictions_for_match,
 )
 from penalty_pred.player_history import PlayerPenalty
@@ -203,23 +203,30 @@ def _kicker_badge_color(team_name: str) -> _BadgeColor:
 
 
 def render_card(kicker: KickerPrediction) -> None:
-    """Render one kicker card: name + penalties inline, three metric cards.
+    """Render one kicker card: name + penalties inline, bar chart.
 
     The card is a `st.container(border=True)` with:
     - Line 1: Player name + penalty count (inline)
-    - Line 2: Three metric cards for L/C/R probabilities.
-      The highest probability gets a green "best" delta.
+    - Line 2: An Altair bar chart with Left/Center/Right bars, y-axis fixed 0–100.
     """
-    most_likely = most_likely_side(kicker.p_L, kicker.p_C, kicker.p_R)
     with st.container(border=True):
         st.markdown(f"**{kicker.player_name}** · {kicker.total_penalties} pen")
-        cols = st.columns(3)
-        with cols[0]:
-            st.metric("Left", f"{kicker.p_L * 100:.0f}%", delta="most likely" if most_likely == "L" else None, delta_color="green", border=True, height=135, delta_arrow="off")
-        with cols[1]:
-            st.metric("Center", f"{kicker.p_C * 100:.0f}%", delta="most likely" if most_likely == "C" else None, delta_color="green", border=True, height=135, delta_arrow="off")
-        with cols[2]:
-            st.metric("Right", f"{kicker.p_R * 100:.0f}%", delta="most likely" if most_likely == "R" else None, delta_color="green", border=True, height=135, delta_arrow="off")
+        df = pd.DataFrame(
+            {
+                "side": ["Left", "Center", "Right"],
+                "probability": [kicker.p_L * 100, kicker.p_C * 100, kicker.p_R * 100],
+            }
+        )
+        chart = (
+            alt.Chart(df)
+            .mark_bar()
+            .encode(
+                x=alt.X("side:N", title=None, axis=alt.Axis(labelFontSize=12)),
+                y=alt.Y("probability:Q", title=None, scale=alt.Scale(domain=[0, 100]), axis=alt.Axis(labelFontSize=11)),
+            )
+            .properties(height=180)
+        )
+        st.altair_chart(chart, use_container_width=True)
 
 
 def render_team_block(
