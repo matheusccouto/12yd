@@ -232,3 +232,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+.playwright-cli/
+.playwright/
+.agents/
