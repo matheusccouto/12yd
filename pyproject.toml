@@ -16,39 +16,12 @@ dependencies = [
     "streamlit>=1.30",
 ]
 
-[tool.poetry]
-name = "penalty-pred"
-version = "0.1.0"
-description = "Predict penalty shootout kick side from a kicker's history (FotMob data, LightGBM classifier)."
-authors = ["matheusccouto"]
-readme = "README.md"
-packages = [{include = "penalty_pred", from = "src"}]
-
-[tool.poetry.dependencies]
-python = ">=3.12"
-httpx = ">=0.27"
-huggingface_hub = ">=0.20"
-numpy = ">=2.0"
-pandas = ">=2.0"
-packaging = ">=24.0"
-plotly = ">=6.0"
-scikit-learn = ">=1.5"
-lightgbm = ">=4.5"
-streamlit = ">=1.30"
-
 [dependency-groups]
-dev = [
-    "pytest>=8.0",
-    "ruff>=0.6",
-    "ty>=0.0.1a5",
-]
+dev = ["pytest>=8.0", "ruff>=0.6", "ty>=0.0.1a5"]
 
 [build-system]
 requires = ["uv_build>=0.11.21,<0.12"]
 build-backend = "uv_build"
-
-[tool.uv]
-package = true
 
 [tool.ruff]
 line-length = 100
@@ -58,14 +31,5 @@ target-version = "py312"
 select = ["E", "F", "I", "B", "UP", "W"]
 ignore = ["E501"]
 
-[tool.ruff.lint.per-file-ignores]
-"tests/**" = ["E402"]
-
-[tool.ty.environment]
-root = ["./src", "./", "./tests"]
-python = "./.venv"
-python-version = "3.12"
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra"
