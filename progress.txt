@@ -193,3 +193,30 @@ compliance with `select = ["ALL"]`.
 ### Blockers / notes
 - scrape-and-predict.yml still requires a workflow-scoped token to push.
   File exists locally but the GH App token lacks `workflows` permission.
+
+
+## Iteration 7: Create workflow + final HF cleanup (2026-07-10)
+
+### Task
+Create `.github/workflows/scrape-and-predict.yml` (PRD #18, #19, #21)
+and remove HF references from `ralph.yml` (PRD #4).
+
+### Key decisions
+- scrape-and-predict.yml: Single job, daily cron (06:00 UTC) +
+  workflow_dispatch. Steps: checkout → config git → install uv →
+  restore fotmob cache (run_id key + prefix restore-keys) →
+  uv sync --group pipeline --no-dev → scrape roster → scrape player
+  history → predict (with TABPFN_TOKEN secret) → git commit+push
+  JSONLs → save cache (if: always()). Timeout 60 min.
+- Uses actions/cache/restore + actions/cache/save split for partial
+  progress persistence.
+- ralph.yml: Removed install hf CLI step, Add hf to PATH step, and
+  HF_TOKEN env var. HF is fully dropped from CI surface.
+
+### Files changed
+- .github/workflows/scrape-and-predict.yml — new workflow
+- .github/workflows/ralph.yml — removed HF CLI install + HF_TOKEN
+
+### Blockers / notes
+- None. Workflow file is created and committed. Repo owner needs
+  TABPFN_TOKEN configured as a repo secret for the predict step.
