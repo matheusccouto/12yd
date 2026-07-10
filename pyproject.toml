@@ -9,12 +9,12 @@ dependencies = [
     "numpy>=2.0",
     "pandas>=2.0",
     "packaging>=24.0",
+    "streamlit>=1.30",
+    "tabpfn-client>=0.3",
 ]
 
 [dependency-groups]
 dev = ["pytest>=8.0", "ruff>=0.6", "ty>=0.0.1a5"]
-app = ["streamlit>=1.30"]
-pipeline = ["tabpfn-client>=0.3"]
 
 [build-system]
 requires = ["uv_build>=0.11.21,<0.12"]
@@ -58,6 +58,9 @@ select = ["ALL"]
     "TRY003",
     "ERA001",
     "COM812",
+    "S603",
+    "S607",
+    "PLW1510",
 ]
 "scripts/**/*.py" = [
     "T201",

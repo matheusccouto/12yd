@@ -1,24 +1,34 @@
 """Tests for the v5 deployment manifest.
 
-v5 drops lightgbm, plotly, huggingface_hub, packaging, sklearn from runtime deps.
-v5 runtime deps: tabpfn-client, streamlit, httpx, numpy, pandas.
+v5 drops lightgbm, plotly, huggingface_hub, sklearn from runtime deps.
+v5 runtime deps: tabpfn-client, streamlit, httpx, numpy, pandas, packaging.
 
-The manifest is requirements.txt at the repo root, which Streamlit Cloud reads.
+The manifest is pyproject.toml at the repo root, resolved to uv.lock.
+Streamlit Community Cloud reads uv.lock (priority #1) and runs `uv sync --frozen`,
+which installs [project.dependencies] — NOT [dependency-groups]. Runtime deps
+must therefore live directly under [project.dependencies], never in groups.
+requirements.txt was removed; ADR-0002 mandates pyproject.toml as the sole manifest.
 """
 
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
+import sys
 import tomllib
 from importlib import import_module
 from pathlib import Path
 
 import pytest
-from packaging.specifiers import SpecifierSet
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
 REQUIREMENTS_PATH = REPO_ROOT / "requirements.txt"
+UV_LOCK_PATH = REPO_ROOT / "uv.lock"
+
+DROPPED_DEPS = {"plotly", "lightgbm", "huggingface-hub", "scikit-learn", "sklearn"}
+EXPECTED_RUNTIME_DEPS = {"httpx", "numpy", "pandas", "packaging", "streamlit", "tabpfn-client"}
 
 
 # ---------------------------------------------------------------------------
@@ -42,22 +52,32 @@ def test_tabpfn_client_is_importable() -> None:
 
 
 # ---------------------------------------------------------------------------
-# requirements.txt
+# pyproject.toml is the deployment manifest (ADR-0002)
 # ---------------------------------------------------------------------------
 
 
-def test_requirements_txt_exists() -> None:
-    assert REQUIREMENTS_PATH.exists(), "requirements.txt missing at repo root"
+def test_requirements_txt_does_not_exist() -> None:
+    assert not REQUIREMENTS_PATH.exists(), (
+        "requirements.txt must not exist — ADR-0002 designates pyproject.toml as "
+        "the sole dependency manifest. requirements.txt would shadow uv.lock on "
+        "Streamlit Community Cloud (priority order: uv.lock < requirements.txt) "
+        "and reinstall the (now deleted) hand-maintained mirror instead of the "
+        "local twelveyards package."
+    )
+
+
+def test_uv_lock_exists() -> None:
+    assert UV_LOCK_PATH.exists(), (
+        "uv.lock is required — Streamlit Community Cloud reads it (priority #1) "
+        "and runs `uv sync --frozen` to install the local twelveyards package."
+    )
 
 
 def _parse_pyproject_dependencies() -> dict[str, str]:
     data = tomllib.loads(PYPROJECT_PATH.read_text())
     deps: list[str] = data["project"]["dependencies"]
-    app_deps: list[str] = data["dependency-groups"].get("app", [])
-    pipeline_deps: list[str] = data["dependency-groups"].get("pipeline", [])
-    all_deps = deps + app_deps + pipeline_deps
     parsed: dict[str, str] = {}
-    for dep in all_deps:
+    for dep in deps:
         match = re.match(r"^([A-Za-z0-9_.\-]+)\s*(.*)$", dep.strip())
         assert match, f"unparseable dep: {dep!r}"
         name, specifier = match.group(1), match.group(2).strip()
@@ -65,106 +85,113 @@ def _parse_pyproject_dependencies() -> dict[str, str]:
     return parsed
 
 
-def _parse_requirements_txt() -> dict[str, str]:
-    parsed: dict[str, str] = {}
-    for raw in REQUIREMENTS_PATH.read_text().splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        match = re.match(r"^([A-Za-z0-9_.\-]+)\s*(.*)$", line)
-        assert match, f"unparseable requirement: {line!r}"
-        name, specifier = match.group(1), match.group(2).strip()
-        parsed[name.lower().replace("_", "-")] = specifier
-    return parsed
-
-
-def test_requirements_txt_contains_tabpfn_client() -> None:
-    reqs = _parse_requirements_txt()
-    assert "tabpfn-client" in reqs, (
-        "requirements.txt must declare tabpfn-client for Streamlit Cloud deploy"
-    )
-
-
-def test_requirements_txt_contains_streamlit() -> None:
-    reqs = _parse_requirements_txt()
-    assert "streamlit" in reqs, (
-        "requirements.txt must declare streamlit for Streamlit Cloud deploy"
-    )
-
-
-def test_requirements_txt_contains_core_deps() -> None:
-    reqs = _parse_requirements_txt()
-    for dep in ("httpx", "numpy", "pandas"):
-        assert dep in reqs, (
-            f"requirements.txt missing {dep} (core runtime dep)"
-        )
-
-
-def test_requirements_txt_matches_pyproject() -> None:
-    pyproject_deps = _parse_pyproject_dependencies()
-    requirements = _parse_requirements_txt()
-    missing = set(pyproject_deps) - set(requirements) - {"packaging"}
+def test_pyproject_contains_runtime_deps() -> None:
+    deps = _parse_pyproject_dependencies()
+    missing = EXPECTED_RUNTIME_DEPS - set(deps)
     assert not missing, (
-        f"requirements.txt is missing packages: {sorted(missing)}"
+        f"pyproject.toml [project.dependencies] missing runtime deps: "
+        f"{sorted(missing)}. Streamlit Community Cloud runs `uv sync --frozen`, "
+        f"which installs ONLY [project.dependencies] (and the default dev group), "
+        f"NOT [dependency-groups]. Runtime deps must live here, not in groups."
     )
 
 
-def test_requirements_txt_specifiers_compatible() -> None:
-    pyproject_deps = _parse_pyproject_dependencies()
-    requirements = _parse_requirements_txt()
-    for name, req_spec in requirements.items():
-        if name not in pyproject_deps:
-            continue
-        pyproject_spec = pyproject_deps[name]
-        req = SpecifierSet(req_spec) if req_spec else SpecifierSet()
-        proj = SpecifierSet(pyproject_spec) if pyproject_spec else SpecifierSet()
-        for v in _sample_versions(req):
-            if v in req:
-                assert v in proj, (
-                    f"requirements.txt specifier {req_spec!r} for "
-                    f"{name!r} allows {v!r} but pyproject.toml "
-                    f"specifier {pyproject_spec!r} does not."
-                )
+def test_pyproject_no_app_or_pipeline_groups() -> None:
+    data = tomllib.loads(PYPROJECT_PATH.read_text())
+    groups = data.get("dependency-groups", {})
+    leaked = {g for g in ("app", "pipeline") if g in groups}
+    assert not leaked, (
+        f"[dependency-groups] must not define {sorted(leaked)} — those groups are "
+        f"NOT installed by `uv sync --frozen` on Streamlit Cloud. Their contents "
+        f"must be flattened into [project.dependencies]."
+    )
 
 
-def _sample_versions(specifier: SpecifierSet) -> list[str]:
-    return [
-        "0.0.0", "0.27.0", "0.3.0", "1.0.0", "1.30.0",
-        "2.0.0", "5.0.0", "6.0.0", "24.0.0", "100.0.0",
-    ]
+def test_pyproject_no_dropped_deps() -> None:
+    deps = _parse_pyproject_dependencies()
+    leaked = DROPPED_DEPS & set(deps)
+    assert not leaked, f"v5 dropped deps {sorted(leaked)} must not reappear"
 
 
-def test_requirements_txt_no_pinned_versions() -> None:
-    for raw in REQUIREMENTS_PATH.read_text().splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        assert "==" not in line, (
-            f"requirements.txt has a pinned (==) requirement: {line!r}"
+def test_pyproject_no_pinned_versions() -> None:
+    deps = _parse_pyproject_dependencies()
+    for name, spec in deps.items():
+        assert "==" not in spec, (
+            f"pyproject [project.dependencies] has a pinned (==) requirement: "
+            f"{name}{spec!r} — use range specifiers (>=) instead"
         )
 
 
+def test_uv_lock_is_in_sync() -> None:
+    """uv.lock must be up to date with pyproject.toml.
+
+    `uv sync --frozen` on Streamlit Cloud refuses to mutate uv.lock; a stale
+    lock would silently skip newly-added runtime deps → ModuleNotFoundError
+    at app boot (the exact bug class this test guards against).
+    """
+    result = subprocess.run(
+        ["uv", "lock", "--check"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (
+        "uv.lock is stale. Run `uv lock` locally and commit the result. "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+
+
 # ---------------------------------------------------------------------------
-# No dropped deps
+# app.py boot path is deployable (regression for the ModuleNotFoundError bug)
 # ---------------------------------------------------------------------------
 
 
-def test_requirements_txt_no_plotly() -> None:
-    reqs = _parse_requirements_txt()
-    assert "plotly" not in reqs, "v5 drops plotly"
+def test_app_imports_resolve_under_frozen_sync(tmp_path: Path) -> None:
+    """Replay Streamlit Cloud's exact install path: fresh venv + `uv sync --frozen`.
 
+    Guards against the regression where a runtime dep sits in a
+    [dependency-groups] entry rather than [project.dependencies] — `uv sync`
+    silently skips the group and the app boot fails at import time.
+    """
 
-def test_requirements_txt_no_lightgbm() -> None:
-    reqs = _parse_requirements_txt()
-    assert "lightgbm" not in reqs, "v5 drops lightgbm"
-
-
-def test_requirements_txt_no_huggingface_hub() -> None:
-    reqs = _parse_requirements_txt()
-    assert "huggingface-hub" not in reqs, "v5 drops huggingface_hub"
-
-
-def test_requirements_txt_no_scikit_learn() -> None:
-    reqs = _parse_requirements_txt()
-    assert "scikit-learn" not in reqs, "v5 drops scikit-learn"
-    assert "sklearn" not in reqs, "v5 drops sklearn"
+    snapshot = tmp_path / "repo"
+    shutil.copytree(
+        REPO_ROOT,
+        snapshot,
+        ignore=shutil.ignore_patterns(
+            ".venv",
+            ".git",
+            "__pycache__",
+            ".pytest_cache",
+            ".ruff_cache",
+        ),
+    )
+    subprocess.run(
+        [sys.executable, "-m", "venv", str(snapshot / ".venv")],
+        check=True,
+    )
+    subprocess.run(
+        ["uv", "sync", "--frozen"],
+        cwd=snapshot,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    check = subprocess.run(
+        [
+            str(snapshot / ".venv" / "bin" / "python"),
+            "-c",
+            "import pandas, streamlit; "
+            "from twelveyards.artifacts import Artifacts; "
+            "from twelveyards.dashboard import "
+            "KickerPrediction, distinct_teams, predictions_for_match; "
+            "print('OK')",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert check.returncode == 0, (
+        "Boot path broken — a runtime dep is missing from pyproject "
+        f"[project.dependencies]. stdout={check.stdout!r} "
+        f"stderr={check.stderr!r}"
+    )
