@@ -1,41 +1,25 @@
-"""Tests for the `Artifacts` on-disk layout adapter (Issue #29).
+"""Tests for the v5 Artifacts on-disk layout adapter.
 
-The adapter owns the on-disk layout — paths, JSONL shape, model pickle,
-metrics JSON. These tests pin the contract: the path accessors point at
-the canonical filenames, the read/write methods round-trip, the v3
-17-feature schema has no `age` column (Issue #41), the metrics report
-survives a `to_dict` → JSON → `from_dict` round-trip, and the
-`fotmob_client` factory returns a `FotMobClient` rooted at the
-configured cache_dir.
+v5 changes:
+- Artifacts root is "data" (was "output")
+- Surviving artifacts: player_history, missing_history, roster, predictions
+- Dropped: shootout_kicks, training_table, model pickles, metrics, cv, diagnostics,
+  discrepancies, tournament_success_rate, lightgbm_model, baseline_model
 """
 
 from __future__ import annotations
 
-import json
-import math
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 
-from twelveyards.artifacts import Artifacts
-from twelveyards.evaluate import BaselineMetrics, MetricsReport
 from tests._factories import (
     make_history_row,
-    make_missing_kicker,
     make_prediction_row,
     make_roster_player,
-    make_shootout_kick,
-    make_training_row,
 )
-
-
-# A module-level dataclass (not nested in a test) so pickle can
-# serialise it — local classes are not picklable.
-@dataclass
-class _StubPickleModel:
-    weights: list[float]
-
+from twelveyards.artifacts import Artifacts
+from twelveyards.client import FotMobClient
 
 # ---------------------------------------------------------------------------
 # Path accessors
@@ -43,46 +27,34 @@ class _StubPickleModel:
 
 
 def test_default_paths_point_at_canonical_filenames() -> None:
-    """The default instance's path accessors point at the v1
-    canonical on-disk filenames (the script surface is preserved)."""
     art = Artifacts()
-    assert art.root == Path("output")
+    assert art.root == Path("data")
     assert art.cache_dir == Path("data/fotmob_cache")
-    assert art.shootout_kicks == Path("output/shootout_kicks.jsonl")
-    assert art.player_history == Path("output/player_history.jsonl")
-    assert art.missing_history == Path("output/missing_history.jsonl")
-    assert art.roster == Path("output/wc2026_roster.jsonl")
-    assert art.training_table == Path("output/training_table.jsonl")
-    assert art.predictions == Path("output/predictions.jsonl")
-    assert art.lightgbm_model == Path("output/lightgbm.pkl")
-    assert art.baseline_model == Path("output/baseline.pkl")
-    assert art.metrics == Path("output/metrics.json")
-    assert art.discrepancies == Path("output/discrepancies.json")
-    assert art.diagnostics == Path("output/skipped_refs_diagnostics.jsonl")
-    assert art.tournament_success_rate == Path("output/tournament_success_rate.jsonl")
-    assert art.cv_metrics == Path("output/cv_metrics.json")
+    assert art.player_history == Path("data/player_history.jsonl")
+    assert art.missing_history == Path("data/missing_history.jsonl")
+    assert art.roster == Path("data/wc2026_roster.jsonl")
+    assert art.predictions == Path("data/predictions.jsonl")
 
 
 def test_custom_root_redirects_every_artifact() -> None:
-    """A non-default `root` redirects every path accessor (the
-    scripts can be re-parameterised via `--root` without touching
-    individual artifact paths)."""
     art = Artifacts(root=Path("/tmp/foo"))
-    assert art.shootout_kicks == Path("/tmp/foo/shootout_kicks.jsonl")
+    assert art.player_history == Path("/tmp/foo/player_history.jsonl")
+    assert art.missing_history == Path("/tmp/foo/missing_history.jsonl")
+    assert art.roster == Path("/tmp/foo/wc2026_roster.jsonl")
     assert art.predictions == Path("/tmp/foo/predictions.jsonl")
-    assert art.metrics == Path("/tmp/foo/metrics.json")
-    assert art.diagnostics == Path("/tmp/foo/skipped_refs_diagnostics.jsonl")
-    assert art.tournament_success_rate == Path("/tmp/foo/tournament_success_rate.jsonl")
-    assert art.cv_metrics == Path("/tmp/foo/cv_metrics.json")
-    # The cache_dir is independent of `root`.
-    assert art.cache_dir == Path("data/fotmob_cache")
+
+
+def test_custom_cache_dir() -> None:
+    art = Artifacts(cache_dir=Path("/tmp/custom_cache"))
+    assert art.cache_dir == Path("/tmp/custom_cache")
+
+
+# ---------------------------------------------------------------------------
+# fotmob_client factory
+# ---------------------------------------------------------------------------
 
 
 def test_fotmob_client_factory_uses_cache_dir() -> None:
-    """`fotmob_client()` returns a `FotMobClient` whose `cache_dir`
-    matches the adapter's `cache_dir`."""
-    from twelveyards.client import FotMobClient
-
     art = Artifacts(cache_dir=Path("/tmp/foo_cache"))
     client = art.fotmob_client()
     assert isinstance(client, FotMobClient)
@@ -90,19 +62,38 @@ def test_fotmob_client_factory_uses_cache_dir() -> None:
 
 
 # ---------------------------------------------------------------------------
-# JSONL round-trips (one per dataclass)
+# v5 has no old artifacts
 # ---------------------------------------------------------------------------
 
 
-_shootout_kick = make_shootout_kick
+def test_v5_has_no_shootout_kicks() -> None:
+    art = Artifacts()
+    assert not hasattr(art, "shootout_kicks")
 
 
-def test_shootout_kicks_round_trip(tmp_path: Path) -> None:
-    art = Artifacts(root=tmp_path)
-    kicks = [_shootout_kick(1), _shootout_kick(1, 2)]
-    n = art.write_shootout_kicks(kicks, path=art.shootout_kicks)
-    assert n == 2
-    assert art.read_shootout_kicks() == kicks
+def test_v5_has_no_training_table() -> None:
+    art = Artifacts()
+    assert not hasattr(art, "training_table")
+
+
+def test_v5_has_no_lightgbm_model() -> None:
+    art = Artifacts()
+    assert not hasattr(art, "lightgbm_model")
+
+
+def test_v5_has_no_baseline_model() -> None:
+    art = Artifacts()
+    assert not hasattr(art, "baseline_model")
+
+
+def test_v5_has_no_metrics() -> None:
+    art = Artifacts()
+    assert not hasattr(art, "metrics")
+
+
+# ---------------------------------------------------------------------------
+# JSONL round-trips
+# ---------------------------------------------------------------------------
 
 
 def test_player_history_round_trip(tmp_path: Path) -> None:
@@ -114,8 +105,10 @@ def test_player_history_round_trip(tmp_path: Path) -> None:
 
 
 def test_missing_history_round_trip(tmp_path: Path) -> None:
+    from twelveyards.initial_set import MissingKicker
+
     art = Artifacts(root=tmp_path)
-    rows = [make_missing_kicker()]
+    rows = [MissingKicker(player_id=1, player_name="No History", team_id=100, team_name="T")]
     n = art.write_missing_history(rows, path=art.missing_history)
     assert n == 1
     assert art.read_missing_history() == rows
@@ -137,192 +130,36 @@ def test_predictions_round_trip(tmp_path: Path) -> None:
     assert art.read_predictions() == rows
 
 
-def test_training_table_round_trip_v3_schema(tmp_path: Path) -> None:
-    """`write_training_table` writes the v3 17-feature schema (no
-    `age` column, per Issue #41). The roundtrip preserves every
-    field; the JSONL has no `NaN` literals and no `null` for the
-    dropped column."""
+def test_predictions_round_trip_with_v5_fields(tmp_path: Path) -> None:
     art = Artifacts(root=tmp_path)
-    rows = [make_training_row()]
-    n = art.write_training_table(rows, path=art.training_table)
+    rows = [
+        make_prediction_row(
+            player_id=42,
+            player_name="Lionel Messi",
+            short_name="Messi",
+            photo_url="https://images.fotmob.com/image_resources/playerimages/42.png",
+            total_penalties=12,
+        ),
+    ]
+    n = art.write_predictions(rows, path=art.predictions)
     assert n == 1
-    raw = art.training_table.read_text(encoding="utf-8")
-    assert "age" not in raw, "v3 schema should not write an `age` field"
-    assert "NaN" not in raw
-    back = art.read_training_table()
-    assert back[0] == rows[0]
+    back = art.read_predictions()
+    assert back[0].short_name == "Messi"
+    assert back[0].total_penalties == 12
+    assert "fotmob" in back[0].photo_url
 
 
 # ---------------------------------------------------------------------------
-# Metrics
-# ---------------------------------------------------------------------------
-
-
-def _make_report() -> MetricsReport:
-    return MetricsReport(
-        model=BaselineMetrics(
-            name="model",
-            log_loss=1.1,
-            accuracy=0.5,
-            save_rate=0.46,
-            n_kicks=28,
-        ),
-        random_baseline=BaselineMetrics(
-            name="random",
-            log_loss=math.log(3),
-            accuracy=1.0 / 3.0,
-            save_rate=0.55,
-            n_kicks=28,
-        ),
-        kicker_most_frequent_baseline=BaselineMetrics(
-            name="last_side",
-            log_loss=None,
-            accuracy=None,
-            save_rate=0.40,
-            n_kicks=28,
-        ),
-        actual_keeper_baseline=BaselineMetrics(
-            name="actual_keeper",
-            log_loss=None,
-            accuracy=None,
-            save_rate=None,
-            n_kicks=28,
-        ),
-        n_train=151,
-        n_holdout=28,
-        holdout_cutoff_date="2026-01-01",
-        baseline=BaselineMetrics(
-            name="baseline",
-            log_loss=1.05,
-            accuracy=0.5,
-            save_rate=0.43,
-            n_kicks=28,
-        ),
-        extras={
-            "model_kind": "lightgbm",
-            "classes": ["L", "C", "R"],
-            "feature_columns": ["p_L_5", "b3_round"],
-        },
-    )
-
-
-def test_metrics_round_trip_preserves_extras(tmp_path: Path) -> None:
-    """`write_metrics` then `read_metrics` returns a `MetricsReport`
-    with the same fields, including the optional `baseline` and the
-    `extras` dict (the model_kind/classes/feature_columns metadata
-    that the model layer stashes in `extras`)."""
-    art = Artifacts(root=tmp_path)
-    report = _make_report()
-    art.write_metrics(report, path=art.metrics)
-    back = art.read_metrics()
-    assert back.n_train == 151
-    assert back.n_holdout == 28
-    assert back.holdout_cutoff_date == "2026-01-01"
-    assert back.model.save_rate == 0.46
-    assert back.random_baseline.save_rate == 0.55
-    assert back.actual_keeper_baseline.save_rate is None
-    assert back.baseline is not None
-    assert back.baseline.save_rate == 0.43
-    assert back.extras["model_kind"] == "lightgbm"
-    assert back.extras["feature_columns"] == ["p_L_5", "b3_round"]
-
-
-def test_metrics_round_trip_without_optional_baseline(tmp_path: Path) -> None:
-    """A report without the optional `baseline` section round-trips
-    with `baseline=None` (not a KeyError)."""
-    art = Artifacts(root=tmp_path)
-    report = _make_report()
-    object.__setattr__(report, "baseline", None)  # type: ignore[attr-defined]
-    art.write_metrics(report, path=art.metrics)
-    back = art.read_metrics()
-    assert back.baseline is None
-
-
-# ---------------------------------------------------------------------------
-# Model artifact
-# ---------------------------------------------------------------------------
-
-
-def test_model_round_trip_records_feature_columns(tmp_path: Path) -> None:
-    """`write_model` pickles `{model, feature_columns, model_kind, params}`
-    and `read_model` returns the same dict. The `feature_columns` order
-    is preserved (the predict path relies on it for column alignment)."""
-    import pickle
-
-    art = Artifacts(root=tmp_path)
-    model = _StubPickleModel(weights=[1.0, 2.0, 3.0])
-    art.write_model(
-        model,
-        feature_columns=["p_L_5", "p_C_5", "p_R_5"],
-        model_kind="stub",
-        params={"C": 1.0},
-        path=art.baseline_model,
-    )
-    raw = pickle.loads(art.baseline_model.read_bytes())
-    assert raw["model"] == model
-    assert raw["feature_columns"] == ["p_L_5", "p_C_5", "p_R_5"]
-    assert raw["model_kind"] == "stub"
-    assert raw["params"] == {"C": 1.0}
-
-    back = art.read_model(path=art.baseline_model)
-    assert back["model"] == model
-    assert back["feature_columns"] == ["p_L_5", "p_C_5", "p_R_5"]
-
-
-# ---------------------------------------------------------------------------
-# Streaming serialise
-# ---------------------------------------------------------------------------
-
-
-def test_serialize_row_matches_write_shape(tmp_path: Path) -> None:
-    """`serialize_row` returns a JSON string compatible with the
-    per-row shape of `write_*` so a streaming writer can mix
-    per-row `serialize_row` calls with the same file format."""
-    art = Artifacts(root=tmp_path)
-    kick = _shootout_kick()
-    # Write one row via the streaming helper…
-    out = tmp_path / "kicks.jsonl"
-    out.write_text(art.serialize_row(kick) + "\n", encoding="utf-8")
-    # …and read it back via the normal read path.
-    assert art.read_shootout_kicks(path=out) == [kick]
-
-
-def test_serialize_row_v3_no_age_key() -> None:
-    """`serialize_row` writes the v3 17-feature schema (no `age`
-    column, per Issue #41). The `nan_to_null` kwarg is a no-op
-    on the v3 row type (no NaN-valued fields) but is kept for
-    backwards compatibility with pre-#41 callers."""
-    art = Artifacts()
-    row = make_training_row()
-    text = art.serialize_row(row, nan_to_null=True)
-    payload = json.loads(text)
-    assert "age" not in payload, "v3 schema should not serialise an `age` field"
-    # The bare `serialize_row(row)` (without nan_to_null) is the
-    # non-strict path used for the rest of the dataclasses.
-    text2 = art.serialize_row(row)
-    payload2 = json.loads(text2)
-    assert "age" not in payload2
-
-
-# ---------------------------------------------------------------------------
-# Read raises FileNotFoundError for missing JSONL
+# Read raises for missing JSONL
 # ---------------------------------------------------------------------------
 
 
 def test_read_missing_jsonl_raises(tmp_path: Path) -> None:
-    """A missing JSONL raises `FileNotFoundError` on read; the slice
-    scripts gate on `path.exists()` first. Pinning this behaviour
-    here so a future change to "return [] on missing" is a deliberate
-    decision, not a side effect."""
     art = Artifacts(root=tmp_path)
-    with pytest.raises(FileNotFoundError):
-        art.read_shootout_kicks()
     with pytest.raises(FileNotFoundError):
         art.read_player_history()
     with pytest.raises(FileNotFoundError):
         art.read_roster()
-    with pytest.raises(FileNotFoundError):
-        art.read_training_table()
     with pytest.raises(FileNotFoundError):
         art.read_predictions()
     with pytest.raises(FileNotFoundError):
@@ -330,94 +167,36 @@ def test_read_missing_jsonl_raises(tmp_path: Path) -> None:
 
 
 def test_write_creates_parent_directories(tmp_path: Path) -> None:
-    """`write_*` calls `mkdir -p` on the parent (the slice scripts
-    can write the artifact without first creating `output/`)."""
     art = Artifacts(root=tmp_path / "deep" / "nested")
-    art.write_shootout_kicks([_shootout_kick()])
-    assert art.shootout_kicks.exists()
+    art.write_player_history([make_history_row()])
+    assert art.player_history.exists()
 
 
 # ---------------------------------------------------------------------------
-# Per-tournament success-rate JSONL round-trip
+# serialize_row
 # ---------------------------------------------------------------------------
 
 
-def test_tournament_success_rate_round_trip(tmp_path: Path) -> None:
-    """The `TournamentSuccessRate` dataclass round-trips through the
-    adapter's read/write pair. A small fixture covers the four
-    `status` values (`"ok"`, `"partial"`, `"missing"`, `"n/a"`) so
-    the JSONL shape is pinned at the seam."""
-    from twelveyards.shootouts import TournamentSuccessRate
+def test_serialize_row_matches_write_shape(tmp_path: Path) -> None:
+    import json
 
     art = Artifacts(root=tmp_path)
-    rows = [
-        TournamentSuccessRate(
-            league_id=77,
-            season=2022,
-            tournament_name="World Cup",
-            match_count=5,
-            kick_count=25,
-            skipped_count=0,
-            no_kicks_count=0,
-            failed_count=0,
-            expected_match_count=5,
-            reachable_match_count=5,
-            status="ok",
-        ),
-        TournamentSuccessRate(
-            league_id=50,
-            season=2024,
-            tournament_name="Euro",
-            match_count=1,
-            kick_count=8,
-            skipped_count=0,
-            no_kicks_count=0,
-            failed_count=0,
-            expected_match_count=3,
-            reachable_match_count=3,
-            status="partial",
-        ),
-        TournamentSuccessRate(
-            league_id=44,
-            season=2024,
-            tournament_name="Copa América",
-            match_count=0,
-            kick_count=0,
-            skipped_count=0,
-            no_kicks_count=0,
-            failed_count=0,
-            expected_match_count=4,
-            reachable_match_count=4,
-            status="missing",
-        ),
-        TournamentSuccessRate(
-            league_id=298,
-            season=2021,
-            tournament_name="CONCACAF Gold Cup",
-            match_count=0,
-            kick_count=0,
-            skipped_count=0,
-            no_kicks_count=0,
-            failed_count=0,
-            expected_match_count=0,
-            reachable_match_count=0,
-            status="n/a",
-        ),
-    ]
-    n = 0
-    with art.tournament_success_rate.open("w", encoding="utf-8") as f:
-        for row in rows:
-            f.write(json.dumps(row.__dict__, ensure_ascii=False))
-            f.write("\n")
-            n += 1
-    assert n == 4
-    assert art.tournament_success_rate.exists()
+    row = make_roster_player()
+    text = art.serialize_row(row)
+    payload = json.loads(text)
+    assert payload["player_id"] == row.player_id
+    assert payload["player_name"] == row.player_name
 
-    loaded = art.read_tournament_success_rate()
-    assert len(loaded) == 4
-    assert loaded[0] == rows[0]
-    assert loaded[1] == rows[1]
-    assert loaded[2] == rows[2]
-    assert loaded[3] == rows[3]
-    # The four status values are all preserved.
-    assert [r.status for r in loaded] == ["ok", "partial", "missing", "n/a"]
+
+# ---------------------------------------------------------------------------
+# Explicit path override on read/write
+# ---------------------------------------------------------------------------
+
+
+def test_explicit_path_round_trip(tmp_path: Path) -> None:
+    art = Artifacts(root=tmp_path)
+    custom = tmp_path / "custom.jsonl"
+    rows = [make_roster_player(player_id=99)]
+    n = art.write_roster(rows, path=custom)
+    assert n == 1
+    assert art.read_roster(path=custom) == rows

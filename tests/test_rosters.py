@@ -362,9 +362,9 @@ def test_fetch_wc_2026_roster_dedupes_across_matches(
                         "home": {"id": "6710", "name": "Mexico"},
                         "away": {"id": "6316", "name": "South Africa"},
                     },
-                ]
-            }
-        }
+                ],
+            },
+        },
     }
     # Return the same match twice — the player list is the same in both.
     cache_dir, urls_seen = _stub_client(
@@ -394,7 +394,7 @@ def test_fetch_wc_2026_roster_skips_stale_h2h(
         "pageProps": {
             "general": {**sample_wc_2026_match["pageProps"]["general"], "matchId": 99999999},
             "content": {"lineup": sample_wc_2026_match["pageProps"]["content"]["lineup"]},
-        }
+        },
     }
     # The league has 3 refs; we return the tampered payload for all 3.
     # Every match is then "stale" and contributes 0 rows.

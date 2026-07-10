@@ -368,7 +368,7 @@ def extract_player_penalties_from_match(
         is_home = (shot_team_id == home_team_id) if (shot_team_id and home_team_id) else False
         x = float(shot["onGoalShot"]["x"])
         outcome = SHOTMAP_EVENT_TYPE_TO_OUTCOME.get(
-            shot.get("eventType", ""), str(shot.get("eventType", ""))
+            shot.get("eventType", ""), str(shot.get("eventType", "")),
         )
         shot_type = str(shot.get("shotType", ""))
         out.append(
@@ -385,7 +385,7 @@ def extract_player_penalties_from_match(
                 is_on_target=bool(shot.get("isOnTarget")),
                 outcome=outcome,
                 shot_type=shot_type,
-            )
+            ),
         )
     return out
 
@@ -517,7 +517,7 @@ def _process_match_fixture(
     if page_match_id and page_match_id != match_id:
         return  # stale (seo, h2h) hash — skip silently
     yield from extract_player_penalties_from_match(
-        match, player_id, team_id, league_id, league_name
+        match, player_id, team_id, league_id, league_name,
     )
 
 

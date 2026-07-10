@@ -167,7 +167,8 @@ def test_season_name_to_year_raises_on_garbage() -> None:
 
 def test_compute_lookback_window_with_floor() -> None:
     """For a 2022-12-18 target with 5y lookback and 2016-01-01 floor, the
-    floor doesn't kick in (5y back is 2017-12-18, which is after 2016-01-01)."""
+    floor doesn't kick in (5y back is 2017-12-18, which is after 2016-01-01).
+    """
     start, end = compute_lookback_window(date(2022, 12, 18), 5, date(2016, 1, 1))
     assert start == date(2017, 12, 18)
     assert end == date(2022, 12, 18)
@@ -175,7 +176,8 @@ def test_compute_lookback_window_with_floor() -> None:
 
 def test_compute_lookback_window_floor_kicks_in() -> None:
     """For a 2020-12-18 target with 5y back, naive start is 2015-12-18,
-    before the 2016-01-01 floor — the floor wins."""
+    before the 2016-01-01 floor — the floor wins.
+    """
     start, end = compute_lookback_window(date(2020, 12, 18), 5, date(2016, 1, 1))
     assert start == date(2016, 1, 1)
     assert end == date(2020, 12, 18)
@@ -195,7 +197,8 @@ def test_compute_lookback_window_zero_lookback() -> None:
 
 def test_extract_player_metadata_messi(sample_messi_player: Mapping[str, object]) -> None:
     """The Messi fixture has player_id=30981, position='striker', birth 1987-06-24,
-    preferred_foot='left' (v3: read from playerInformation[])."""
+    preferred_foot='left' (v3: read from playerInformation[]).
+    """
     md = extract_player_metadata(sample_messi_player)
     assert isinstance(md, PlayerMetadata)
     assert md.player_id == 30981
@@ -221,27 +224,27 @@ def test_extract_player_metadata_reads_preferred_foot() -> None:
     # Standard "left" via the cache's value.key shape.
     assert (
         _preferred_foot(
-            [{"translationKey": "preferred_foot", "value": {"key": "left", "fallback": "Left"}}]
+            [{"translationKey": "preferred_foot", "value": {"key": "left", "fallback": "Left"}}],
         )
         == "left"
     )
     # "right" and "both" round-trip.
     assert (
         _preferred_foot(
-            [{"translationKey": "preferred_foot", "value": {"key": "right", "fallback": "Right"}}]
+            [{"translationKey": "preferred_foot", "value": {"key": "right", "fallback": "Right"}}],
         )
         == "right"
     )
     assert (
         _preferred_foot(
-            [{"translationKey": "preferred_foot", "value": {"key": "both", "fallback": "Both"}}]
+            [{"translationKey": "preferred_foot", "value": {"key": "both", "fallback": "Both"}}],
         )
         == "both"
     )
     # Unknown key → "" (defensive; the model treats it as missing).
     assert (
         _preferred_foot(
-            [{"translationKey": "preferred_foot", "value": {"key": "switch", "fallback": "?"}}]
+            [{"translationKey": "preferred_foot", "value": {"key": "switch", "fallback": "?"}}],
         )
         == ""
     )
@@ -258,7 +261,8 @@ def test_extract_player_metadata_handles_missing_preferred_foot() -> None:
     """A player page with no `playerInformation[]` (or with the
     `preferred_foot` entry missing) yields `preferred_foot=""` (not
     a crash). The other C-group fields (position, birth date) are
-    unaffected."""
+    unaffected.
+    """
     md = extract_player_metadata(
         {
             "pageProps": {
@@ -270,9 +274,9 @@ def test_extract_player_metadata_handles_missing_preferred_foot() -> None:
                     "playerInformation": [
                         {"translationKey": "height_sentencecase", "value": {"numberValue": 180}},
                     ],
-                }
-            }
-        }
+                },
+            },
+        },
     )
     assert md.player_id == 42
     assert md.position_key == "midfielder"
@@ -283,7 +287,7 @@ def test_extract_player_metadata_handles_missing_preferred_foot() -> None:
 def test_extract_player_metadata_missing_position() -> None:
     """A player with no positionDescription falls back to empty string."""
     md = extract_player_metadata(
-        {"pageProps": {"data": {"id": 42, "name": "Test", "birthDate": None}}}
+        {"pageProps": {"data": {"id": 42, "name": "Test", "birthDate": None}}},
     )
     assert md.player_id == 42
     assert md.player_name == "Test"
@@ -294,7 +298,7 @@ def test_extract_player_metadata_missing_position() -> None:
 def test_extract_player_metadata_handles_malformed_birthdate() -> None:
     """A malformed birthDate falls back to empty string (not a crash)."""
     md = extract_player_metadata(
-        {"pageProps": {"data": {"id": 42, "name": "Test", "birthDate": {"utcTime": "garbage"}}}}
+        {"pageProps": {"data": {"id": 42, "name": "Test", "birthDate": {"utcTime": "garbage"}}}},
     )
     assert md.birth_date == ""
 
@@ -338,8 +342,8 @@ def test_iter_career_season_entries_skips_youth_bucket() -> None:
                                     "seasonName": "2020",
                                     "teamId": 100,
                                     "tournamentStats": [],
-                                }
-                            ]
+                                },
+                            ],
                         },
                         "national team": {"seasonEntries": []},
                         "youth": {
@@ -348,13 +352,13 @@ def test_iter_career_season_entries_skips_youth_bucket() -> None:
                                     "seasonName": "2018",
                                     "teamId": 999,
                                     "tournamentStats": [],
-                                }
-                            ]
+                                },
+                            ],
                         },
-                    }
+                    },
                 },
-            }
-        }
+            },
+        },
     }
     entries = list(iter_career_season_entries(payload))
     team_ids = {int(e.get("teamId") or 0) for e in entries}
@@ -388,7 +392,7 @@ def test_iter_team_season_lookups_skips_stats_without_league_id() -> None:
                 {"leagueId": 42, "leagueName": "Has ID", "seasonName": "2026"},
                 {"leagueName": "No ID", "seasonName": "2026"},  # no leagueId
             ],
-        }
+        },
     ]
     lookups = list(iter_team_season_lookups(entries))
     assert len(lookups) == 1
@@ -401,7 +405,7 @@ def test_iter_team_season_lookups_skips_stats_without_league_id() -> None:
 
 
 def _fixture(
-    match_id: int, home_id: int, away_id: int, home_name: str = "Home", away_name: str = "Away"
+    match_id: int, home_id: int, away_id: int, home_name: str = "Home", away_name: str = "Away",
 ) -> dict[str, object]:
     return {
         "id": str(match_id),
@@ -448,7 +452,8 @@ def test_extract_penalties_from_2022_final_returns_two_messi_kicks(
     sample_2022_final: Mapping[str, object],
 ) -> None:
     """The 2022 final has 2 Messi penalty shots: one in-match (23') and
-    one shootout (kick 2). Both should be returned."""
+    one shootout (kick 2). Both should be returned.
+    """
     rows = extract_player_penalties_from_match(
         sample_2022_final,
         player_id=30981,
@@ -474,7 +479,8 @@ def test_extract_penalties_from_2022_final_includes_in_match_and_shootout(
 ) -> None:
     """The two Messi kicks span two distinct `period` values. We don't
     assert on the period here (it isn't carried in the row), but the row
-    count of 2 covers both the in-match penalty (23') and the shootout kick."""
+    count of 2 covers both the in-match penalty (23') and the shootout kick.
+    """
     rows = extract_player_penalties_from_match(sample_2022_final, 30981, 6706, 77, "World Cup")
     assert len(rows) == 2
 
@@ -497,7 +503,8 @@ def test_extract_penalties_uses_match_league_name_when_present(
     sample_2022_final: Mapping[str, object],
 ) -> None:
     """The `league_name` parameter is a fallback; the match JSON's
-    `general.leagueName` wins when present."""
+    `general.leagueName` wins when present.
+    """
     rows = extract_player_penalties_from_match(
         sample_2022_final,
         player_id=30981,
@@ -529,7 +536,7 @@ def test_write_player_history_roundtrip(tmp_path: Path) -> None:
             is_on_target=True,
             outcome="Goal",
             shot_type="RightFoot",
-        )
+        ),
     ]
     out = tmp_path / "x.jsonl"
     art = Artifacts(root=tmp_path)
@@ -575,13 +582,13 @@ def _build_minimal_player_page(player_id: int) -> dict[str, object]:
                                     "leagueId": 42,
                                     "leagueName": "Stub League",
                                     "seasonName": "2020/2021",
-                                }
+                                },
                             ],
-                        }
+                        },
                     ],
                 },
                 "national team": {"teamEntries": [], "seasonEntries": []},
-            }
+            },
         },
     }
 
@@ -611,7 +618,7 @@ def _build_minimal_match(
                 "isOnTarget": True,
                 "shotType": "RightFoot",
                 "onGoalShot": {"x": 0.5, "y": 0.1, "zoomRatio": 1},
-            }
+            },
         )
     return {
         "pageProps": {
@@ -625,18 +632,19 @@ def _build_minimal_match(
                 "teams": [
                     {"id": home_id, "name": "Home Team", "score": 1},
                     {"id": away_id, "name": "Away Team", "score": 0},
-                ]
+                ],
             },
             "content": {"shotmap": {"shots": shots}},
-        }
+        },
     }
 
 
 def test_orchestrator_yields_penalty_from_canned_match(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
     """End-to-end: the stub client serves a player page + one league
-    season + one match. The orchestrator should yield that one penalty."""
+    season + one match. The orchestrator should yield that one penalty.
+    """
     player_id = 30981
     match_id = 99999
     _cache_dir, _urls = _stub_client(
@@ -654,8 +662,8 @@ def test_orchestrator_yields_penalty_from_canned_match(
                         "scoreStr": "1 - 0",
                         "reason": {"shortKey": "fulltime_short"},
                     },
-                }
-            ]
+                },
+            ],
         },
         matches=[_build_minimal_match(match_id, player_id=player_id)],
     )
@@ -666,7 +674,7 @@ def test_orchestrator_yields_penalty_from_canned_match(
             player_id=player_id,
             player_slug="stub-player",
             target_date=date(2022, 12, 18),
-        )
+        ),
     )
     assert len(rows) == 1
     row = rows[0]
@@ -680,10 +688,11 @@ def test_orchestrator_yields_penalty_from_canned_match(
 
 
 def test_orchestrator_skips_match_outside_lookback_window(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
     """A match dated before the lookback window is silently skipped
-    (we never even fetch the match JSON)."""
+    (we never even fetch the match JSON).
+    """
     player_id = 30981
     match_id_early = 11111
     match_id_in_window = 22222
@@ -712,7 +721,7 @@ def test_orchestrator_skips_match_outside_lookback_window(
                         "scoreStr": "1 - 0",
                     },
                 },
-            ]
+            ],
         },
         matches=[
             _build_minimal_match(match_id_in_window, player_id=player_id),
@@ -725,7 +734,7 @@ def test_orchestrator_skips_match_outside_lookback_window(
             player_id=player_id,
             player_slug="stub-player",
             target_date=date(2022, 12, 18),
-        )
+        ),
     )
     # Only the in-window match yields a row; the early match is skipped.
     assert len(rows) == 1
@@ -738,10 +747,11 @@ def test_orchestrator_skips_match_outside_lookback_window(
 
 
 def test_orchestrator_skips_stale_url_match(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
     """A (seo, h2h) hash that points to a different matchId in the
-    response is skipped silently, like in the shootout pipeline."""
+    response is skipped silently, like in the shootout pipeline.
+    """
     player_id = 30981
     stale_match_id = 33333
     real_match_id = 44444
@@ -759,8 +769,8 @@ def test_orchestrator_skips_stale_url_match(
                         "utcTime": "2020-06-15T19:00:00Z",
                         "scoreStr": "1 - 0",
                     },
-                }
-            ]
+                },
+            ],
         },
         # The canned payload is for a DIFFERENT matchId — simulates FotMob
         # reusing a hash and pointing us at a newer match.
@@ -773,17 +783,18 @@ def test_orchestrator_skips_stale_url_match(
             player_id=player_id,
             player_slug="stub-player",
             target_date=date(2022, 12, 18),
-        )
+        ),
     )
     # The stale match is silently skipped; no row is yielded.
     assert rows == []
 
 
 def test_orchestrator_dedupes_team_season_lookups(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
     """Two season entries that map to the same (team, league, season)
-    are deduped to a single fixture fetch."""
+    are deduped to a single fixture fetch.
+    """
     player_id = 30981
     fetch_count = {"n": 0}
     match_id = 55555
@@ -797,7 +808,7 @@ def test_orchestrator_dedupes_team_season_lookups(
                         "name": "Stub Player",
                         "birthDate": None,
                         "positionDescription": {
-                            "primaryPosition": {"key": "striker", "label": "Striker"}
+                            "primaryPosition": {"key": "striker", "label": "Striker"},
                         },
                         "careerHistory": {
                             "careerItems": {
@@ -816,7 +827,7 @@ def test_orchestrator_dedupes_team_season_lookups(
                                                     "leagueId": 42,
                                                     "leagueName": "L",
                                                     "seasonName": "2020/2021",
-                                                }
+                                                },
                                             ],
                                         },
                                         {
@@ -828,7 +839,7 @@ def test_orchestrator_dedupes_team_season_lookups(
                                                     "leagueId": 42,
                                                     "leagueName": "L",
                                                     "seasonName": "2020/2021",
-                                                }
+                                                },
                                             ],
                                         },
                                     ],
@@ -837,10 +848,10 @@ def test_orchestrator_dedupes_team_season_lookups(
                                     "teamEntries": [],
                                     "seasonEntries": [],
                                 },
-                            }
+                            },
                         },
-                    }
-                }
+                    },
+                },
             }
         if path.startswith("leagues/"):
             fetch_count["n"] += 1
@@ -857,10 +868,10 @@ def test_orchestrator_dedupes_team_season_lookups(
                                     "utcTime": "2020-06-15T19:00:00Z",
                                     "scoreStr": "1 - 0",
                                 },
-                            }
-                        ]
-                    }
-                }
+                            },
+                        ],
+                    },
+                },
             }
         if path.startswith("matches/"):
             return _build_minimal_match(match_id, player_id=player_id)
@@ -878,7 +889,7 @@ def test_orchestrator_dedupes_team_season_lookups(
             player_id=player_id,
             player_slug="stub-player",
             target_date=date(2022, 12, 18),
-        )
+        ),
     )
     # Two duplicate (team, league, season) lookups → one fixture fetch.
     assert fetch_count["n"] == 1

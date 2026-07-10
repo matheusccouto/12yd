@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from .leagues import CLUB_LEAGUE_IDS, LEAGUE_BY_ID, League  # noqa: F401 — re-exported
+from .leagues import CLUB_LEAGUE_IDS, LEAGUE_BY_ID, League
 
 # Type alias: the `tournament_kind` attribute stamped on every
 # `TrainingRow` and `PredictionRow` (Issue #51, Phase 3 schema change).
@@ -71,9 +71,7 @@ LEAGUE_SEASONS_PREDICT_WINDOW: tuple[tuple[int, int], ...] = INTERNATIONAL_PAIRS
 # seasons (e.g. if a club tournament holds an extra season in the
 # window, the test can parametrize the new (league, season) pair
 # without touching the orchestrator).
-CLUB_LEAGUE_SEASONS: dict[int, tuple[int, ...]] = {
-    league_id: (2021, 2022, 2023, 2024, 2025, 2026) for league_id in sorted(CLUB_LEAGUE_IDS)
-}
+CLUB_LEAGUE_SEASONS: dict[int, tuple[int, ...]] = dict.fromkeys(sorted(CLUB_LEAGUE_IDS), (2021, 2022, 2023, 2024, 2025, 2026))
 
 # The six section headings on the RSSSF page, mapped to FotMob league names.
 # Used by the RSSSF parser to filter to only the 6 in-scope international

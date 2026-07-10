@@ -25,7 +25,7 @@ class _FakeTabPFNClassifier:
 @pytest.fixture(autouse=True)
 def _stub_tabpfn_classifier(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        tabpfn_module, "TabPFNClassifier", _FakeTabPFNClassifier
+        tabpfn_module, "TabPFNClassifier", _FakeTabPFNClassifier,
     )
     monkeypatch.setattr(tabpfn_module, "_tabpfn_init", lambda: None)
 

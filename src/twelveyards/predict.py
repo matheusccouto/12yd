@@ -1,301 +1,123 @@
-"""Live predictions for the 2026 World Cup roster (slice #9, Issue #25).
+"""Live predictions for the 2026 World Cup roster.
 
-PRD: For each player in the 2026 World Cup squads, compute the 18 features
-(using the player's penalty history filtered to before the target date) and
-run the frozen LightGBM model. Write one row per WC player with the
-predicted probabilities P(L), P(C), P(R), the kicking foot, and the
-team/country metadata.
-
-The slice is the deliverable artifact the dashboard consumes. The
-model's input is a `TrainingRow` (the same shape the training slice
-used); the model's output is a 3-vector of probabilities in `CLASSES`
-order (L=0, C=1, R=2).
-
-The feature row for a prediction target uses neutral B-group values:
-`kick_number=1`, `pen_score_before=(0, 0)`, `is_decisive=False`. These
-are not the values of any real shootout kick (we don't know which
-side of the bracket the team will be on), they're the "nothing-yet"
-defaults. The numeric B fields are 0/False which is the well-defined
-neutral state. The A-group (history) and C-group (metadata) features
-are the kicker-specific signal the model uses.
-
-v3 (Issue #36) removed the B3 (`b3_round`) feature and the dashboard
-re-score path (`PredictContext` / `predict_roster_with_context`).
-The model is round-agnostic; the dashboard reads `predictions.jsonl`
-directly.
-
-Re-runs are idempotent: same roster + same history + same model +
-same `target_date` → same predictions. The `target_date` is a CLI flag
-with a deterministic default (`today_utc() + 1 day`, so the prediction
-window always includes all of today's penalties).
-
-Phase 0 (Issue #30): the predict slice no longer constructs a synthetic
-`ShootoutKick`. The feature builder's prediction entry point takes a
-`RosterPlayer` + history + metadata + target_date and returns a
-`TrainingRow` with neutral B-group values via the shared
-`compute_features` / `build_features` path.
+PRD-v5: TabPFN classifier on player-only features. Each roster player is
+scored once; the same prediction row serves any match. Predictions are
+match-agnostic — no opponent or match-context features.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 
 from .features import (
+    CATEGORICAL_INDICES,
     CLASSES,
-    PRIOR_PROB,
-    BGroupContext,
-    KickIndex,
-    TrainingRow,
-    build_features,
-    compute_features,
-)
-from .model import (
-    build_feature_matrix,
+    build_prediction_matrix,
+    build_training_matrix,
 )
 from .player_history import PlayerMetadata, PlayerPenalty
 from .rosters import RosterPlayer
-from .tournaments import TournamentKind
+from .tabpfn import TabPFN
+from .tabpfn import init as tabpfn_init
 
 
 @dataclass(frozen=True)
 class PredictionRow:
-    """One row in `predictions.jsonl`: a WC player's predicted P(L/C/R).
-
-    Fields:
-    - `player_id`, `player_name`, `team_id`, `team_name`: pass-through
-      from the roster. `team_id`/`team_name` are the national team the
-      player is representing at the WC, NOT the club side.
-    - `country_code`: ISO 3166-1 alpha-3 from the roster ("" if FotMob
-      did not return one for the player).
-    - `kicking_foot`: the declared preferred foot (v3: pass-through
-      from `PlayerMetadata.preferred_foot`, lowercase
-      "left" / "right" / "both"). The JSONL column keeps the
-      `kicking_foot` name for consumer continuity (the dashboard's
-      per-kicker table reads the same column it always did); the
-      underlying semantic is now the declared foot, not the
-      mode-of-history inference.
-    - `p_L`, `p_C`, `p_R`: predicted probabilities from the frozen
-      LightGBM, in `CLASSES` order. Sum to 1.0 within 1e-6.
-    - `tournament_kind`: Phase 3 (Issue #51) metadata attribute — the
-      kind of the tournament the prediction is for. For the WC 2026
-      roster (the current consumer), the kind is always
-      `"international"`; a future cycle that adds club-roster
-      predictions will see `"club"`. Surfaced as per-kicker metadata
-      so the dashboard can render the kind on the per-kicker card.
-    """
-
     player_id: int
     player_name: str
+    short_name: str
     team_id: int
     team_name: str
     country_code: str
     kicking_foot: str
+    photo_url: str
     p_L: float
     p_C: float
     p_R: float
-    tournament_kind: TournamentKind = "international"
-
-
-# ---------------------------------------------------------------------------
-# Feature builder for a single prediction target
-# ---------------------------------------------------------------------------
-
-
-def build_prediction_features(
-    kicker: RosterPlayer,
-    history: Sequence[PlayerPenalty],
-    metadata: PlayerMetadata | None,
-    target_date: str,
-) -> TrainingRow:
-    """Build the 17-feature row for one roster player at `target_date`.
-
-    The B-group is the neutral context (kick_number=1, pen_score=0-0,
-    is_home=True) so the model's B-group features don't leak
-    shootout-state information that doesn't exist for a prediction
-    target. The A1 features (side distribution over the last 5/10/20
-    kicks) and A2/A3/A4 features come from the player's history and
-    metadata, filtered to before `target_date`. C1 (position) comes
-    from the metadata. For kickers with no history, A1 falls back to
-    the prior `(1/3, 1/3, 1/3)`, A2 is "", and A4 is 0. A3 falls
-    through from `metadata.preferred_foot` ("" when metadata is
-    missing or the field is absent). Issue #41 dropped the C2 (`age`)
-    feature, so the model no longer reads the kicker's birth date.
-    """
-    features = compute_features(
-        history=history,
-        metadata=metadata,
-        target_date=target_date,
-        b_group=BGroupContext.neutral(),
-        kicks_done=KickIndex(home_kicks_done=0, away_kicks_done=0),
-    )
-    return build_features(
-        features,
-        # Synthetic identifiers — the model doesn't use them at
-        # predict time, but the unified row type carries them so the
-        # data layer's directory layout is consistent.
-        match_id=0,
-        kick_number=1,
-        kicker_id=kicker.player_id,
-        kicker_name=kicker.player_name,
-        match_date=target_date,
-        tournament_id=77,  # FotMob WC leagueId
-        tournament_name="World Cup",
-        round="",
-        team_id=kicker.team_id,
-        is_home=True,
-        label="L",  # dummy — unused at predict time
-        is_on_target=True,  # dummy — unused at predict time
-    )
-
-
-# ---------------------------------------------------------------------------
-# Per-kicker predict
-# ---------------------------------------------------------------------------
-
-
-def predict_kicker(
-    model: Any,
-    kicker: RosterPlayer,
-    history: Sequence[PlayerPenalty],
-    metadata: PlayerMetadata | None,
-    target_date: str,
-) -> PredictionRow:
-    """Run the model for one kicker and return the `PredictionRow`.
-
-    Builds the 17-feature row (Issue #41 dropped `age` from the
-    schema), runs the model, and returns the predicted probabilities.
-    The `kicking_foot` is the declared preferred foot from
-    `PlayerMetadata.preferred_foot` (v3: the same value the feature
-    row carries, so the slice doesn't re-read metadata).
-    """
-    row = build_prediction_features(kicker, history, metadata, target_date)
-    matrix = build_feature_matrix([row])
-    probs = np.asarray(model.predict_proba(matrix.X))
-    p_L, p_C, p_R = (float(p) for p in probs[0])
-    return PredictionRow(
-        player_id=kicker.player_id,
-        player_name=kicker.player_name,
-        team_id=kicker.team_id,
-        team_name=kicker.team_name,
-        country_code=kicker.country_code,
-        kicking_foot=row.preferred_foot,
-        p_L=p_L,
-        p_C=p_C,
-        p_R=p_R,
-        tournament_kind=row.tournament_kind,
-    )
-
-
-# ---------------------------------------------------------------------------
-# I/O — the predictions JSONL is the read/write seam for the dashboard.
-# `load_player_history` re-exports the features-module reader; `load_roster`
-# re-exports the rosters JSONL reader. Both thin wrappers are kept here so
-# callers don't have to import four modules to wire the slice.
-# ---------------------------------------------------------------------------
+    total_penalties: int = 0
 
 
 def load_player_history(path: Path) -> dict[int, list[PlayerPenalty]]:
-    """Load `player_history.jsonl` into a dict keyed by `kicker_id`.
+    import json
 
-    Re-exported from `features.load_player_history` for the predict
-    module's callers. Each value is the unsorted list of
-    `PlayerPenalty` rows for that kicker; the caller is expected to
-    sort by `match_date` after filtering to the target date.
-    """
-    from .features import load_player_history as _load_player_history
-
-    return _load_player_history(path)
+    out: dict[int, list[PlayerPenalty]] = {}
+    with path.open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            row = json.loads(line)
+            out.setdefault(int(row["kicker_id"]), []).append(PlayerPenalty(**row))
+    return out
 
 
 def load_roster(path: Path) -> list[RosterPlayer]:
-    """Load `wc2026_roster.jsonl` into a list of `RosterPlayer`."""
     from .artifacts import Artifacts
 
     return Artifacts().read_roster(path)
 
 
-# ---------------------------------------------------------------------------
-# Per-roster predict
-# ---------------------------------------------------------------------------
-
-
-def predict_roster(
-    model: Any,
+def predict_and_write(
     roster: Sequence[RosterPlayer],
-    player_history: Mapping[int, Sequence[PlayerPenalty]],
-    metadata_fetcher: Any,
-    target_date: str,
+    player_history: dict[int, list[PlayerPenalty]],
+    metadata_by_id: dict[int, PlayerMetadata],
+    output_path: Path,
+    *,
+    target_date: date | None = None,
 ) -> list[PredictionRow]:
-    """Run the model for every roster player with the neutral B-group.
+    tabpfn_init()
+    model = TabPFN(categorical_features_indices=CATEGORICAL_INDICES)
 
-    Returns a list of `PredictionRow` in the same order as the input
-    `roster`. The function is pure: same inputs → same outputs. Each
-    kicker's prediction is independent — a single bad metadata fetch
-    (returns None) does not abort the run; the kicker just gets
-    `position=""` and the model's categorical `position` becomes NaN
-    (LightGBM treats it as missing).
+    X_train, y_train = build_training_matrix(player_history, metadata_by_id)
+    if len(X_train) > 0:
+        model.fit(X_train, y_train)
 
-    `metadata_fetcher` is the `MetadataFetcher` callable from
-    `features.py` — typically `fetcher_from_client(client)` with the
-    on-disk cache populated by the player-history slice. The fetcher
-    is process-global; no per-process caching is done here.
+    roster_ids = [p.player_id for p in roster]
+    X_test = build_prediction_matrix(
+        roster_ids, player_history, metadata_by_id, target_date,
+    )
 
-    v3 (Issue #36): the previous `predict_roster_with_context` /
-    `PredictContext(round=...)` round-override entry point is gone.
-    The model is round-agnostic; the dashboard reads
-    `predictions.jsonl` directly. Issue #41 dropped the C2 (`age`)
-    feature, so the model no longer reads the kicker's birth date.
-    """
-    out: list[PredictionRow] = []
-    for kicker in roster:
-        history = player_history.get(kicker.player_id, [])
-        metadata = metadata_fetcher(kicker.player_id)
-        out.append(predict_kicker(model, kicker, history, metadata, target_date))
-    return out
+    if len(X_train) > 0 and len(X_test) > 0:
+        probs = model.predict_proba(X_test)
+    else:
+        probs = np.full((len(X_test), 3), 1.0 / 3.0)
 
+    rows: list[PredictionRow] = []
+    for i, kicker in enumerate(roster):
+        metadata = metadata_by_id.get(kicker.player_id)
+        preferred_foot = metadata.preferred_foot if metadata is not None else ""
+        total = len(player_history.get(kicker.player_id, []))
 
-def count_kickers_with_history(
-    roster: Sequence[RosterPlayer],
-    player_history: Mapping[int, Sequence[PlayerPenalty]],
-) -> int:
-    """Count the roster kickers with at least one row in `player_history`.
+        rows.append(
+            PredictionRow(
+                player_id=kicker.player_id,
+                player_name=kicker.player_name,
+                short_name=_derive_short_name(kicker.player_name),
+                team_id=kicker.team_id,
+                team_name=kicker.team_name,
+                country_code=kicker.country_code,
+                kicking_foot=preferred_foot,
+                photo_url=f"https://images.fotmob.com/image_resources/playerimages/{kicker.player_id}.png",
+                p_L=float(probs[i, CLASSES.index("L")]) if len(X_test) > 0 else 1.0 / 3.0,
+                p_C=float(probs[i, CLASSES.index("C")]) if len(X_test) > 0 else 1.0 / 3.0,
+                p_R=float(probs[i, CLASSES.index("R")]) if len(X_test) > 0 else 1.0 / 3.0,
+                total_penalties=total,
+            ),
+        )
 
-    A kicker has history iff their `player_id` is a key in the dict AND
-    the list for that key is non-empty. `load_player_history` groups
-    the per-kicker JSONL by `kicker_id`; a key exists iff the kicker
-    has ≥ 1 row in the lookback window (empty lists are not written by
-    `fetch_initial_set_player_history.py`, so the `len > 0` check is
-    defensive — equivalent to `in dict` for the current data layer).
+    from .artifacts import Artifacts
 
-    v3 (Issue #36) replaced the v2 inferred `kicking_foot` (the
-    per-penalty `shotType` mode) with the *declared* `preferred_foot`
-    from `PlayerMetadata`. The v2 `"Unknown"` no-history sentinel is
-    gone — every roster player has a real declared foot (one of
-    `left` / `right` / `both` / `""`). The previous
-    `sum(1 for r in predictions if r.kicking_foot != "Unknown")` always
-    reported 100% with history. This helper is the replacement: count
-    from the dict, not the row.
-
-    Used by the predict slice for the "model sees the prior" stat
-    (~86% of the 1247-player WC 2026 roster has no penalty history in
-    the 5-year lookback window, per the v3 review).
-    """
-    return sum(1 for kicker in roster if player_history.get(kicker.player_id))
+    Artifacts().write_predictions(rows, path=output_path)
+    return rows
 
 
-__all__ = [
-    "CLASSES",
-    "PRIOR_PROB",
-    "PredictionRow",
-    "build_prediction_features",
-    "count_kickers_with_history",
-    "load_player_history",
-    "load_roster",
-    "predict_kicker",
-    "predict_roster",
-]
+def _derive_short_name(full_name: str) -> str:
+    parts = full_name.strip().split()
+    if len(parts) == 1:
+        return parts[0]
+    return parts[-1]

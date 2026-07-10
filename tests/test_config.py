@@ -20,11 +20,11 @@ def test_scrape_floor_is_before_train_floor() -> None:
 
 
 def test_scrape_floor_matches_prd() -> None:
-    assert config.SCRAPE_FLOOR == date(2016, 1, 1)
+    assert date(2016, 1, 1) == config.SCRAPE_FLOOR
 
 
 def test_train_floor_matches_prd() -> None:
-    assert config.TRAIN_FLOOR == date(2021, 1, 1)
+    assert date(2021, 1, 1) == config.TRAIN_FLOOR
 
 
 def test_lookback_window_is_an_int() -> None:

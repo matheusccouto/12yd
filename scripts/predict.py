@@ -20,11 +20,12 @@ import sys
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+from twelveyards.model import load_artifact
+
 from twelveyards.artifacts import Artifacts
 from twelveyards.client import FotMobClient
 from twelveyards.config import today_utc
 from twelveyards.features import fetcher_from_client, load_player_history
-from twelveyards.model import load_artifact
 from twelveyards.predict import count_kickers_with_history, load_roster, predict_roster
 
 
@@ -103,7 +104,7 @@ def main() -> int:
     print(
         f"Loaded {len(roster)} players from {args.roster}; "
         f"{len(history)} unique kickers in {args.player_history}; "
-        f"model_kind={art_model['model_kind']}; target_date={target.isoformat()}."
+        f"model_kind={art_model['model_kind']}; target_date={target.isoformat()}.",
     )
 
     # Metadata fetcher (cache-warm from the player-history slice; the
@@ -132,7 +133,7 @@ def main() -> int:
     print(
         f"Wrote {n} predictions to {args.output}.\n"
         f"  With penalty history: {n_with_history}/{n}\n"
-        f"  No penalty history:   {n_no_history}/{n} (model sees the prior)"
+        f"  No penalty history:   {n_no_history}/{n} (model sees the prior)",
     )
     return 0
 

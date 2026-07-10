@@ -1,75 +1,9 @@
 """Single seam for the on-disk artifact layout.
 
-PRD: One adapter that owns the on-disk layout. Replaces the nine
-hardcoded `Path("output/...")` defaults in the slice scripts, the five
-`write_jsonl` and three `read_jsonl` functions in five modules, the
-`validate.py` ad-hoc re-parse, the `load_training_table` sibling-JSONL
-reach, and the nine live smoke tests that open `Path("output/...")`
-directly. Migration notes:
-
-- The shape of every JSONL is unchanged — the adapter is a re-statement
-  of what already exists, not a re-design.
-- The added value is that no caller has to know the artifact filenames,
-  the artifact directory, the JSONL serialization (NaN → null), the
-  pickle format for the model, or the JSON format for the metrics
-  report.
-- Adding a new artifact is one new path accessor + one read/write pair
-  in this module. Renaming an artifact is one rename in this module.
-
-The on-disk layout (relative to `root`), v4 retrain (Issue #51):
-
-- `shootout_kicks.jsonl` — 437 target kicks across 25 shootouts in 8
-  national-team + club tournaments, 2021–2026 (the v3 179-row scope
-  plus 258 new club-scope rows from Phase 3)
-- `player_history.jsonl` — per-kicker penalty history (the A1/A2/A3/A4
-  inputs), filtered to each kicker's target-kick date minus the
-  5-year lookback window. The Phase 3 ingest fetched 1359 unique
-  kickers (the v2 1327 plus 32 from the club-scope shootouts); 261
-  have at least one penalty row, 1098 have zero (the prior-only
-  kickers)
-- `missing_history.jsonl` — 1098 kickers with no penalty history in
-  the lookback window
-- `wc2026_roster.jsonl` — the WC 2026 squad list (1247 unique
-  players across 48 teams; the prediction roster)
-- `training_table.jsonl` — 437 rows of 17-feature rows (v3, Issue #41
-  dropped the `age` column)
-- `predictions.jsonl` — 1247 rows of per-player round-agnostic
-  predictions (the dashboard reads this directly — v3 dropped the
-  per-match re-score path; v4 keeps the round-agnostic schema)
-- `lightgbm.pkl` — the frozen LightGBM model
-- `baseline.pkl` — the baseline logreg model
-- `metrics.json` — the held-out metrics report (log loss, accuracy,
-  save rate, the calibration block per Issue #43, and the LOTO CV
-  block per Issues #45 + #51)
-- `cv_metrics.json` — the standalone LOTO CV artifact (the same
-  payload that's embedded in `metrics.json` under the `cv` key,
-  written separately so the dashboard or a future tool can load the
-  CV without parsing the rest of the metrics report)
-- `discrepancies.json` — the RSSSF-vs-scraper divergence report
-  (scraper-reachable total: 18 international + 4 club + 7 n/a + 6
-  missing = 25 distinct matches in the 57-pair scope, after the
-  URL-rotation wall + empty-shotmap exclusions)
-- `skipped_refs_diagnostics.jsonl` — per-match skip / no-kicks /
-  failure records with the `failure_mode` discriminator
-  (`stale_hash` | `empty_shotmap` | `ExceptionClass: message`). The
-  18 URL-rotation wall and 6 empty-shotmap cases are documented here
-- `tournament_success_rate.jsonl` — one `TournamentSuccessRate` row
-  per (league, season) pair (Issue #52 close-out; the v4 Phase 2
-  acceptance criterion), with the scraper's match / kick counts, the
-  per-state breakdown, and the expected / reachable counts from the
-  RSSSF oracle. Companion to `skipped_refs_diagnostics.jsonl` — the
-  per-match file surfaces the why, this file surfaces the
-  per-tournament rollup
-
-The cache directory (separate from `root`):
-
-- `data/fotmob_cache/` — the persistent ETag/gzip disk cache for the
-  FotMob HTTP responses.
-
-All read/write methods accept an optional `path` argument so callers
-that take a CLI `--output` override can route through the same code
-path as the default (e.g. `art.write_predictions(rows, path=args.output)`).
-The default is the instance's path accessor.
+PRD-v5: Artifacts live under `data/`. Surviving artifacts: wc2026_roster.jsonl,
+player_history.jsonl, predictions.jsonl, and missing_history.jsonl. Dropped
+artifacts: shootout_kicks, training_table, model pickles, metrics, cv, diagnostics,
+discrepancies, tournament_success_rate.
 """
 
 from __future__ import annotations
@@ -81,19 +15,10 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from .client import FotMobClient
-from .evaluate import CVReport, MetricsReport, _cv_from_dict, _cv_to_dict
-from .features import TrainingRow
 from .initial_set import MissingKicker
-from .model import (
-    load_artifact as _model_load_artifact,
-)
-from .model import (
-    save_artifact as _model_save_artifact,
-)
 from .player_history import PlayerPenalty
 from .predict import PredictionRow
 from .rosters import RosterPlayer
-from .shootouts import ShootoutKick, TournamentSuccessRate
 
 _T = TypeVar("_T")
 
@@ -104,18 +29,6 @@ def _write_jsonl(
     *,
     nan_to_null: bool = False,
 ) -> int:
-    """Write `rows` to `path` as JSONL (one record per line).
-
-    When `nan_to_null` is True, `NaN` floats in the serialised payload
-    are emitted as JSON `null` (strict JSON parsers reject `NaN`). The
-    caller is expected to use `dataclasses.asdict` for the row; the
-    helper only handles the top-level `NaN` fields (not nested ones).
-
-    Issue #41: the v3 `TrainingRow` no longer has an `age` field, so
-    the special-case `NaN → null` rewrite is a no-op. The kwarg is
-    kept so the same write path handles the pre-#41 rows that still
-    carry an `age` field (the reader accepts extra fields).
-    """
     path.parent.mkdir(parents=True, exist_ok=True)
     count = 0
     with path.open("w", encoding="utf-8") as f:
@@ -127,29 +40,11 @@ def _write_jsonl(
 
 
 def _serialize_row(row: Any, *, nan_to_null: bool = False) -> str:
-    """Serialise a single dataclass row to a JSON string (no trailing newline).
-
-    The streaming-writer scripts (e.g. `fetch_initial_set_player_history.py`)
-    need to write one row at a time to keep the disk copy current on a
-    long run. The serialisation is the same as `_write_jsonl`'s per-row
-    body, lifted into a public helper.
-
-    Issue #41: the special-case `NaN → null` rewrite for `age` is now
-    a no-op (the v3 row type has no `age` field). The kwarg is kept
-    for callers that may still serialise a pre-#41 row with an
-    `age` key.
-    """
     payload = asdict(row)
     return json.dumps(payload, ensure_ascii=False, allow_nan=(not nan_to_null))
 
 
 def _read_jsonl_of_dataclasses[T](path: Path, cls: type[T]) -> list[T]:
-    """Read a JSONL file of `cls` records into a list of `cls`.
-
-    Blank lines are skipped. The reconstruction uses `cls(**row)`; the
-    caller is expected to have written the JSONL via `dataclasses.asdict`
-    of the same class (or an equivalent shape).
-    """
     out: list[T] = []
     with path.open(encoding="utf-8") as f:
         for line in f:
@@ -161,31 +56,15 @@ def _read_jsonl_of_dataclasses[T](path: Path, cls: type[T]) -> list[T]:
 
 
 class Artifacts:
-    """The on-disk artifact layout adapter.
-
-    An instance owns the artifact `root` and the FotMob `cache_dir`.
-    Path accessors and typed read/write methods cross the same seam.
-
-    >>> art = Artifacts()
-    >>> art.shootout_kicks
-    PosixPath('output/shootout_kicks.jsonl')
-    >>> art.fotmob_client().cache_dir
-    PosixPath('data/fotmob_cache')
-    """
-
     def __init__(
         self,
-        root: Path = Path("output"),
+        root: Path = Path("data"),
         cache_dir: Path = Path("data/fotmob_cache"),
     ) -> None:
         self.root = Path(root)
         self.cache_dir = Path(cache_dir)
 
     # ------------------------------------------------------------------ paths
-
-    @property
-    def shootout_kicks(self) -> Path:
-        return self.root / "shootout_kicks.jsonl"
 
     @property
     def player_history(self) -> Path:
@@ -200,58 +79,8 @@ class Artifacts:
         return self.root / "wc2026_roster.jsonl"
 
     @property
-    def training_table(self) -> Path:
-        return self.root / "training_table.jsonl"
-
-    @property
     def predictions(self) -> Path:
         return self.root / "predictions.jsonl"
-
-    @property
-    def lightgbm_model(self) -> Path:
-        return self.root / "lightgbm.pkl"
-
-    @property
-    def baseline_model(self) -> Path:
-        return self.root / "baseline.pkl"
-
-    @property
-    def metrics(self) -> Path:
-        return self.root / "metrics.json"
-
-    @property
-    def discrepancies(self) -> Path:
-        return self.root / "discrepancies.json"
-
-    @property
-    def diagnostics(self) -> Path:
-        return self.root / "skipped_refs_diagnostics.jsonl"
-
-    @property
-    def tournament_success_rate(self) -> Path:
-        """Path to the per-(league, season) scraper coverage diagnostic.
-
-        Issue #51 (v4 PRD Phase 2 acceptance criterion): the scraper
-        writes one JSONL row per (league, season) pair with the
-        match / kick counts, the per-state breakdown (skipped,
-        no-kicks, failed), and the expected / reachable counts from
-        the RSSSF oracle. The `test_tournaments.py` integration test
-        pins every in-scope pair's coverage against
-        `EXPECTED_SHOOTOUT_COUNTS`.
-        """
-        return self.root / "tournament_success_rate.jsonl"
-
-    @property
-    def cv_metrics(self) -> Path:
-        return self.root / "cv_metrics.json"
-
-    # -------------------------------------------------------------- shootouts
-
-    def read_shootout_kicks(self, path: Path | None = None) -> list[ShootoutKick]:
-        return _read_jsonl_of_dataclasses(path or self.shootout_kicks, ShootoutKick)
-
-    def write_shootout_kicks(self, rows: Iterable[ShootoutKick], path: Path | None = None) -> int:
-        return _write_jsonl(path or self.shootout_kicks, rows)
 
     # ------------------------------------------------------------ player_h
 
@@ -277,14 +106,6 @@ class Artifacts:
     def write_roster(self, rows: Iterable[RosterPlayer], path: Path | None = None) -> int:
         return _write_jsonl(path or self.roster, rows)
 
-    # -------------------------------------------------------- training_table
-
-    def read_training_table(self, path: Path | None = None) -> list[TrainingRow]:
-        return _read_jsonl_of_dataclasses(path or self.training_table, TrainingRow)
-
-    def write_training_table(self, rows: Iterable[TrainingRow], path: Path | None = None) -> int:
-        return _write_jsonl(path or self.training_table, rows, nan_to_null=True)
-
     # ----------------------------------------------------------- predictions
 
     def read_predictions(self, path: Path | None = None) -> list[PredictionRow]:
@@ -293,95 +114,12 @@ class Artifacts:
     def write_predictions(self, rows: Iterable[PredictionRow], path: Path | None = None) -> int:
         return _write_jsonl(path or self.predictions, rows)
 
-    # --------------------------------------------- tournament success-rate
-
-    def read_tournament_success_rate(self, path: Path | None = None) -> list[TournamentSuccessRate]:
-        """Read the per-tournament scraper coverage diagnostic.
-
-        Issue #51 (v4 PRD Phase 2): the artifact is one
-        `TournamentSuccessRate` row per (league, season) pair, with
-        the match / kick counts and the per-state breakdown. The
-        reader reconstructs the dataclass list; callers use
-        `aggregate_per_tournament_success_rate` to compute the rows
-        before writing.
-        """
-        return _read_jsonl_of_dataclasses(
-            path or self.tournament_success_rate, TournamentSuccessRate
-        )
-
-    # -------------------------------------------------------------- metrics
-
-    def read_metrics(self, path: Path | None = None) -> MetricsReport:
-        with (path or self.metrics).open(encoding="utf-8") as f:
-            return MetricsReport.from_dict(json.load(f))
-
-    def write_metrics(self, report: MetricsReport, path: Path | None = None) -> int:
-        target = path or self.metrics
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with target.open("w", encoding="utf-8") as f:
-            json.dump(report.to_dict(), f, indent=2, ensure_ascii=False)
-        return 1
-
-    # ----------------------------------------------------------------- cv
-
-    def read_cv(self, path: Path | None = None) -> CVReport:
-        """Read the standalone `cv_metrics.json` artifact (Issue #45).
-
-        The artifact stores the full `CVReport` payload (per-fold
-        metrics + aggregate) so the CV can be loaded independently of
-        the main `metrics.json` (e.g. by the dashboard or by a future
-        documentation tool that doesn't need the rest of the metrics
-        report).
-        """
-        with (path or self.cv_metrics).open(encoding="utf-8") as f:
-            return _cv_from_dict(json.load(f))
-
-    def write_cv(self, report: CVReport, path: Path | None = None) -> int:
-        """Write the standalone `cv_metrics.json` artifact (Issue #45)."""
-        target = path or self.cv_metrics
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with target.open("w", encoding="utf-8") as f:
-            json.dump(_cv_to_dict(report), f, indent=2, ensure_ascii=False)
-        return 1
-
-    # ----------------------------------------------------------------- model
-
-    def read_model(self, path: Path | None = None) -> dict[str, Any]:
-        return _model_load_artifact(path or self.lightgbm_model)
-
-    def write_model(
-        self,
-        model: Any,
-        feature_columns: list[str],
-        model_kind: str,
-        params: dict[str, Any] | None = None,
-        path: Path | None = None,
-    ) -> int:
-        _model_save_artifact(
-            path or self.lightgbm_model,
-            model,
-            feature_columns,
-            model_kind,
-            params=params,
-        )
-        return 1
-
     # ----------------------------------------------------------- cache factory
 
     def fotmob_client(self) -> FotMobClient:
-        """Build a `FotMobClient` rooted at this adapter's cache_dir."""
         return FotMobClient(cache_dir=self.cache_dir)
 
     # ---------------------------------------------------- streaming serialise
 
     def serialize_row(self, row: Any, *, nan_to_null: bool = False) -> str:
-        """Serialise one dataclass row to a JSON string (no trailing newline).
-
-        Streaming-writer scripts (e.g. the initial-set player history
-        slice) want to write one row at a time so the on-disk copy is
-        kept current on long runs (a 3h cold-cache run cannot afford to
-        lose rows to a Ctrl-C). The serialisation matches the
-        `write_*` methods' per-row shape, so the file format is
-        unchanged.
-        """
         return _serialize_row(row, nan_to_null=nan_to_null)

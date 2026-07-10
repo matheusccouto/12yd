@@ -34,7 +34,6 @@ from .client import FotMobClient
 from .fotmob_parsing import coerce_int
 from .leagues import League
 from .match_ref import MatchRef
-from .shootouts import fetch_season_fixtures
 from .tournaments import WC_2026_LEAGUE, WC_2026_SEASON
 
 
@@ -55,6 +54,18 @@ class RosterPlayer:
     team_id: int
     team_name: str
     country_code: str  # ISO 3166-1 alpha-3, "" if missing
+
+
+def fetch_season_fixtures(
+    client: FotMobClient, league: League, season: int,
+) -> list[dict[str, Any]]:
+    payload = client.get(
+        f"leagues/{league.league_id}/overview/{league.slug}",
+        params={"season": str(season)},
+    )
+    fixtures = (payload.get("pageProps") or {}).get("fixtures") or {}
+    matches = fixtures.get("allMatches") or []
+    return list(matches)
 
 
 def fetch_wc_2026_roster(

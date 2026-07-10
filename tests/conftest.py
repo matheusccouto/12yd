@@ -24,6 +24,6 @@ def sample_2022_final() -> Mapping[str, Any]:
     if not SAMPLE_MATCH_PATH.exists():
         pytest.skip(
             f"Sample not present at {SAMPLE_MATCH_PATH}. "
-            "Run `uv run python scripts/fetch_2022_final.py` to populate it."
+            "Run `uv run python scripts/fetch_2022_final.py` to populate it.",
         )
     return json.loads(gzip.decompress(SAMPLE_MATCH_PATH.read_bytes()))

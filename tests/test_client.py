@@ -35,7 +35,7 @@ class _StubResponse:
 
 
 def _stub_httpx_client(
-    monkeypatch, response: _StubResponse, captures: list[str] | None = None
+    monkeypatch, response: _StubResponse, captures: list[str] | None = None,
 ) -> None:
     class _StubHTTP:
         def __init__(self, *_args: Any, **_kwargs: Any) -> None:
@@ -44,7 +44,7 @@ def _stub_httpx_client(
         def __enter__(self) -> _StubHTTP:
             return self
 
-        def __exit__(self, *_args: Any) -> None:
+        def __exit__(self, *_args: object) -> None:
             return None
 
         def close(self) -> None:
@@ -229,7 +229,7 @@ def test_shared_http_client_reused_across_calls(tmp_path: Path, monkeypatch) -> 
         def __enter__(self) -> _StubHTTP:
             return self
 
-        def __exit__(self, *_args: Any) -> None:
+        def __exit__(self, *_args: object) -> None:
             pass
 
         def close(self) -> None:

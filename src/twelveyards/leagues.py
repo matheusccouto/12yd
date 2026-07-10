@@ -93,7 +93,7 @@ EXTENDED_LEAGUES: tuple[League, ...] = (
     League(114, "friendlies", "Friendlies", kind="domestic_only"),
     League(76, "uefa-euro-qualification", "UEFA Euro Qualifiers", kind="domestic_only"),
     League(
-        84, "fifa-world-cup-qualifiers-conmebol", "CONMEBOL WC Qualifiers", kind="domestic_only"
+        84, "fifa-world-cup-qualifiers-conmebol", "CONMEBOL WC Qualifiers", kind="domestic_only",
     ),
     # Club continental (Americas)
     League(292, "concacaf-champions-cup", "CONCACAF Champions Cup", kind="domestic_only"),
