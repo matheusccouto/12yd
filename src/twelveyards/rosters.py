@@ -26,15 +26,18 @@ skipped at extraction time.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from .client import FotMobClient
 from .fotmob_parsing import coerce_int
-from .leagues import League
 from .match_ref import MatchRef
 from .tournaments import WC_2026_LEAGUE, WC_2026_SEASON
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator, Mapping
+
+    from .client import FotMobClient
+    from .leagues import League
 
 
 @dataclass(frozen=True)
@@ -59,6 +62,7 @@ class RosterPlayer:
 def fetch_season_fixtures(
     client: FotMobClient, league: League, season: int,
 ) -> list[dict[str, Any]]:
+    """Fetch a league's season fixtures list from FotMob."""
     payload = client.get(
         f"leagues/{league.league_id}/overview/{league.slug}",
         params={"season": str(season)},

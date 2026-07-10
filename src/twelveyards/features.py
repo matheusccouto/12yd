@@ -15,21 +15,27 @@ kick's side. TabPFN handles categoricals natively.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from datetime import date, timedelta
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from .config import LOOKBACK_WINDOW_YEARS, TRAIN_FLOOR
-from .player_history import PlayerMetadata, PlayerPenalty
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from .player_history import PlayerMetadata, PlayerPenalty
 
 PRIOR_PROB: tuple[float, float, float] = (1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0)
 CLASSES: tuple[str, ...] = ("L", "C", "R")
 
 CATEGORICAL_INDICES: list[int] = [4, 5, 6]
+_NUM_FEATURES: int = 7
 
 
 def side_distribution(sides: Sequence[str], n: int) -> tuple[float, float, float]:
+    """Return (p_L, p_C, p_R) for the last `n` sides, or the uniform prior if empty."""
     if not sides:
         return PRIOR_PROB
     recent = sides[-n:] if n > 0 else []
@@ -57,7 +63,9 @@ def _filter_history_window(
     return out
 
 
-def _build_categorical_encoder(rows: list[dict]) -> tuple[dict[str, int], dict[str, int], dict[str, int]]:
+def _build_categorical_encoder(
+    rows: list[dict],
+) -> tuple[dict[str, int], dict[str, int], dict[str, int]]:
     side_map: dict[str, int] = {}
     foot_map: dict[str, int] = {}
     pos_map: dict[str, int] = {}
@@ -80,6 +88,11 @@ def compute_features(
     target_date: date,
     lookback_years: int = LOOKBACK_WINDOW_YEARS,
 ) -> dict:
+    """Compute the 7-element feature dict for a player at a target date.
+
+    Returns p_L, p_C, p_R (A1), last_side (A2), preferred_foot (A3),
+    career_penalty_count (A4), and position (C1).
+    """
     window_kicks = _filter_history_window(history, target_date, lookback_years)
     sides = [p.side for p in window_kicks]
     total = len(window_kicks)
@@ -105,6 +118,12 @@ def build_training_matrix(
     metadata_by_id: dict[int, PlayerMetadata],
     lookback_years: int = LOOKBACK_WINDOW_YEARS,
 ) -> tuple[np.ndarray, np.ndarray]:
+    """Build (X, y) training matrices from player history.
+
+    Each kick becomes a training row whose features are derived from
+    prior kicks within the 5-year window and whose label is the kick's side.
+    Only kicks on or after TRAIN_FLOOR are used as training rows.
+    """
     rows: list[dict] = []
     labels: list[int] = []
 
@@ -121,7 +140,7 @@ def build_training_matrix(
             rows.append(features)
             labels.append(CLASSES.index(kick.side))
 
-    X = _features_to_array(rows)
+    X = _features_to_array(rows)  # noqa: N806
     y = np.array(labels, dtype=np.int64)
     return X, y
 
@@ -133,8 +152,13 @@ def build_prediction_matrix(
     target_date: date | None = None,
     lookback_years: int = LOOKBACK_WINDOW_YEARS,
 ) -> np.ndarray:
+    """Build the prediction feature matrix for roster players.
+
+    Each roster player gets one row of features computed from their
+    penalty history up to `target_date` (defaults to today UTC).
+    """
     if target_date is None:
-        target_date = date.today()
+        target_date = date.today()  # noqa: DTZ011
 
     rows: list[dict] = []
     for player_id in roster_player_ids:
@@ -149,18 +173,18 @@ def build_prediction_matrix(
 def _features_to_array(rows: list[dict]) -> np.ndarray:
     n = len(rows)
     if n == 0:
-        return np.empty((0, 7))
+        return np.empty((0, _NUM_FEATURES))
 
     side_map, foot_map, pos_map = _build_categorical_encoder(rows)
 
-    X = np.zeros((n, 7), dtype=np.float64)
+    x = np.zeros((n, _NUM_FEATURES), dtype=np.float64)
     for i, r in enumerate(rows):
-        X[i, 0] = float(r["p_L"])
-        X[i, 1] = float(r["p_C"])
-        X[i, 2] = float(r["p_R"])
-        X[i, 3] = float(r["career_penalty_count"])
-        X[i, 4] = float(side_map.get(str(r["last_side"]), 0))
-        X[i, 5] = float(foot_map.get(str(r["preferred_foot"]), 0))
-        X[i, 6] = float(pos_map.get(str(r["position"]), 0))
+        x[i, 0] = float(r["p_L"])
+        x[i, 1] = float(r["p_C"])
+        x[i, 2] = float(r["p_R"])
+        x[i, 3] = float(r["career_penalty_count"])
+        x[i, 4] = float(side_map.get(str(r["last_side"]), 0))
+        x[i, 5] = float(foot_map.get(str(r["preferred_foot"]), 0))
+        x[i, 6] = float(pos_map.get(str(r["position"]), 0))
 
-    return X
+    return x

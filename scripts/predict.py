@@ -64,7 +64,7 @@ def main() -> int:
     for kicker_id in {*player_history.keys(), *(p.player_id for p in roster)}:
         try:
             payload = fetch_player_data(
-                art.fotmob_client(), kicker_id
+                art.fotmob_client(), kicker_id,
             )
             metadata = extract_player_metadata(payload)
             if metadata is not None:

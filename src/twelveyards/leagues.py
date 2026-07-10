@@ -1,5 +1,4 @@
-"""The 6 in-scope international tournaments + the 7 in-scope club tournaments
-(FotMob leagueId + SEO slug pairs).
+"""FotMob leagueId + SEO slug pairs for in-scope tournaments and player history.
 
 PRD: The leagueId is the FotMob integer ID, e.g. World Cup = 77, Euro = 50,
 Copa América = 44, Gold Cup = 298, Asian Cup = 290, AFCON = 289.
@@ -40,6 +39,8 @@ LeagueKind = Literal["international", "club", "domestic_only"]
 
 @dataclass(frozen=True)
 class League:
+    """A FotMob league identifier: league_id, SEO slug, display name, and kind."""
+
     league_id: int
     slug: str
     name: str

@@ -59,6 +59,7 @@ _NEUTRAL_COLOR: _BadgeColor = "gray"
 
 @st.cache_data(show_spinner="Loading predictions…")
 def load_predictions() -> list:
+    """Load predictions.jsonl from the working tree and return deserialized rows."""
     art = Artifacts()
     path = art.predictions
     if not path.exists():
@@ -68,12 +69,14 @@ def load_predictions() -> list:
 
 @st.cache_data
 def get_distinct_teams() -> list[tuple[int, str]]:
+    """Extract distinct (team_id, team_name) pairs from predictions."""
     predictions = load_predictions()
     return distinct_teams(predictions)
 
 
 @st.cache_data(show_spinner="Loading player history…")
 def load_player_history() -> dict[int, list]:
+    """Load player_history.jsonl and group penalties by kicker_id."""
     art = Artifacts()
     path = art.player_history
     if not path.exists():
@@ -92,6 +95,7 @@ def _badge_color(team_name: str) -> _BadgeColor:
 
 
 def render_card(kicker: KickerPrediction) -> None:
+    """Render one kicker's predictions as a Streamlit card with a bar chart."""
     with st.container(border=True):
         st.markdown(f"**{kicker.player_name}** · {kicker.total_penalties} pen")
         df = pd.DataFrame(
@@ -106,6 +110,7 @@ def render_team_block(
     *,
     heading: str,
 ) -> None:
+    """Render all kicker cards for one team with a heading badge."""
     color = _badge_color(heading)
     st.badge(heading.upper(), color=color)
     for k in kickers:
@@ -113,6 +118,7 @@ def render_team_block(
 
 
 def main() -> None:
+    """Entry point: configure the page, render sidebar dropdowns, and display cards."""
     st.set_page_config(
         page_title="12yd — Penalty Shootout Prediction",
         page_icon="⚽",

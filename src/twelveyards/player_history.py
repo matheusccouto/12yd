@@ -7,7 +7,7 @@ lookup) fans out to the Derived History (per-match penalty shots). No
 further fetches originate from the Derived History — a scraper that fans
 out from there is a bug, not a feature.
 
-The Initial Set assembly (Training ∪ Prediction, dedup) and the
+The Initial Set assembly (Training U Prediction, dedup) and the
 per-kicker fan-out across the Initial Set live in `initial_set`. This
 module is the per-kicker FotMob fan-out only.
 
@@ -24,13 +24,12 @@ per-kicker history is over every penalty, not just shootout kicks.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from email.utils import parsedate_to_datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from .client import FotMobClient
 from .config import LOOKBACK_WINDOW_YEARS, SCRAPE_FLOOR
 from .coordinates import side
 from .fotmob_parsing import (
@@ -40,6 +39,11 @@ from .fotmob_parsing import (
 )
 from .leagues import LEAGUE_BY_ID
 from .match_ref import parse_page_url
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
+
+    from .client import FotMobClient
 
 
 @dataclass(frozen=True)
@@ -111,18 +115,13 @@ def fetch_player_data(client: FotMobClient, player_id: int, slug: str = "") -> M
     return client.get(f"players/{player_id}")
 
 
-def extract_player_metadata(player_payload: Mapping[str, Any]) -> PlayerMetadata:
-    """Extract the player's name, position, birth date, and preferred foot from the page payload.
+def extract_player_metadata(
+    player_payload: Mapping[str, Any],
+) -> PlayerMetadata:
+    """Extract the player's name, position, birth date, and preferred foot.
 
-    Accepts the full `__next/data` payload (the same shape `fetch_player_data`
-    returns). The fields live at `pageProps.data.{id,name,birthDate,positionDescription,playerInformation}`.
-
-    The position comes from `positionDescription.primaryPosition.key`
-    (PRD: feature C1). The birth date comes from `birthDate.utcTime`
-    (PRD: feature C2). The preferred foot (v3: model feature A3)
-    comes from `playerInformation[]` with `translationKey="preferred_foot"`;
-    we read `value.key` ("left" / "right" / "both") and fall back to "" if
-    the field is missing or the key is unknown.
+    Accepts the full `__next/data` payload. The fields live at
+    `pageProps.data.{id,name,birthDate,positionDescription,playerInformation}`.
     """
     player_data = (player_payload.get("pageProps") or {}).get("data") or {}
     player_id = coerce_int(player_data.get("id"))
@@ -169,7 +168,7 @@ def _primary_position_key(player_data: Mapping[str, Any]) -> str:
     return str(primary.get("key") or "")
 
 
-def _parse_birth_date(birth_date: Any) -> str:
+def _parse_birth_date(birth_date: Any) -> str:  # noqa: ANN401
     """Parse a FotMob `birthDate` block into an ISO 8601 date string.
 
     The shape is `{"utcTime": "1987-06-24T00:00:00.000Z", "timezone": "UTC"}`.
@@ -414,7 +413,7 @@ def compute_lookback_window(
     return start, end
 
 
-def fetch_player_penalty_history(
+def fetch_player_penalty_history(  # noqa: PLR0913
     client: FotMobClient,
     player_id: int,
     player_slug: str = "",
@@ -482,7 +481,7 @@ def fetch_player_penalty_history(
             )
 
 
-def _process_match_fixture(
+def _process_match_fixture(  # noqa: PLR0913
     client: FotMobClient,
     fixture: Mapping[str, Any],
     player_id: int,

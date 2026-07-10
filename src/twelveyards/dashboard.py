@@ -7,14 +7,19 @@ MatchContext, is_placeholder_team, _parse_kickoff_utc.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-from .predict import PredictionRow
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from .predict import PredictionRow
 
 
 @dataclass(frozen=True)
 class KickerPrediction:
+    """One kicker's predicted side distribution, prepared for card rendering."""
+
     player_id: int
     player_name: str
     short_name: str
@@ -23,9 +28,9 @@ class KickerPrediction:
     kicking_foot: str
     photo_url: str
     total_penalties: int
-    p_L: float
-    p_C: float
-    p_R: float
+    p_L: float  # noqa: N815
+    p_C: float  # noqa: N815
+    p_R: float  # noqa: N815
     recommended_dive: str
 
 
@@ -34,6 +39,7 @@ def predictions_for_match(
     home_team_id: int,
     away_team_id: int,
 ) -> tuple[list[KickerPrediction], list[KickerPrediction]]:
+    """Filter predictions into (home, away) KickerPrediction lists."""
     home_rows: list[KickerPrediction] = []
     away_rows: list[KickerPrediction] = []
     for r in predictions:
@@ -60,15 +66,17 @@ def predictions_for_match(
     return home_rows, away_rows
 
 
-def recommended_dive(p_L: float, p_C: float, p_R: float) -> str:
-    minimum = min(p_L, p_C, p_R)
-    for side, value in (("L", p_L), ("C", p_C), ("R", p_R)):
+def recommended_dive(p_l: float, p_c: float, p_r: float) -> str:
+    """Return the side the kicker is least likely to aim for (best dive choice)."""
+    minimum = min(p_l, p_c, p_r)
+    for side, value in (("L", p_l), ("C", p_c), ("R", p_r)):
         if value == minimum:
             return side
     return "L"
 
 
 def opposite_side(side: str) -> str:
+    """Return the opposite goal side (L↔R, C↔C)."""
     if side == "L":
         return "R"
     if side == "R":
@@ -78,15 +86,17 @@ def opposite_side(side: str) -> str:
     return side
 
 
-def most_likely_side(p_L: float, p_C: float, p_R: float) -> str:
-    maximum = max(p_L, p_C, p_R)
-    for side, value in (("L", p_L), ("C", p_C), ("R", p_R)):
+def most_likely_side(p_l: float, p_c: float, p_r: float) -> str:
+    """Return the side the kicker is most likely to aim for."""
+    maximum = max(p_l, p_c, p_r)
+    for side, value in (("L", p_l), ("C", p_c), ("R", p_r)):
         if value == maximum:
             return side
     return "L"
 
 
 def distinct_teams(predictions: Iterable[PredictionRow]) -> list[tuple[int, str]]:
+    """Return sorted list of distinct (team_id, team_name) pairs from predictions."""
     seen: set[int] = set()
     teams: list[tuple[int, str]] = []
     for r in predictions:

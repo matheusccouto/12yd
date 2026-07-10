@@ -23,11 +23,13 @@ The fields consumers don't need are simply left as their defaults.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .fotmob_parsing import coerce_int
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 # FotMob match pageUrl shape: `/matches/{seo}/{h2h}#{match_id}`.
 # The `seo` is kebab-case (e.g. `argentina-vs-france`); `h2h` is a 6-char

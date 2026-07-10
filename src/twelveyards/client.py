@@ -12,36 +12,53 @@ from __future__ import annotations
 import gzip
 import json
 import re
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import httpx
 
 from .config import HTTP_TIMEOUT_SECONDS, USER_AGENT
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+_MAX_CACHE_KEY_LEN: int = 200
+_HTTP_NOT_MODIFIED: int = 304
+_GZIP_MAGIC_MIN_LEN: int = 2
+_GZIP_MAGIC_BYTE_0: int = 0x1F
+_GZIP_MAGIC_BYTE_1: int = 0x8B
+
 
 class FotMobClientLike(Protocol):
-    def get(self, path: str, params: Mapping[str, str] | None = None) -> Any: ...
+    """Structural type for anything that looks like a FotMob HTTP client."""
+
+    def get(self, path: str, params: Mapping[str, str] | None = None) -> Any:  # noqa: ANN401
+        """Fetch a FotMob API path and return the parsed JSON body."""
+        ...
 
 
 @dataclass
 class FotMobClient:
+    """FotMob HTTP client with gzip, ETag revalidation, and disk cache."""
+
     cache_dir: Path
     timeout: float = HTTP_TIMEOUT_SECONDS
     build_id: str | None = field(default=None, init=False)
     _http: httpx.Client | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
+        """Create the cache directory if it does not exist."""
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-    def _ensure_http(self) -> httpx.Client:
+    def ensure_http(self) -> httpx.Client:
+        """Lazy-init and return a shared httpx.Client."""
         if self._http is None:
             self._http = httpx.Client(timeout=self.timeout, follow_redirects=True)
         return self._http
 
-    def get(self, path: str, params: Mapping[str, str] | None = None) -> Any:
+    def get(self, path: str, params: Mapping[str, str] | None = None) -> Any:  # noqa: ANN401
+        """Fetch a FotMob API path, build the URL, and return parsed JSON."""
         if self.build_id is None:
             self.build_id = _discover_build_id(self)
         url = f"https://www.fotmob.com/_next/data/{self.build_id}/{path}.json"
@@ -50,6 +67,7 @@ class FotMobClient:
         return _cached_get(self, url)
 
     def close(self) -> None:
+        """Close the underlying httpx.Client if it was created."""
         if self._http is not None:
             self._http.close()
             self._http = None
@@ -57,7 +75,7 @@ class FotMobClient:
 
 def _discover_build_id(client: FotMobClient) -> str:
     headers = {"User-Agent": USER_AGENT, "Accept-Encoding": "gzip"}
-    http = client._ensure_http()
+    http = client.ensure_http()
     response = http.get("https://www.fotmob.com/", headers=headers)
     response.raise_for_status()
     match = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.+?)</script>', response.text, re.DOTALL)
@@ -76,21 +94,21 @@ def _cache_key(url: str) -> Path:
     """
     stripped = re.sub(r"/_next/data/[^/]+/", "/_next/data/_/", url)
     sanitized = re.sub(r"[^A-Za-z0-9._-]", "_", stripped)
-    if len(sanitized) > 200:
-        sanitized = sanitized[:200]
+    if len(sanitized) > _MAX_CACHE_KEY_LEN:
+        sanitized = sanitized[:_MAX_CACHE_KEY_LEN]
     return Path(sanitized + ".json.gz")
 
 
-def _cached_get(client: FotMobClient, url: str) -> Any:
+def _cached_get(client: FotMobClient, url: str) -> Any:  # noqa: ANN401
     cache_file = client.cache_dir / _cache_key(url)
     etag_file = cache_file.with_suffix(".etag")
     headers: dict[str, str] = {"User-Agent": USER_AGENT, "Accept-Encoding": "gzip"}
     if etag_file.exists():
         headers["If-None-Match"] = etag_file.read_text(encoding="utf-8").strip()
 
-    http = client._ensure_http()
+    http = client.ensure_http()
     response = http.get(url, headers=headers)
-    if response.status_code == 304:
+    if response.status_code == _HTTP_NOT_MODIFIED:
         return _load_cached(cache_file)
 
     response.raise_for_status()
@@ -103,10 +121,14 @@ def _cached_get(client: FotMobClient, url: str) -> Any:
 
 def _decompress(response: httpx.Response) -> bytes:
     raw = bytes(response.content)
-    if len(raw) >= 2 and raw[0] == 0x1F and raw[1] == 0x8B:
+    if (
+        len(raw) >= _GZIP_MAGIC_MIN_LEN
+        and raw[0] == _GZIP_MAGIC_BYTE_0
+        and raw[1] == _GZIP_MAGIC_BYTE_1
+    ):
         return gzip.decompress(raw)
     return raw
 
 
-def _load_cached(cache_file: Path) -> Any:
+def _load_cached(cache_file: Path) -> Any:  # noqa: ANN401
     return json.loads(gzip.decompress(cache_file.read_bytes()))

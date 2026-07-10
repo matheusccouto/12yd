@@ -23,8 +23,8 @@ class TabPFN:
     Usage:
         init()
         model = TabPFN()
-        model.fit(X_train, y_train)
-        probs = model.predict_proba(X_test)  # shape (n_test, 3)
+        model.fit(x_train, y_train)
+        probs = model.predict_proba(x_test)  # shape (n_test, 3)
     """
 
     def __init__(
@@ -35,14 +35,15 @@ class TabPFN:
         random_state: int = 0,
         categorical_features_indices: list[int] | None = None,
     ) -> None:
+        """Create a TabPFN wrapper with the given hyperparameters."""
         self._n_estimators = n_estimators
         self._thinking_mode = thinking_mode
         self._random_state = random_state
         self._categorical_features_indices = categorical_features_indices
         self._classifier: TabPFNClassifier | None = None
 
-    def fit(self, X: np.ndarray, y: np.ndarray) -> None:
-        """Fit TabPFN on the training data (free — no tokens consumed)."""
+    def fit(self, X: np.ndarray, y: np.ndarray) -> None:  # noqa: N803
+        """Fit TabPFN on the training data (free -- no tokens consumed)."""
         self._classifier = TabPFNClassifier(
             n_estimators=self._n_estimators,
             thinking_mode=self._thinking_mode,
@@ -52,8 +53,8 @@ class TabPFN:
         )
         self._classifier.fit(X, y)
 
-    def predict_proba(self, X: np.ndarray) -> np.ndarray:
-        """Run batched prediction (costs tokens — always batch all rows)."""
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:  # noqa: N803
+        """Run batched prediction (costs tokens -- always batch all rows)."""
         if self._classifier is None:
             msg = "TabPFN must be fit before predict_proba"
             raise RuntimeError(msg)

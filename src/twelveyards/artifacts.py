@@ -9,10 +9,9 @@ discrepancies, tournament_success_rate.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any
 
 from .client import FotMobClient
 from .initial_set import MissingKicker
@@ -20,7 +19,8 @@ from .player_history import PlayerPenalty
 from .predict import PredictionRow
 from .rosters import RosterPlayer
 
-_T = TypeVar("_T")
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 def _write_jsonl(
@@ -39,7 +39,7 @@ def _write_jsonl(
     return count
 
 
-def _serialize_row(row: Any, *, nan_to_null: bool = False) -> str:
+def _serialize_row(row: Any, *, nan_to_null: bool = False) -> str:  # noqa: ANN401
     payload = asdict(row)
     return json.dumps(payload, ensure_ascii=False, allow_nan=(not nan_to_null))
 
@@ -47,8 +47,8 @@ def _serialize_row(row: Any, *, nan_to_null: bool = False) -> str:
 def _read_jsonl_of_dataclasses[T](path: Path, cls: type[T]) -> list[T]:
     out: list[T] = []
     with path.open(encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
+        for raw_line in f:
+            line = raw_line.strip()
             if not line:
                 continue
             out.append(cls(**json.loads(line)))
@@ -56,11 +56,14 @@ def _read_jsonl_of_dataclasses[T](path: Path, cls: type[T]) -> list[T]:
 
 
 class Artifacts:
+    """Single seam for the on-disk artifact layout under `data/`."""
+
     def __init__(
         self,
         root: Path = Path("data"),
         cache_dir: Path = Path("data/fotmob_cache"),
     ) -> None:
+        """Create an Artifacts handle rooted at `root`, with `cache_dir` for HTTP cache."""
         self.root = Path(root)
         self.cache_dir = Path(cache_dir)
 
@@ -68,58 +71,80 @@ class Artifacts:
 
     @property
     def player_history(self) -> Path:
+        """Path to player_history.jsonl."""
         return self.root / "player_history.jsonl"
 
     @property
     def missing_history(self) -> Path:
+        """Path to missing_history.jsonl."""
         return self.root / "missing_history.jsonl"
 
     @property
     def roster(self) -> Path:
+        """Path to wc2026_roster.jsonl."""
         return self.root / "wc2026_roster.jsonl"
 
     @property
     def predictions(self) -> Path:
+        """Path to predictions.jsonl."""
         return self.root / "predictions.jsonl"
 
     # ------------------------------------------------------------ player_h
 
     def read_player_history(self, path: Path | None = None) -> list[PlayerPenalty]:
+        """Read player_history.jsonl into PlayerPenalty rows."""
         return _read_jsonl_of_dataclasses(path or self.player_history, PlayerPenalty)
 
-    def write_player_history(self, rows: Iterable[PlayerPenalty], path: Path | None = None) -> int:
+    def write_player_history(
+        self, rows: Iterable[PlayerPenalty], path: Path | None = None,
+    ) -> int:
+        """Write PlayerPenalty rows to player_history.jsonl."""
         return _write_jsonl(path or self.player_history, rows)
 
     # ----------------------------------------------------------- missing_h
 
     def read_missing_history(self, path: Path | None = None) -> list[MissingKicker]:
+        """Read missing_history.jsonl into MissingKicker rows."""
         return _read_jsonl_of_dataclasses(path or self.missing_history, MissingKicker)
 
-    def write_missing_history(self, rows: Iterable[MissingKicker], path: Path | None = None) -> int:
+    def write_missing_history(
+        self, rows: Iterable[MissingKicker], path: Path | None = None,
+    ) -> int:
+        """Write MissingKicker rows to missing_history.jsonl."""
         return _write_jsonl(path or self.missing_history, rows)
 
     # ----------------------------------------------------------------- roster
 
     def read_roster(self, path: Path | None = None) -> list[RosterPlayer]:
+        """Read wc2026_roster.jsonl into RosterPlayer rows."""
         return _read_jsonl_of_dataclasses(path or self.roster, RosterPlayer)
 
-    def write_roster(self, rows: Iterable[RosterPlayer], path: Path | None = None) -> int:
+    def write_roster(
+        self, rows: Iterable[RosterPlayer], path: Path | None = None,
+    ) -> int:
+        """Write RosterPlayer rows to wc2026_roster.jsonl."""
         return _write_jsonl(path or self.roster, rows)
 
     # ----------------------------------------------------------- predictions
 
     def read_predictions(self, path: Path | None = None) -> list[PredictionRow]:
+        """Read predictions.jsonl into PredictionRow rows."""
         return _read_jsonl_of_dataclasses(path or self.predictions, PredictionRow)
 
-    def write_predictions(self, rows: Iterable[PredictionRow], path: Path | None = None) -> int:
+    def write_predictions(
+        self, rows: Iterable[PredictionRow], path: Path | None = None,
+    ) -> int:
+        """Write PredictionRow rows to predictions.jsonl."""
         return _write_jsonl(path or self.predictions, rows)
 
     # ----------------------------------------------------------- cache factory
 
     def fotmob_client(self) -> FotMobClient:
+        """Return a FotMobClient configured to use this instance's cache_dir."""
         return FotMobClient(cache_dir=self.cache_dir)
 
     # ---------------------------------------------------- streaming serialise
 
-    def serialize_row(self, row: Any, *, nan_to_null: bool = False) -> str:
+    def serialize_row(self, row: Any, *, nan_to_null: bool = False) -> str:  # noqa: ANN401
+        """Serialize a dataclass row as a JSON string for streaming writes."""
         return _serialize_row(row, nan_to_null=nan_to_null)

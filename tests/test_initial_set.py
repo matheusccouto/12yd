@@ -123,12 +123,12 @@ def test_fetch_all_initial_set_empty() -> None:
 def test_fetch_all_initial_set_yields_one_per_kicker(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
-    from twelveyards import initial_set as initial_set_module
+    from twelveyards import player_history as player_history_module
 
     def fake_fetch(client, player_id, player_slug="", target_date=None, lookback_years=5, history_floor=None):
         return []
 
-    monkeypatch.setattr(initial_set_module, "fetch_player_penalty_history", fake_fetch)
+    monkeypatch.setattr(player_history_module, "fetch_player_penalty_history", fake_fetch)
 
     class _FakeClient:
         pass
@@ -148,7 +148,7 @@ def test_fetch_all_initial_set_yields_one_per_kicker(
 def test_fetch_all_initial_set_captures_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from twelveyards import initial_set as initial_set_module
+    from twelveyards import player_history as player_history_module
 
     call_count = 0
 
@@ -159,7 +159,7 @@ def test_fetch_all_initial_set_captures_errors(
             raise RuntimeError("simulated fetch failure")
         return []
 
-    monkeypatch.setattr(initial_set_module, "fetch_player_penalty_history", fake_fetch)
+    monkeypatch.setattr(player_history_module, "fetch_player_penalty_history", fake_fetch)
 
     class _FakeClient:
         pass
