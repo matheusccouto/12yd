@@ -218,5 +218,9 @@ and remove HF references from `ralph.yml` (PRD #4).
 - .github/workflows/ralph.yml — removed HF CLI install + HF_TOKEN
 
 ### Blockers / notes
-- None. Workflow file is created and committed. Repo owner needs
-  TABPFN_TOKEN configured as a repo secret for the predict step.
+- Workflow files (scrape-and-predict.yml, ralph.yml) exist on disk but
+  cannot be pushed — the GH Actions runner's installation token lacks the
+  `workflows` permission scope. Repo owner must add `workflows: write` to
+  the GH App permissions (or push with a PAT that has `workflow` scope).
+- Repo owner also needs TABPFN_TOKEN configured as a repo secret for the
+  predict step.
