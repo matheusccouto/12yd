@@ -73,6 +73,22 @@ def test_uv_lock_exists() -> None:
     )
 
 
+def test_uv_lock_is_tracked_in_git() -> None:
+    result = subprocess.run(
+        ["git", "ls-files", "uv.lock"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.strip() == "uv.lock", (
+        "uv.lock must be committed to git — Streamlit Community Cloud clones the "
+        "repo, so a gitignored uv.lock is invisible to it. Without uv.lock in the "
+        "repo, Cloud falls back to pyproject.toml (poetry mode) or requirements.txt, "
+        "neither of which builds and installs the local twelveyards package. "
+        f"stdout={result.stdout!r}"
+    )
+
+
 def _parse_pyproject_dependencies() -> dict[str, str]:
     data = tomllib.loads(PYPROJECT_PATH.read_text())
     deps: list[str] = data["project"]["dependencies"]

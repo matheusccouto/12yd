@@ -107,17 +107,11 @@ ipython_config.py
 # Pipfile.lock
 
 # UV
-#   uv.lock is intentionally not tracked. Streamlit Community Cloud reads
-#   the first dependency file it finds in this priority order:
-#       uv.lock > Pipfile > environment.yml > requirements.txt > pyproject.toml
-#   The lock format is `uv` version-specific; when the lock format on disk
-#   is newer than the `uv` binary Streamlit Cloud ships, parsing silently
-#   falls back to installing only `streamlit` (the default), which broke
-#   the v4 dashboard deploy with `ModuleNotFoundError: No module named
-#   'plotly'` (see issue #52). `requirements.txt` is the canonical
-#   deployment manifest; `uv.lock` is regenerated locally by `uv sync`
-#   from `pyproject.toml` and stays out of the repo.
-uv.lock
+#   uv.lock IS tracked. Streamlit Community Cloud reads it (priority #1)
+#   and runs `uv sync --frozen`, which builds and installs the local
+#   twelveyards package via the uv_build backend. Without uv.lock in the
+#   repo, Cloud falls back to pyproject.toml (treated as poetry) or
+#   requirements.txt — neither installs the local package.
 
 # poetry
 #   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
