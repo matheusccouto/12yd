@@ -1,0 +1,34 @@
+## 2026-07-11 — Commit workflow files: ralph.yml HF removal + scrape-and-predict.yml (PRD #4, #5, #18-21)
+
+**Task**: Commit and push the two pending workflow file changes as a single commit.
+
+**PRD items**: #4 (store everything in GitHub, drop HuggingFace), #5 (scrape-and-predict.yml workflow), #18-21 (workflow details)
+
+**Key decisions**:
+- Consolidated ralph.yml (HF CLI removal, workflows:write permission) and scrape-and-predict.yml (new pipeline) into one commit
+- scrape-and-predict.yml: single job, daily cron at 06:00 UTC + workflow_dispatch, split cache/restore + cache/save with fotmob-cache- prefix restore-keys, uv sync --no-dev, TABPFN_TOKEN secret
+
+**Files changed**: `.github/workflows/ralph.yml` (modified), `.github/workflows/scrape-and-predict.yml` (new)
+
+**Status**: Commit created locally (8f02336). Cannot push — the GH_TOKEN (fine-grained PAT) lacks `workflows` permission, which is required for .github/workflows/ file modifications. Fix: use a PAT with `workflows: write` scope, or add the workflows permission to the org-level GitHub App OAuth policy. Workflow file changes are stashed locally pending token fix.
+
+## 2026-07-11 — Update README.md for v5 (PRD docs)
+
+**Task**: Update README to reflect v5 architecture.
+
+**Files changed**: `README.md`
+**Status**: Pushed to main.
+
+## 2026-07-11 — Tighten ruff per-file-ignores (PRD #31)
+
+**Task**: Trim ruff per-file-ignores from 32 to 28 rules for tests, removing blanket suppressions.
+
+**Key decisions**:
+- Kept S101 (assert), SLF001 (private members), PLR2004 (magic numbers), ARG* (unused args in fixtures), ANN (type annotations in tests), D (docstrings in tests), N80* (naming conventions), PLC0415 (imports in test bodies)
+- Removed: E501, COM812, F841, ERA001, S108, S603, S607, EM101, EM102, PT011, B017, FBT001, TRY003, PYI034, RUF059, PLW1510, TC001-003
+- But added back 16 of these (PLR0913, TC*, S108, PLW1510, S603, S607, TRY003, PYI034, RUF059, PT011, B017, EM101, EM102, FBT001) after testing — net reduction of 4 rules
+- Fixed 3 inline violations: ERA001 (remove commented code), F841 (prefix unused var), E501×13 (break long lines)
+
+**Files changed**: `pyproject.toml`, `tests/test_client.py`, `tests/test_deployment.py`, `tests/test_features.py`, `tests/test_initial_set.py`, `tests/test_player_history.py`, `tests/test_predict.py`
+
+**Status**: Pushed to main. 261 tests pass, ruff clean.
