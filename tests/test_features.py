@@ -103,7 +103,9 @@ def test_compute_features_with_history() -> None:
         _penalty(5, "2024-05-01T00:00:00+00:00", side="R"),
     ]
     feats = compute_features(
-        history, _metadata(player_id=1, preferred_foot="left", position_key="midfielder"), TARGET_DATE,
+        history,
+        _metadata(player_id=1, preferred_foot="left", position_key="midfielder"),
+        TARGET_DATE,
     )
     assert (feats["p_L"], feats["p_C"], feats["p_R"]) == (0.6, 0.0, 0.4)
     assert feats["last_side"] == "R"

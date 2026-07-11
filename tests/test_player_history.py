@@ -114,7 +114,6 @@ def _stub_client(
                 raise AssertionError(msg)
             return {"pageProps": {"data": player_page}}
         if path.startswith("leagues/"):
-            # leagues/{leagueId}/overview/{slug}
             parts = path.split("/")
             league_id = int(parts[1])
             season_year = int((params or {}).get("season", "0"))

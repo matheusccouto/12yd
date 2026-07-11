@@ -125,7 +125,9 @@ def test_fetch_all_initial_set_yields_one_per_kicker(
 ) -> None:
     from twelveyards import player_history as player_history_module
 
-    def fake_fetch(client, player_id, player_slug="", target_date=None, lookback_years=5, history_floor=None):
+    def fake_fetch(
+        client, player_id, player_slug="", target_date=None, lookback_years=5, history_floor=None,
+    ):
         return []
 
     monkeypatch.setattr(player_history_module, "fetch_player_penalty_history", fake_fetch)
@@ -152,7 +154,9 @@ def test_fetch_all_initial_set_captures_errors(
 
     call_count = 0
 
-    def fake_fetch(client, player_id, player_slug="", target_date=None, lookback_years=5, history_floor=None):
+    def fake_fetch(
+        client, player_id, player_slug="", target_date=None, lookback_years=5, history_floor=None,
+    ):
         nonlocal call_count
         call_count += 1
         if player_id == 1:

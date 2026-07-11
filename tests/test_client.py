@@ -247,7 +247,7 @@ def test_shared_http_client_reused_across_calls(tmp_path: Path, monkeypatch) -> 
 
 def test_close_releases_http_client(tmp_path: Path) -> None:
     c = FotMobClient(cache_dir=tmp_path)
-    http = c.ensure_http()
+    _http = c.ensure_http()
     assert c._http is not None
     c.close()
     assert c._http is None

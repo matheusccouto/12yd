@@ -169,7 +169,6 @@ def test_app_imports_resolve_under_frozen_sync(tmp_path: Path) -> None:
     [dependency-groups] entry rather than [project.dependencies] — `uv sync`
     silently skips the group and the app boot fails at import time.
     """
-
     snapshot = tmp_path / "repo"
     shutil.copytree(
         REPO_ROOT,

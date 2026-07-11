@@ -157,7 +157,7 @@ def test_predict_and_write_writes_jsonl(tmp_path: Path, monkeypatch: pytest.Monk
             return np.full((len(X), 3), 1.0 / 3.0)
 
     monkeypatch.setattr(predict_module, "tabpfn_init", lambda: None)
-    monkeypatch.setattr(predict_module, "TabPFN", lambda categorical_features_indices=None: _FakeModel())
+    monkeypatch.setattr(predict_module, "TabPFN", lambda **_: _FakeModel())
 
     roster = [_roster(player_id=1, player_name="Alpha")]
     output_path = tmp_path / "preds.jsonl"
@@ -181,7 +181,9 @@ def test_predict_and_write_writes_jsonl(tmp_path: Path, monkeypatch: pytest.Monk
     assert "photo_url" in data
 
 
-def test_predict_and_write_multiple_players(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_predict_and_write_multiple_players(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from twelveyards import predict as predict_module
 
     call_count = 0
@@ -196,7 +198,7 @@ def test_predict_and_write_multiple_players(tmp_path: Path, monkeypatch: pytest.
             return np.full((len(X), 3), 1.0 / 3.0)
 
     monkeypatch.setattr(predict_module, "tabpfn_init", lambda: None)
-    monkeypatch.setattr(predict_module, "TabPFN", lambda categorical_features_indices=None: _FakeModel())
+    monkeypatch.setattr(predict_module, "TabPFN", lambda **_: _FakeModel())
 
     roster = [
         _roster(player_id=1, player_name="Alpha", team_id=100),
@@ -219,7 +221,9 @@ def test_predict_and_write_multiple_players(tmp_path: Path, monkeypatch: pytest.
     assert call_count == 1
 
 
-def test_predict_and_write_uses_metadata_foot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_predict_and_write_uses_metadata_foot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from twelveyards import predict as predict_module
 
     class _FakeModel:
@@ -231,7 +235,7 @@ def test_predict_and_write_uses_metadata_foot(tmp_path: Path, monkeypatch: pytes
             return np.full((len(X), 3), 1.0 / 3.0)
 
     monkeypatch.setattr(predict_module, "tabpfn_init", lambda: None)
-    monkeypatch.setattr(predict_module, "TabPFN", lambda categorical_features_indices=None: _FakeModel())
+    monkeypatch.setattr(predict_module, "TabPFN", lambda **_: _FakeModel())
 
     roster = [_roster(player_id=1)]
     output_path = tmp_path / "preds.jsonl"
@@ -259,7 +263,7 @@ def test_predict_and_write_no_metadata_foot_defaults_empty(
             return np.full((len(X), 3), 1.0 / 3.0)
 
     monkeypatch.setattr(predict_module, "tabpfn_init", lambda: None)
-    monkeypatch.setattr(predict_module, "TabPFN", lambda categorical_features_indices=None: _FakeModel())
+    monkeypatch.setattr(predict_module, "TabPFN", lambda **_: _FakeModel())
 
     roster = [_roster(player_id=1)]
     output_path = tmp_path / "preds.jsonl"
@@ -279,7 +283,7 @@ def test_predict_and_write_empty_roster(tmp_path: Path, monkeypatch: pytest.Monk
             return np.full((len(X), 3), 1.0 / 3.0)
 
     monkeypatch.setattr(predict_module, "tabpfn_init", lambda: None)
-    monkeypatch.setattr(predict_module, "TabPFN", lambda categorical_features_indices=None: _FakeModel())
+    monkeypatch.setattr(predict_module, "TabPFN", lambda **_: _FakeModel())
 
     output_path = tmp_path / "preds.jsonl"
     rows = predict_and_write([], {}, {}, output_path, target_date=TARGET_DATE)
@@ -302,7 +306,7 @@ def test_predict_and_write_probabilities_sum_to_one(
             return np.array([[0.5, 0.3, 0.2]])
 
     monkeypatch.setattr(predict_module, "tabpfn_init", lambda: None)
-    monkeypatch.setattr(predict_module, "TabPFN", lambda categorical_features_indices=None: _FakeModel())
+    monkeypatch.setattr(predict_module, "TabPFN", lambda **_: _FakeModel())
 
     roster = [_roster(player_id=1)]
     output_path = tmp_path / "preds.jsonl"
@@ -326,7 +330,7 @@ def test_predict_and_write_country_code_passthrough(
             return np.full((len(X), 3), 1.0 / 3.0)
 
     monkeypatch.setattr(predict_module, "tabpfn_init", lambda: None)
-    monkeypatch.setattr(predict_module, "TabPFN", lambda categorical_features_indices=None: _FakeModel())
+    monkeypatch.setattr(predict_module, "TabPFN", lambda **_: _FakeModel())
 
     roster = [_roster(player_id=1, country_code="FRA")]
     output_path = tmp_path / "preds.jsonl"
