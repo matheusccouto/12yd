@@ -22,7 +22,8 @@ SHOTMAP_EVENT_TYPE_TO_OUTCOME: dict[str, str] = {
 
 
 def coerce_int(value: Any) -> int:  # noqa: ANN401
-    """Coerce any FotMob-shaped id to a clean int.
+    """
+    Coerce any FotMob-shaped id to a clean int.
 
     Returns 0 for `None`, `""`, and unparseable values. Accepts ints, floats
     (truncated), and numeric strings. Bools are NOT accepted as ints —
@@ -38,7 +39,8 @@ def coerce_int(value: Any) -> int:  # noqa: ANN401
 
 
 def parse_match_date(value: Any) -> str:  # noqa: ANN401
-    """Coerce a FotMob matchTimeUTC to an ISO 8601 string (UTC, second precision).
+    """
+    Coerce a FotMob matchTimeUTC to an ISO 8601 string (UTC, second precision).
 
     The match-detail page uses RFC 2822 dates like
     "Sun, Dec 18, 2022, 15:00 UTC". The season-fixture list uses ISO 8601

@@ -1,4 +1,5 @@
-"""Tests for the FotMob-shape coercion helpers in `fotmob_parsing`.
+"""
+Tests for the FotMob-shape coercion helpers in `fotmob_parsing`.
 
 The helpers are the single source of truth for the three FotMob shape
 quirks the scraper has to work around. A test that pins the behaviour
@@ -48,7 +49,8 @@ def test_coerce_int_unparseable_returns_zero(value: object) -> None:
 
 @pytest.mark.parametrize("value", [True, False])
 def test_coerce_int_bool_returns_zero(value: bool) -> None:
-    """Bools are not accepted as ints — returning 0 is the safe default.
+    """
+    Bools are not accepted as ints — returning 0 is the safe default.
 
     The FotMob payload occasionally has boolean-shaped fields where the
     scraper expects an int id. Accepting `True` as `1` would be a silent

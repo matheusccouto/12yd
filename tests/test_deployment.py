@@ -1,4 +1,5 @@
-"""Tests for the v5 deployment manifest.
+"""
+Tests for the v5 deployment manifest.
 
 v5 drops lightgbm, plotly, huggingface_hub, sklearn from runtime deps.
 v5 runtime deps: tabpfn-client, streamlit, httpx, numpy, pandas, packaging.
@@ -139,7 +140,8 @@ def test_pyproject_no_pinned_versions() -> None:
 
 
 def test_uv_lock_is_in_sync() -> None:
-    """uv.lock must be up to date with pyproject.toml.
+    """
+    uv.lock must be up to date with pyproject.toml.
 
     `uv sync --frozen` on Streamlit Cloud refuses to mutate uv.lock; a stale
     lock would silently skip newly-added runtime deps → ModuleNotFoundError
@@ -163,7 +165,8 @@ def test_uv_lock_is_in_sync() -> None:
 
 
 def test_app_imports_resolve_under_frozen_sync(tmp_path: Path) -> None:
-    """Replay Streamlit Cloud's exact install path: fresh venv + `uv sync --frozen`.
+    """
+    Replay Streamlit Cloud's exact install path: fresh venv + `uv sync --frozen`.
 
     Guards against the regression where a runtime dep sits in a
     [dependency-groups] entry rather than [project.dependencies] — `uv sync`

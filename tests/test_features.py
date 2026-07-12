@@ -1,4 +1,5 @@
-"""Tests for the v5 feature builder.
+"""
+Tests for the v5 feature builder.
 
 v5: 7 player-only, match-agnostic features:
 - A1: (p_L, p_C, p_R) — side distribution over the 5-year rolling window

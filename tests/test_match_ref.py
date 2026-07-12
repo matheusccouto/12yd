@@ -1,4 +1,5 @@
-"""Tests for `parse_page_url` and `MatchRef.from_fixture`.
+"""
+Tests for `parse_page_url` and `MatchRef.from_fixture`.
 
 `parse_page_url` is the foundation for turning season-fixture entries
 into per-match fetchers. `MatchRef.from_fixture` is the single source of

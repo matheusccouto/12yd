@@ -1,10 +1,10 @@
-"""Tests for the FotMob HTTP client (gzip + buildId discovery)."""
+"""Tests for the FotMob HTTP client."""
 
 from __future__ import annotations
 
-import gzip
+import json
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import httpx
 
@@ -24,18 +24,14 @@ class _StubResponse:
         self.content = body
         self.headers = httpx.Headers(headers or {})
 
-    def raise_for_status(self) -> None:
-        if self.status_code >= 400:
-            msg = f"HTTP {self.status_code}"
-            raise httpx.HTTPStatusError(
-                msg,
-                request=httpx.Request("GET", "x"),
-                response=cast("httpx.Response", self),
-            )
+    def json(self) -> Any:
+        return json.loads(self.content)
 
 
 def _stub_httpx_client(
-    monkeypatch, response: _StubResponse, captures: list[str] | None = None,
+    monkeypatch,
+    response: _StubResponse,
+    captures: list[str] | None = None,
 ) -> None:
     class _StubHTTP:
         def __init__(self, *_args: Any, **_kwargs: Any) -> None:
@@ -58,14 +54,19 @@ def _stub_httpx_client(
     monkeypatch.setattr(client_module.httpx, "Client", _StubHTTP)
 
 
+# ---------------------------------------------------------------------------
+# build-id discovery
+# ---------------------------------------------------------------------------
+
+
 def test_discover_build_id_caches_per_client(tmp_path: Path, monkeypatch) -> None:
     discover_calls: list[str] = []
 
-    def fake_discover(c: FotMobClient) -> str:
+    def fake_discover(self: FotMobClient) -> str:
         discover_calls.append("discover")
         return "fake-build-id"
 
-    monkeypatch.setattr(client_module, "_discover_build_id", fake_discover)
+    monkeypatch.setattr(FotMobClient, "_discover_build_id", fake_discover)
     _stub_httpx_client(
         monkeypatch,
         _StubResponse(status_code=200, body=b"{}", headers={"etag": "abc"}),
@@ -79,11 +80,11 @@ def test_discover_build_id_caches_per_client(tmp_path: Path, monkeypatch) -> Non
 def test_distinct_clients_discover_independently(tmp_path: Path, monkeypatch) -> None:
     state = {"count": 0}
 
-    def fake_discover(c: FotMobClient) -> str:
+    def fake_discover(self: FotMobClient) -> str:
         state["count"] += 1
         return f"build-{state['count']}"
 
-    monkeypatch.setattr(client_module, "_discover_build_id", fake_discover)
+    monkeypatch.setattr(FotMobClient, "_discover_build_id", fake_discover)
     _stub_httpx_client(
         monkeypatch,
         _StubResponse(status_code=200, body=b"{}", headers={"etag": "abc"}),
@@ -96,47 +97,33 @@ def test_distinct_clients_discover_independently(tmp_path: Path, monkeypatch) ->
     assert state["count"] == 2
 
 
-def test_get_decompresses_gzipped_response_body(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(client_module, "_discover_build_id", lambda c: "fake-build-id")
-    payload = b'{"decompressed": true}'
-    gz = gzip.compress(payload)
+# ---------------------------------------------------------------------------
+# JSON parsing
+# ---------------------------------------------------------------------------
+
+
+def test_get_returns_parsed_json(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(FotMobClient, "_discover_build_id", lambda self: "fake-build-id")
     _stub_httpx_client(
         monkeypatch,
         _StubResponse(
             status_code=200,
-            body=gz,
-            headers={"content-encoding": "gzip", "etag": "abc"},
+            body=b'{"key": "value"}',
+            headers={"etag": "abc"},
         ),
     )
     client = FotMobClient()
     result = client.get("matches/x/y")
-    assert result == {"decompressed": True}
-
-
-def test_get_handles_uncompressed_body_with_gzip_header(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(client_module, "_discover_build_id", lambda c: "fake-build-id")
-    payload = b'{"uncompressed": true}'
-    _stub_httpx_client(
-        monkeypatch,
-        _StubResponse(
-            status_code=200,
-            body=payload,
-            headers={"content-encoding": "gzip", "etag": "abc"},
-        ),
-    )
-    client = FotMobClient()
-    result = client.get("matches/x/y")
-    assert result == {"uncompressed": True}
+    assert result == {"key": "value"}
 
 
 # ---------------------------------------------------------------------------
-# shared httpx.Client tests (PRD-v5)
+# shared httpx.Client
 # ---------------------------------------------------------------------------
 
 
 def test_shared_http_client_reused_across_calls(tmp_path: Path, monkeypatch) -> None:
-    """Two `client.get` calls use the same httpx.Client instance."""
-    monkeypatch.setattr(client_module, "_discover_build_id", lambda c: "fake-build-id")
+    monkeypatch.setattr(FotMobClient, "_discover_build_id", lambda self: "fake-build-id")
     instance_count = [0]
 
     class _StubHTTP:
@@ -162,9 +149,3 @@ def test_shared_http_client_reused_across_calls(tmp_path: Path, monkeypatch) -> 
     assert instance_count[0] == 1
 
 
-def test_close_releases_http_client(tmp_path: Path) -> None:
-    c = FotMobClient()
-    _http = c.ensure_http()
-    assert c._http is not None
-    c.close()
-    assert c._http is None

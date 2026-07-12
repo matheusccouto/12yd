@@ -1,4 +1,5 @@
-"""Tests for the per-kicker penalty history fetcher (slice #4, Issue #20; refined #36).
+"""
+Tests for the per-kicker penalty history fetcher (slice #4, Issue #20; refined #36).
 
 The tests cover three layers:
 
@@ -69,7 +70,8 @@ def sample_2022_final() -> Mapping[str, object]:
 
 @pytest.fixture(scope="module")
 def sample_messi_player() -> Mapping[str, object]:
-    """The Messi player page JSON, off the disk cache.
+    """
+    The Messi player page JSON, off the disk cache.
 
     The sample was fetched on 2026-06-22 from the live FotMob API and
     saved to `docs/samples/player_30981_messi.json.gz`. It is used
@@ -88,7 +90,8 @@ def _stub_client(
     league_fixtures: Mapping[tuple[int, int], list[dict[str, object]]] | None = None,
     matches: list[Mapping[str, object]] | None = None,
 ) -> list[str]:
-    """Patch the FotMobClient to return canned data per URL.
+    """
+    Patch the FotMobClient to return canned data per URL.
 
     Returns urls_seen. The stub builds the URL the way
     `FotMobClient.get` does, so the stub can match on the path +
@@ -132,7 +135,7 @@ def _stub_client(
     # Pin the BuildId to avoid hitting the homepage.
     from twelveyards.fotmob import client as client_module
 
-    monkeypatch.setattr(client_module, "_discover_build_id", lambda c: "stub-build")
+    monkeypatch.setattr(client_module.FotMobClient, "_discover_build_id", lambda self: "stub-build")
     monkeypatch.setattr(client_module.FotMobClient, "get", fake_get)
     return urls_seen
 
@@ -163,7 +166,8 @@ def test_season_name_to_year_raises_on_garbage() -> None:
 
 
 def test_compute_lookback_window_with_floor() -> None:
-    """For a 2022-12-18 target with 5y lookback and 2016-01-01 floor, the
+    """
+    For a 2022-12-18 target with 5y lookback and 2016-01-01 floor, the
     floor doesn't kick in (5y back is 2017-12-18, which is after 2016-01-01).
     """
     start, end = compute_lookback_window(date(2022, 12, 18), 5, date(2016, 1, 1))
@@ -172,7 +176,8 @@ def test_compute_lookback_window_with_floor() -> None:
 
 
 def test_compute_lookback_window_floor_kicks_in() -> None:
-    """For a 2020-12-18 target with 5y back, naive start is 2015-12-18,
+    """
+    For a 2020-12-18 target with 5y back, naive start is 2015-12-18,
     before the 2016-01-01 floor — the floor wins.
     """
     start, end = compute_lookback_window(date(2020, 12, 18), 5, date(2016, 1, 1))
@@ -193,7 +198,8 @@ def test_compute_lookback_window_zero_lookback() -> None:
 
 
 def test_extract_player_metadata_messi(sample_messi_player: Mapping[str, object]) -> None:
-    """The Messi fixture has player_id=30981, position='striker', birth 1987-06-24,
+    """
+    The Messi fixture has player_id=30981, position='striker', birth 1987-06-24,
     preferred_foot='left' (v3: read from playerInformation[]).
     """
     md = extract_player_metadata(sample_messi_player)
@@ -206,7 +212,8 @@ def test_extract_player_metadata_messi(sample_messi_player: Mapping[str, object]
 
 
 def test_extract_player_metadata_reads_preferred_foot() -> None:
-    """v3 (Issue #36): the A3 feature is the declared preferred foot,
+    """
+    v3 (Issue #36): the A3 feature is the declared preferred foot,
     read from `pageProps.data.playerInformation[]` (the cached
     player-page JSON the scraper already fetches).
 
@@ -255,7 +262,8 @@ def test_extract_player_metadata_reads_preferred_foot() -> None:
 
 
 def test_extract_player_metadata_handles_missing_preferred_foot() -> None:
-    """A player page with no `playerInformation[]` (or with the
+    """
+    A player page with no `playerInformation[]` (or with the
     `preferred_foot` entry missing) yields `preferred_foot=""` (not
     a crash). The other C-group fields (position, birth date) are
     unaffected.
@@ -320,7 +328,8 @@ def test_iter_career_season_entries_yields_senior_and_national(
 
 
 def test_iter_career_season_entries_skips_youth_bucket() -> None:
-    """A player page with a `careerItems.youth` bucket has those entries skipped.
+    """
+    A player page with a `careerItems.youth` bucket has those entries skipped.
 
     PRD: "skip `careerItems.youth`". We construct a synthetic page that
     has youth entries with a unique sentinel teamId, and assert the
@@ -366,7 +375,8 @@ def test_iter_career_season_entries_skips_youth_bucket() -> None:
 def test_iter_team_season_lookups_yields_one_per_tournament(
     sample_messi_player: Mapping[str, object],
 ) -> None:
-    """Each season entry has multiple tournamentStats; each becomes a TeamSeasonLookup.
+    """
+    Each season entry has multiple tournamentStats; each becomes a TeamSeasonLookup.
     Lookups without a `leagueId` (e.g. CONMEBOL Qualifiers) are skipped — we
     can't form a FotMob URL without one.
     """
@@ -448,7 +458,8 @@ def test_filter_fixtures_by_team_drops_unknown_team() -> None:
 def test_extract_penalties_from_2022_final_returns_two_messi_kicks(
     sample_2022_final: Mapping[str, object],
 ) -> None:
-    """The 2022 final has 2 Messi penalty shots: one in-match (23') and
+    """
+    The 2022 final has 2 Messi penalty shots: one in-match (23') and
     one shootout (kick 2). Both should be returned.
     """
     rows = extract_player_penalties_from_match(
@@ -474,7 +485,8 @@ def test_extract_penalties_from_2022_final_returns_two_messi_kicks(
 def test_extract_penalties_from_2022_final_includes_in_match_and_shootout(
     sample_2022_final: Mapping[str, object],
 ) -> None:
-    """The two Messi kicks span two distinct `period` values. We don't
+    """
+    The two Messi kicks span two distinct `period` values. We don't
     assert on the period here (it isn't carried in the row), but the row
     count of 2 covers both the in-match penalty (23') and the shootout kick.
     """
@@ -499,7 +511,8 @@ def test_extract_penalties_returns_empty_for_non_kicker(
 def test_extract_penalties_uses_match_league_name_when_present(
     sample_2022_final: Mapping[str, object],
 ) -> None:
-    """The `league_name` parameter is a fallback; the match JSON's
+    """
+    The `league_name` parameter is a fallback; the match JSON's
     `general.leagueName` wins when present.
     """
     rows = extract_player_penalties_from_match(
@@ -553,7 +566,8 @@ def test_write_player_history_roundtrip(tmp_path: Path) -> None:
 
 
 def _build_minimal_player_page(player_id: int) -> dict[str, object]:
-    """Build a minimal player page with a single (team, season) entry.
+    """
+    Build a minimal player page with a single (team, season) entry.
 
     The page declares a one-year stint on team 100, playing in league 42
     in season 2020/2021. The orchestrator's only required output is
@@ -639,7 +653,8 @@ def _build_minimal_match(
 def test_orchestrator_yields_penalty_from_canned_match(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
-    """End-to-end: the stub client serves a player page + one league
+    """
+    End-to-end: the stub client serves a player page + one league
     season + one match. The orchestrator should yield that one penalty.
     """
     player_id = 30981
@@ -687,7 +702,8 @@ def test_orchestrator_yields_penalty_from_canned_match(
 def test_orchestrator_skips_match_outside_lookback_window(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
-    """A match dated before the lookback window is silently skipped
+    """
+    A match dated before the lookback window is silently skipped
     (we never even fetch the match JSON).
     """
     player_id = 30981
@@ -746,7 +762,8 @@ def test_orchestrator_skips_match_outside_lookback_window(
 def test_orchestrator_skips_stale_url_match(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
-    """A (seo, h2h) hash that points to a different matchId in the
+    """
+    A (seo, h2h) hash that points to a different matchId in the
     response is skipped silently, like in the shootout pipeline.
     """
     player_id = 30981
@@ -789,7 +806,8 @@ def test_orchestrator_skips_stale_url_match(
 def test_orchestrator_dedupes_team_season_lookups(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
-    """Two season entries that map to the same (team, league, season)
+    """
+    Two season entries that map to the same (team, league, season)
     are deduped to a single fixture fetch.
     """
     player_id = 30981
@@ -877,7 +895,7 @@ def test_orchestrator_dedupes_team_season_lookups(
 
     from twelveyards.fotmob import client as client_module
 
-    monkeypatch.setattr(client_module, "_discover_build_id", lambda c: "stub-build")
+    monkeypatch.setattr(client_module.FotMobClient, "_discover_build_id", lambda self: "stub-build")
     monkeypatch.setattr(client_module.FotMobClient, "get", fake_get)
     client = FotMobClient()
     list(

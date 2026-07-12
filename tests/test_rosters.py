@@ -1,4 +1,5 @@
-"""Tests for the 2026 World Cup squad roster fetcher (slice #3, Issue #18).
+"""
+Tests for the 2026 World Cup squad roster fetcher (slice #3, Issue #18).
 
 The tests cover three layers:
 
@@ -93,7 +94,7 @@ def _stub_client(
 
     from twelveyards.fotmob import client as client_module
 
-    monkeypatch.setattr(client_module, "_discover_build_id", lambda c: "stub-build")
+    monkeypatch.setattr(client_module.FotMobClient, "_discover_build_id", lambda self: "stub-build")
     monkeypatch.setattr(client_module.FotMobClient, "get", fake_get)
     return urls_seen
 
@@ -138,7 +139,8 @@ def test_iter_roster_match_refs_yields_one_per_match(
 def test_iter_roster_match_refs_skips_placeholder_match(
     sample_wc_2026_league: Mapping[str, Any],
 ) -> None:
-    """The 3rd match in the slim fixture is a knockout placeholder match;
+    """
+    The 3rd match in the slim fixture is a knockout placeholder match;
     it is still included in the refs (it carries a real (seo, h2h)),
     but `extract_lineup_players` on its lineup payload will yield zero
     rows because the home/away team blocks are empty.
@@ -224,7 +226,8 @@ def test_extract_lineup_players_mexico_vs_south_africa(
 
 
 def test_extract_lineup_players_empty_lineup() -> None:
-    """A placeholder knockout match has an empty `homeTeam`/`awayTeam` block;
+    """
+    A placeholder knockout match has an empty `homeTeam`/`awayTeam` block;
     the iterator yields zero rows.
     """
     lineup = {"homeTeam": {}, "awayTeam": {}}
@@ -269,7 +272,8 @@ def test_extract_lineup_players_missing_country_code() -> None:
 
 
 def test_extract_lineup_players_skips_zero_id() -> None:
-    """A player with no `id` (or id=0) is silently skipped — we can't dedupe it
+    """
+    A player with no `id` (or id=0) is silently skipped — we can't dedupe it
     downstream without an id, so dropping it is the right move.
     """
     lineup = {
@@ -335,7 +339,8 @@ def test_fetch_wc_2026_roster_dedupes_across_matches(
     sample_wc_2026_league: Mapping[str, Any],
     sample_wc_2026_match: Mapping[str, Any],
 ) -> None:
-    """A player who appears in two matches is yielded once.
+    """
+    A player who appears in two matches is yielded once.
 
     The stub returns the same match payload for two consecutive match
     requests, simulating the same player being listed in two group-stage
@@ -383,7 +388,8 @@ def test_fetch_wc_2026_roster_skips_stale_h2h(
     sample_wc_2026_league: Mapping[str, Any],
     sample_wc_2026_match: Mapping[str, Any],
 ) -> None:
-    """If the per-match response's matchId differs from the ref's matchId
+    """
+    If the per-match response's matchId differs from the ref's matchId
     (stale (seo, h2h) hash), the match is skipped silently.
     """
     # Build a match payload whose general.matchId is different from any ref.

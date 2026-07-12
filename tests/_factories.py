@@ -2,20 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-
 from twelveyards.artifacts import PredictionRow
 from twelveyards.scraper.player_history import PlayerMetadata, PlayerPenalty
 from twelveyards.scraper.rosters import RosterPlayer
-
-
-class FakeFotMobClient:
-    """Stub FotMobClient that satisfies the FotMobClientLike protocol."""
-
-    def get(self, path: str, params: Mapping[str, str] | None = None) -> object:
-        msg = "tests must monkeypatch the inner fetcher"
-        raise NotImplementedError(msg)
-
 
 # ---------------------------------------------------------------------------
 # PlayerPenalty (one row of player_history.jsonl)

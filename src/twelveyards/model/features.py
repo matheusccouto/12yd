@@ -75,7 +75,8 @@ def compute_features(
     target_date: date,
     lookback_years: int = LOOKBACK_WINDOW_YEARS,
 ) -> dict:
-    """Compute the 7-element feature dict for a player at a target date.
+    """
+    Compute the 7-element feature dict for a player at a target date.
 
     Returns p_L, p_C, p_R (A1), last_side (A2), preferred_foot (A3),
     career_penalty_count (A4), and position (C1).
@@ -105,7 +106,8 @@ def build_training_matrix(
     metadata_by_id: dict[int, PlayerMetadata],
     lookback_years: int = LOOKBACK_WINDOW_YEARS,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Build (X, y) training matrices from player history.
+    """
+    Build (X, y) training matrices from player history.
 
     Each kick becomes a training row whose features are derived from
     prior kicks within the 5-year window and whose label is the kick's side.
@@ -139,7 +141,8 @@ def build_prediction_matrix(
     target_date: date | None = None,
     lookback_years: int = LOOKBACK_WINDOW_YEARS,
 ) -> np.ndarray:
-    """Build the prediction feature matrix for roster players.
+    """
+    Build the prediction feature matrix for roster players.
 
     Each roster player gets one row of features computed from their
     penalty history up to `target_date` (defaults to today UTC).

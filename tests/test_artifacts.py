@@ -1,4 +1,5 @@
-"""Tests for the v5 Artifacts on-disk layout adapter.
+"""
+Tests for the v5 Artifacts on-disk layout adapter.
 
 v5 changes:
 - Artifacts root is "data" (was "output")

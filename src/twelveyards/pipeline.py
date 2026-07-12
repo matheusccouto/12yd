@@ -14,7 +14,11 @@ from .scraper.initial_set import (
     fetch_all_initial_set_penalty_history_parallel,
     iter_initial_set_kickers,
 )
-from .scraper.player_history import PlayerMetadata, extract_player_metadata, fetch_player_data
+from .scraper.player_history import (
+    PlayerMetadata,
+    extract_player_metadata,
+    fetch_player_data,
+)
 from .scraper.rosters import fetch_wc_2026_roster
 
 if TYPE_CHECKING:
@@ -46,7 +50,8 @@ def fetch_and_write_initial_set(
     *,
     progress_every: int = 25,
 ) -> tuple[int, int, int, int]:
-    """Fan out penalty-history fetches across the roster, stream results, write missing.
+    """
+    Fan out penalty-history fetches across the roster, stream results, write missing.
 
     Returns (n_kickers, n_rows_written, n_missing, n_errored).
     """
@@ -105,7 +110,8 @@ def predict(
     output_path: Path,
     target_date: date | None = None,
 ) -> tuple[int, int]:
-    """Fetch per-kicker metadata, fit TabPFN, predict, write predictions.jsonl.
+    """
+    Fetch per-kicker metadata, fit TabPFN, predict, write predictions.jsonl.
 
     Returns (n_predictions, n_no_history).
     """

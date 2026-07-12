@@ -18,7 +18,8 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class RosterPlayer:
-    """One player registered in a tournament squad.
+    """
+    One player registered in a tournament squad.
 
     The (player_id, team_id) pair is unique within a single match's lineup
     (one player plays for one team in one match), but the same player
@@ -53,7 +54,8 @@ def fetch_wc_2026_roster(
     league: League = WC_2026_LEAGUE,
     season: int = WC_2026_SEASON,
 ) -> Iterator[RosterPlayer]:
-    """Yield every unique player registered in the 2026 World Cup squads.
+    """
+    Yield every unique player registered in the 2026 World Cup squads.
 
     Algorithm:
 
@@ -104,7 +106,8 @@ def _iter_roster_players(
 def iter_roster_match_refs(
     fixtures: Iterable[Mapping[str, Any]],
 ) -> Iterator[MatchRef]:
-    """Yield a `MatchRef` for every fixture in the season list.
+    """
+    Yield a `MatchRef` for every fixture in the season list.
 
     We do NOT filter on `status.reason.shortKey` — the roster slice
     wants every match, not just shootouts. We do filter out fixtures
@@ -123,7 +126,8 @@ def extract_lineup_players(
     lineup_payload: Mapping[str, Any],
     ref: MatchRef,
 ) -> Iterator[RosterPlayer]:
-    """Yield every registered player from one match's lineup payload.
+    """
+    Yield every registered player from one match's lineup payload.
 
     `lineup_payload` is the value at `pageProps.content.lineup` (NOT the
     full match payload). `ref` carries the match's home/away team ids and

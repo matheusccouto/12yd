@@ -18,7 +18,8 @@ _PAGE_URL_RE = re.compile(r"^/matches/(?P<seo>[^/]+)/(?P<h2h>[^/#?]+)(?:#\d+)?$"
 
 
 def parse_page_url(page_url: str) -> tuple[int, str, str]:
-    """Parse a FotMob match `pageUrl` into (match_id, seo, h2h).
+    """
+    Parse a FotMob match `pageUrl` into (match_id, seo, h2h).
 
     Format: `/matches/{seo}/{h2h}#{match_id}`. The `seo` is kebab-case
     (e.g. `argentina-vs-france`); `h2h` is a 6-char alphanumeric (e.g.
@@ -42,7 +43,8 @@ def parse_page_url(page_url: str) -> tuple[int, str, str]:
 
 @dataclass(frozen=True)
 class MatchRef:
-    """A reference to one match, parsed from a season fixture entry.
+    """
+    A reference to one match, parsed from a season fixture entry.
 
     Carries the union of fields every downstream consumer needs; fields a
     given consumer does not need are left at their defaults. The defaults
@@ -63,7 +65,8 @@ class MatchRef:
 
     @classmethod
     def from_fixture(cls, fixture: Mapping[str, Any]) -> MatchRef | None:
-        """Build a `MatchRef` from a season fixture entry, or `None` if malformed.
+        """
+        Build a `MatchRef` from a season fixture entry, or `None` if malformed.
 
         Returns `None` when the entry's `pageUrl` is missing/unparseable —
         callers that need to filter rather than crash (e.g. the roster

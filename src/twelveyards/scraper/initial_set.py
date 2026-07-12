@@ -11,7 +11,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
     from datetime import date
 
-    from .fotmob.client import FotMobClientLike
+    from twelveyards.fotmob.client import FotMobClient
+
     from .scraper.player_history import PlayerPenalty
     from .scraper.rosters import RosterPlayer
 
@@ -68,7 +69,7 @@ def iter_initial_set_kickers(
 
 def _fetch_one(
     kicker: InitialSetKicker,
-    client: FotMobClientLike,
+    client: FotMobClient,
     target_date: date | None,
     lookback_years: int,
     history_floor: date,
@@ -85,7 +86,7 @@ def _fetch_one(
 
 
 def fetch_all_initial_set_penalty_history_parallel(  # noqa: PLR0913
-    client: FotMobClientLike,
+    client: FotMobClient,
     initial_set: Iterable[InitialSetKicker],
     target_date: date | None = None,
     lookback_years: int = LOOKBACK_WINDOW_YEARS,

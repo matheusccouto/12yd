@@ -1,4 +1,5 @@
-"""Tests for the 6 in-scope international + 7 in-scope club tournaments
+"""
+Tests for the 6 in-scope international + 7 in-scope club tournaments
 constant table.
 
 Phase 3 (Issue #51): the scope extended from 6 international tournaments
@@ -46,7 +47,8 @@ def test_leagues_are_unique() -> None:
 
 
 def test_league_ids_match_prd() -> None:
-    """PRD: World Cup = 77, Euro = 50, Copa América = 44,
+    """
+    PRD: World Cup = 77, Euro = 50, Copa América = 44,
     Gold Cup = 298, Asian Cup = 290, AFCON = 289.
     """
     assert LEAGUE_BY_ID[77].slug == "world-cup"
@@ -84,7 +86,8 @@ def test_club_leagues_are_unique() -> None:
 
 
 def test_club_league_ids_match_prd() -> None:
-    """Phase 3 (Issue #51) + ADR
+    """
+    Phase 3 (Issue #51) + ADR
     `docs/adr/0004-phase-3-data-source.md`: Copa Libertadores = 41,
     Champions League = 42, FA Cup = 132, Coupe de France = 133,
     DFB-Pokal = 125, Coppa Italia = 137, Copa del Rey = 138.
@@ -104,7 +107,8 @@ def test_club_league_ids_constant() -> None:
 
 
 def test_international_league_ids_constant() -> None:
-    """`INTERNATIONAL_LEAGUE_IDS` is the 6-id set of in-scope
+    """
+    `INTERNATIONAL_LEAGUE_IDS` is the 6-id set of in-scope
     international leagues (the existing `LEAGUES` IDs).
     """
     assert frozenset({league.league_id for league in LEAGUES}) == INTERNATIONAL_LEAGUE_IDS
@@ -114,7 +118,8 @@ def test_international_league_ids_constant() -> None:
 
 
 def test_every_league_has_a_kind() -> None:
-    """The `kind` field on `League` is one of `"international"`,
+    """
+    The `kind` field on `League` is one of `"international"`,
     `"club"`, or `"domestic_only"`. A future kind (e.g. `"youth"`)
     needs a deliberate update here so the discrimination is
     explicit at the type level.
@@ -126,7 +131,8 @@ def test_every_league_has_a_kind() -> None:
 
 
 def test_every_league_kind_is_a_literal_value() -> None:
-    """Type-system-level check: the `kind` field is a `LeagueKind`
+    """
+    Type-system-level check: the `kind` field is a `LeagueKind`
     literal. A drift (e.g. someone sets `kind="International"` with
     a capital I) is caught here at runtime.
     """
@@ -138,7 +144,8 @@ def test_every_league_kind_is_a_literal_value() -> None:
 
 
 def test_extended_leagues_are_domestic_only() -> None:
-    """The 12 `EXTENDED_LEAGUES` (LaLiga, Ligue 1, Premier League,
+    """
+    The 12 `EXTENDED_LEAGUES` (LaLiga, Ligue 1, Premier League,
     etc.) are all `kind="domestic_only"`. A regression that marks
     one of them as `international` or `club` is caught here — that
     would put the league in scope and break the test
@@ -154,7 +161,8 @@ def test_extended_leagues_are_domestic_only() -> None:
 
 
 def test_in_scope_and_extended_leagues_are_disjoint() -> None:
-    """The in-scope leagues (`LEAGUES` + `CLUB_LEAGUES`) are
+    """
+    The in-scope leagues (`LEAGUES` + `CLUB_LEAGUES`) are
     disjoint from `EXTENDED_LEAGUES`. The 7 club leagues that
     used to live in `EXTENDED_LEAGUES` (Copa Libertadores,
     Champions League, FA Cup, Coupe de France, DFB-Pokal, Coppa

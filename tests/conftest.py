@@ -16,7 +16,8 @@ SAMPLE_MATCH_PATH = REPO_ROOT / "docs" / "samples" / "match_3370572.json.gz"
 
 @pytest.fixture(scope="session")
 def sample_2022_final() -> Mapping[str, Any]:
-    """The full FotMob match JSON for the 2022 FIFA World Cup Final.
+    """
+    The full FotMob match JSON for the 2022 FIFA World Cup Final.
 
     Sourced from `docs/samples/match_3370572.json.gz` (cached by the scraper).
     Tests use this fixture so they do not hit the FotMob API.

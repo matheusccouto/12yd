@@ -34,12 +34,13 @@ def _side(x: float) -> str:
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
-    from twelveyards.fotmob.client import FotMobClientLike
+    from twelveyards.fotmob.client import FotMobClient
 
 
 @dataclass(frozen=True)
 class PlayerPenalty:
-    """One penalty kick (shootout or in-match) by a Kicker in a given match.
+    """
+    One penalty kick (shootout or in-match) by a Kicker in a given match.
 
     `match_date` is the match start time in ISO 8601 UTC. `x` is the
     goal-mouth coordinate in [0, 2] from the kicker's perspective
@@ -65,7 +66,8 @@ class PlayerPenalty:
 
 @dataclass(frozen=True)
 class PlayerMetadata:
-    """A subset of the player page that downstream features (C1, C2, A3) need.
+    """
+    A subset of the player page that downstream features (C1, C2, A3) need.
 
     `position_key` is the FotMob position key (e.g. "striker", "centreback")
     from `positionDescription.primaryPosition.key`. `birth_date` is the
@@ -88,9 +90,10 @@ class PlayerMetadata:
 
 
 def fetch_player_data(
-    client: FotMobClientLike, player_id: int, slug: str = "",
+    client: FotMobClient, player_id: int, slug: str = "",
 ) -> Mapping[str, Any]:
-    """Fetch the player page JSON. Returns the full `__next/data` payload.
+    """
+    Fetch the player page JSON. Returns the full `__next/data` payload.
 
     The path is `players/{playerId}/{slug}` per docs/fotmob.md. The `slug`
     is the kebab-case player name (e.g. "lionel-messi"); it is part of
@@ -111,7 +114,8 @@ def fetch_player_data(
 def extract_player_metadata(
     player_payload: Mapping[str, Any],
 ) -> PlayerMetadata:
-    """Extract the player's name, position, birth date, and preferred foot.
+    """
+    Extract the player's name, position, birth date, and preferred foot.
 
     Accepts the full `__next/data` payload. The fields live at
     `pageProps.data.{id,name,birthDate,positionDescription,playerInformation}`.
@@ -132,7 +136,8 @@ def extract_player_metadata(
 
 
 def _preferred_foot(player_information: Iterable[Mapping[str, Any]]) -> str:
-    """Extract the declared foot from `pageProps.data.playerInformation[]`.
+    """
+    Extract the declared foot from `pageProps.data.playerInformation[]`.
 
     Walks the list looking for the entry whose `translationKey` is
     `"preferred_foot"`. Returns `value.key` (one of "left", "right",
@@ -162,7 +167,8 @@ def _primary_position_key(player_data: Mapping[str, Any]) -> str:
 
 
 def _parse_birth_date(birth_date: Any) -> str:  # noqa: ANN401
-    """Parse a FotMob `birthDate` block into an ISO 8601 date string.
+    """
+    Parse a FotMob `birthDate` block into an ISO 8601 date string.
 
     The shape is `{"utcTime": "1987-06-24T00:00:00.000Z", "timezone": "UTC"}`.
     We return just the date part (e.g. "1987-06-24"). If the field is
@@ -188,7 +194,8 @@ def _parse_birth_date(birth_date: Any) -> str:  # noqa: ANN401
 def iter_career_season_entries(
     player_payload: Mapping[str, Any],
 ) -> Iterator[Mapping[str, Any]]:
-    """Yield season entries from senior + national team stints (skip youth).
+    """
+    Yield season entries from senior + national team stints (skip youth).
 
     Accepts the full `__next/data` payload (the same shape `fetch_player_data`
     returns). The career history lives at `pageProps.data.careerHistory`,
@@ -206,7 +213,8 @@ def iter_career_season_entries(
 
 
 def season_name_to_year(season_name: str) -> int:
-    """Convert a FotMob season name to the year int for the `?season=` URL param.
+    """
+    Convert a FotMob season name to the year int for the `?season=` URL param.
 
     Handles the three patterns we see in the wild:
     - "2022" → 2022 (calendar-year leagues like MLS, AFCON, World Cup)
@@ -225,7 +233,8 @@ def season_name_to_year(season_name: str) -> int:
 
 @dataclass(frozen=True)
 class TeamSeasonLookup:
-    """A (teamId, seasonEntry, tournamentStat) triple ready for fixture fetching.
+    """
+    A (teamId, seasonEntry, tournamentStat) triple ready for fixture fetching.
 
     Each `TeamSeasonLookup` corresponds to ONE FotMob league/season fixture
     fetch. We yield one per (seasonEntry, tournamentStat) pair; downstream
@@ -240,7 +249,8 @@ class TeamSeasonLookup:
 def iter_team_season_lookups(
     season_entries: Iterable[Mapping[str, Any]],
 ) -> Iterator[TeamSeasonLookup]:
-    """Yield one TeamSeasonLookup per (seasonEntry, tournamentStat) pair.
+    """
+    Yield one TeamSeasonLookup per (seasonEntry, tournamentStat) pair.
 
     This is the fan-out point: each lookup corresponds to one FotMob
     league/season fixture fetch. We do NOT recurse into per-match data
@@ -266,11 +276,12 @@ def iter_team_season_lookups(
 
 
 def fetch_league_season_fixtures(
-    client: FotMobClientLike,
+    client: FotMobClient,
     league_id: int,
     season_year: int,
 ) -> list[dict[str, Any]]:
-    """Fetch a league's season fixtures. Returns `pageProps.fixtures.allMatches`.
+    """
+    Fetch a league's season fixtures. Returns `pageProps.fixtures.allMatches`.
 
     The `league_id` is the FotMob integer (e.g. 87 for LaLiga, 53 for Ligue 1,
     42 for Champions League). The `season_year` is the FotMob `?season=`
@@ -299,7 +310,8 @@ def filter_fixtures_by_team(
     fixtures: Iterable[Mapping[str, Any]],
     team_id: int,
 ) -> Iterator[Mapping[str, Any]]:
-    """Yield season fixtures involving the given team (home OR away).
+    """
+    Yield season fixtures involving the given team (home OR away).
 
     The fixture's `home.id` and `away.id` are strings on FotMob; we cast
     to int for the comparison. Matches without a known home/away id
@@ -322,7 +334,8 @@ def extract_player_penalties_from_match(
     league_id: int,
     league_name: str,
 ) -> list[PlayerPenalty]:
-    """Extract the player's penalty shots from a match's full JSON.
+    """
+    Extract the player's penalty shots from a match's full JSON.
 
     Source: `pageProps.content.shotmap.shots` filtered to
     `playerId == player_id` AND `situation == "Penalty"`. The `situation`
@@ -390,7 +403,8 @@ def compute_lookback_window(
     lookback_years: int = LOOKBACK_WINDOW_YEARS,
     history_floor: date = SCRAPE_FLOOR,
 ) -> tuple[date, date]:
-    """Compute the (start, end) date bounds of the Lookback Window for `target_date`.
+    """
+    Compute the (start, end) date bounds of the Lookback Window for `target_date`.
 
     The window is `[target_date - lookback_years, target_date]`, floored at
     `history_floor`. The floor is the hard lower bound: we never look back
@@ -407,14 +421,15 @@ def compute_lookback_window(
 
 
 def fetch_player_penalty_history(  # noqa: PLR0913
-    client: FotMobClientLike,
+    client: FotMobClient,
     player_id: int,
     player_slug: str = "",
     target_date: date | None = None,
     lookback_years: int = LOOKBACK_WINDOW_YEARS,
     history_floor: date = SCRAPE_FLOOR,
 ) -> Iterator[PlayerPenalty]:
-    """Yield every penalty the player took in the Lookback Window.
+    """
+    Yield every penalty the player took in the Lookback Window.
 
     Two-level data graph: the player is the Initial Set, the per-match
     penalty shots are the Derived History. No further fetches originate
@@ -475,7 +490,7 @@ def fetch_player_penalty_history(  # noqa: PLR0913
 
 
 def _process_match_fixture(  # noqa: PLR0913
-    client: FotMobClientLike,
+    client: FotMobClient,
     fixture: Mapping[str, Any],
     player_id: int,
     team_id: int,
@@ -484,7 +499,8 @@ def _process_match_fixture(  # noqa: PLR0913
     window_start: date,
     window_end: date,
 ) -> Iterator[PlayerPenalty]:
-    """Fetch one match (if in window) and yield the player's penalty rows.
+    """
+    Fetch one match (if in window) and yield the player's penalty rows.
 
     Skips matches outside the lookback window by date — the FotMob
     `status.utcTime` is the cheapest check before we burn a per-match
@@ -517,7 +533,8 @@ def _process_match_fixture(  # noqa: PLR0913
 
 
 def _parse_fixture_date(value: str) -> date | None:
-    """Parse a FotMob `status.utcTime` into a date, or None if malformed.
+    """
+    Parse a FotMob `status.utcTime` into a date, or None if malformed.
 
     The status `utcTime` is ISO 8601 (e.g. "2022-12-18T15:00:00Z") on the
     fixture list, in contrast to the match detail's `matchTimeUTC` which
