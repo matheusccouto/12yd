@@ -24,7 +24,7 @@ from twelveyards.rosters import RosterPlayer
 class FakeFotMobClient:
     """Stub FotMobClient that satisfies the FotMobClientLike protocol."""
 
-    def get(self, path: str, params: Mapping[str, str] | None = None) -> object:  # noqa: ARG002
+    def get(self, path: str, params: Mapping[str, str] | None = None) -> object:
         raise NotImplementedError("tests must monkeypatch the inner fetcher")
 
 # ---------------------------------------------------------------------------
