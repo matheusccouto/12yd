@@ -72,11 +72,9 @@ class Artifacts:
     def __init__(
         self,
         root: Path = Path("data"),
-        cache_dir: Path = Path("data/fotmob_cache"),
     ) -> None:
-        """Create an Artifacts handle rooted at `root`, with `cache_dir` for HTTP cache."""
+        """Create an Artifacts handle rooted at `root`."""
         self.root = Path(root)
-        self.cache_dir = Path(cache_dir)
 
     # ------------------------------------------------------------------ paths
 
@@ -151,8 +149,8 @@ class Artifacts:
     # ----------------------------------------------------------- cache factory
 
     def fotmob_client(self) -> FotMobClient:
-        """Return a FotMobClient configured to use this instance's cache_dir."""
-        return FotMobClient(cache_dir=self.cache_dir)
+        """Return a FotMobClient instance."""
+        return FotMobClient()
 
     def serialize_row(self, row: Any, *, nan_to_null: bool = False) -> str:
         """Serialize a dataclass row as a JSON string for streaming writes."""

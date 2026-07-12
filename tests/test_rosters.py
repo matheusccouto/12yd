@@ -73,10 +73,8 @@ def _stub_client(
     *,
     league_fixtures: Mapping[str, Any],
     matches: list[Mapping[str, Any]],
-) -> tuple[Path, list[str]]:
+) -> list[str]:
     """Patch the FotMobClient to return canned data per URL."""
-    cache_dir = Path("/tmp/opencode/roster_cache")
-    cache_dir.mkdir(parents=True, exist_ok=True)
     urls_seen: list[str] = []
     match_iter = iter(matches)
 
@@ -97,7 +95,7 @@ def _stub_client(
 
     monkeypatch.setattr(client_module, "_discover_build_id", lambda c: "stub-build")
     monkeypatch.setattr(client_module.FotMobClient, "get", fake_get)
-    return cache_dir, urls_seen
+    return urls_seen
 
 
 # ---------------------------------------------------------------------------
@@ -366,12 +364,12 @@ def test_fetch_wc_2026_roster_dedupes_across_matches(
         },
     }
     # Return the same match twice — the player list is the same in both.
-    cache_dir, urls_seen = _stub_client(
+    urls_seen = _stub_client(
         monkeypatch,
         league_fixtures=league,
         matches=[sample_wc_2026_match, sample_wc_2026_match],
     )
-    client = FotMobClient(cache_dir=cache_dir)
+    client = FotMobClient()
     rows = list(fetch_wc_2026_roster(client, WC_2026_LEAGUE, WC_2026_SEASON))
     # 52 rows per match, deduped to 52 unique players.
     assert len(rows) == 52
@@ -397,12 +395,12 @@ def test_fetch_wc_2026_roster_skips_stale_h2h(
     }
     # The league has 3 refs; we return the tampered payload for all 3.
     # Every match is then "stale" and contributes 0 rows.
-    cache_dir, urls_seen = _stub_client(
+    urls_seen = _stub_client(
         monkeypatch,
         league_fixtures=sample_wc_2026_league,
         matches=[tampered, tampered, tampered],
     )
-    client = FotMobClient(cache_dir=cache_dir)
+    client = FotMobClient()
     rows = list(fetch_wc_2026_roster(client, WC_2026_LEAGUE, WC_2026_SEASON))
     assert len(rows) == 0
     # Sanity: the stub was called once per ref (3 match calls + 1 league call).

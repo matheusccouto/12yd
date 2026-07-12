@@ -19,7 +19,6 @@ def main() -> int:
     parser.add_argument("--roster", type=Path, default=art.roster)
     parser.add_argument("--output", type=Path, default=art.player_history)
     parser.add_argument("--missing", type=Path, default=art.missing_history)
-    parser.add_argument("--cache-dir", type=Path, default=art.cache_dir)
     parser.add_argument("--target-date", default=None)
     parser.add_argument("--lookback-years", type=int, default=LOOKBACK_WINDOW_YEARS)
     parser.add_argument("--history-floor", default=SCRAPE_FLOOR.isoformat())
@@ -34,7 +33,7 @@ def main() -> int:
 
     target = date.fromisoformat(args.target_date) if args.target_date else today_utc()
     history_floor = date.fromisoformat(args.history_floor)
-    client = FotMobClient(cache_dir=args.cache_dir)
+    client = FotMobClient()
 
     total, n_rows, n_missing, n_errored = fetch_and_write_initial_set(
         client, args.roster, args.output, args.missing,

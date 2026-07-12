@@ -18,14 +18,10 @@ def main() -> int:
         "--output", type=Path, default=art.roster,
         help=f"JSONL output path (default: {art.roster}).",
     )
-    parser.add_argument(
-        "--cache-dir", type=Path, default=art.cache_dir,
-        help=f"FotMob HTTP cache dir (default: {art.cache_dir}).",
-    )
     args = parser.parse_args()
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    client = FotMobClient(cache_dir=args.cache_dir)
+    client = FotMobClient()
     n = fetch_and_write_roster(client, args.output)
     print(f"Wrote {n} unique players to {args.output}")
     return 0

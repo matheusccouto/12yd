@@ -29,15 +29,6 @@ jobs:
         with:
           version: "latest"
 
-      - name: Restore FotMob HTTP cache
-        id: cache-restore
-        uses: actions/cache/restore@v4
-        with:
-          path: data/fotmob_cache
-          key: fotmob-cache-${{ github.run_id }}
-          restore-keys: |
-            fotmob-cache-
-
       - name: Install Python dependencies
         run: uv sync --no-dev
 
@@ -61,10 +52,3 @@ jobs:
             git commit -m "chore: refresh data artifacts [skip ci]" || echo "No changes to commit"
             git push
           fi
-
-      - name: Save FotMob HTTP cache
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: data/fotmob_cache
-          key: ${{ steps.cache-restore.outputs.cache-primary-key }}

@@ -29,7 +29,6 @@ from twelveyards.fotmob.client import FotMobClient
 def test_default_paths_point_at_canonical_filenames() -> None:
     art = Artifacts()
     assert art.root == Path("data")
-    assert art.cache_dir == Path("data/fotmob_cache")
     assert art.player_history == Path("data/player_history.jsonl")
     assert art.missing_history == Path("data/missing_history.jsonl")
     assert art.roster == Path("data/wc2026_roster.jsonl")
@@ -44,21 +43,15 @@ def test_custom_root_redirects_every_artifact() -> None:
     assert art.predictions == Path("/tmp/foo/predictions.jsonl")
 
 
-def test_custom_cache_dir() -> None:
-    art = Artifacts(cache_dir=Path("/tmp/custom_cache"))
-    assert art.cache_dir == Path("/tmp/custom_cache")
-
-
 # ---------------------------------------------------------------------------
 # fotmob_client factory
 # ---------------------------------------------------------------------------
 
 
-def test_fotmob_client_factory_uses_cache_dir() -> None:
-    art = Artifacts(cache_dir=Path("/tmp/foo_cache"))
+def test_fotmob_client_factory() -> None:
+    art = Artifacts()
     client = art.fotmob_client()
     assert isinstance(client, FotMobClient)
-    assert client.cache_dir == Path("/tmp/foo_cache")
 
 
 # ---------------------------------------------------------------------------

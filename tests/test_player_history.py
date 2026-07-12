@@ -87,10 +87,10 @@ def _stub_client(
     player_page: Mapping[str, object] | None = None,
     league_fixtures: Mapping[tuple[int, int], list[dict[str, object]]] | None = None,
     matches: list[Mapping[str, object]] | None = None,
-) -> tuple[Path, list[str]]:
+) -> list[str]:
     """Patch the FotMobClient to return canned data per URL.
 
-    Returns (cache_dir, urls_seen). The stub builds the URL the way
+    Returns urls_seen. The stub builds the URL the way
     `FotMobClient.get` does, so the stub can match on the path +
     params. The BuildId is pinned to "stub-build" by skipping the
     live discovery.
@@ -101,8 +101,6 @@ def _stub_client(
     This is enough for the orchestrator's per-match tests since the
     test controls both the fixture and the call sequence.
     """
-    cache_dir = Path("/tmp/opencode/player_history_cache")
-    cache_dir.mkdir(parents=True, exist_ok=True)
     urls_seen: list[str] = []
     match_iter = iter(matches or [])
 
@@ -136,7 +134,7 @@ def _stub_client(
 
     monkeypatch.setattr(client_module, "_discover_build_id", lambda c: "stub-build")
     monkeypatch.setattr(client_module.FotMobClient, "get", fake_get)
-    return cache_dir, urls_seen
+    return urls_seen
 
 
 # ---------------------------------------------------------------------------
@@ -646,7 +644,7 @@ def test_orchestrator_yields_penalty_from_canned_match(
     """
     player_id = 30981
     match_id = 99999
-    _cache_dir, _urls = _stub_client(
+    _urls = _stub_client(
         monkeypatch,
         player_page=_build_minimal_player_page(player_id),
         league_fixtures={
@@ -666,7 +664,7 @@ def test_orchestrator_yields_penalty_from_canned_match(
         },
         matches=[_build_minimal_match(match_id, player_id=player_id)],
     )
-    client = FotMobClient(cache_dir=tmp_path / "stub")
+    client = FotMobClient()
     rows = list(
         fetch_player_penalty_history(
             client,
@@ -695,7 +693,7 @@ def test_orchestrator_skips_match_outside_lookback_window(
     player_id = 30981
     match_id_early = 11111
     match_id_in_window = 22222
-    _cache_dir, urls_seen = _stub_client(
+    urls_seen = _stub_client(
         monkeypatch,
         player_page=_build_minimal_player_page(player_id),
         league_fixtures={
@@ -726,7 +724,7 @@ def test_orchestrator_skips_match_outside_lookback_window(
             _build_minimal_match(match_id_in_window, player_id=player_id),
         ],
     )
-    client = FotMobClient(cache_dir=tmp_path / "stub")
+    client = FotMobClient()
     rows = list(
         fetch_player_penalty_history(
             client,
@@ -754,7 +752,7 @@ def test_orchestrator_skips_stale_url_match(
     player_id = 30981
     stale_match_id = 33333
     real_match_id = 44444
-    _cache_dir, _urls = _stub_client(
+    _urls = _stub_client(
         monkeypatch,
         player_page=_build_minimal_player_page(player_id),
         league_fixtures={
@@ -775,7 +773,7 @@ def test_orchestrator_skips_stale_url_match(
         # reusing a hash and pointing us at a newer match.
         matches=[_build_minimal_match(real_match_id, player_id=player_id)],
     )
-    client = FotMobClient(cache_dir=tmp_path / "stub")
+    client = FotMobClient()
     rows = list(
         fetch_player_penalty_history(
             client,
@@ -881,7 +879,7 @@ def test_orchestrator_dedupes_team_season_lookups(
 
     monkeypatch.setattr(client_module, "_discover_build_id", lambda c: "stub-build")
     monkeypatch.setattr(client_module.FotMobClient, "get", fake_get)
-    client = FotMobClient(cache_dir=tmp_path / "stub")
+    client = FotMobClient()
     list(
         fetch_player_penalty_history(
             client,
