@@ -100,7 +100,7 @@ def render_card(kicker: KickerPrediction) -> None:
         st.markdown(f"**{kicker.player_name}** · {kicker.total_penalties} pen")
         df = pd.DataFrame(
             {"probability": [kicker.p_L * 100, kicker.p_C * 100, kicker.p_R * 100]},
-            index=["Left", "Center", "Right"],
+            index=pd.Index(["Left", "Center", "Right"]),
         )
         st.bar_chart(df, sort=False, height=180)
 

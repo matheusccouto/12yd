@@ -43,7 +43,7 @@ from .match_ref import parse_page_url
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
-    from .client import FotMobClient
+    from .client import FotMobClientLike
 
 
 @dataclass(frozen=True)
@@ -96,7 +96,9 @@ class PlayerMetadata:
 # Player page helpers
 
 
-def fetch_player_data(client: FotMobClient, player_id: int, slug: str = "") -> Mapping[str, Any]:
+def fetch_player_data(
+    client: FotMobClientLike, player_id: int, slug: str = "",
+) -> Mapping[str, Any]:
     """Fetch the player page JSON. Returns the full `__next/data` payload.
 
     The path is `players/{playerId}/{slug}` per docs/fotmob.md. The `slug`
@@ -273,7 +275,7 @@ def iter_team_season_lookups(
 
 
 def fetch_league_season_fixtures(
-    client: FotMobClient,
+    client: FotMobClientLike,
     league_id: int,
     season_year: int,
 ) -> list[dict[str, Any]]:
@@ -414,7 +416,7 @@ def compute_lookback_window(
 
 
 def fetch_player_penalty_history(  # noqa: PLR0913
-    client: FotMobClient,
+    client: FotMobClientLike,
     player_id: int,
     player_slug: str = "",
     target_date: date | None = None,
@@ -482,7 +484,7 @@ def fetch_player_penalty_history(  # noqa: PLR0913
 
 
 def _process_match_fixture(  # noqa: PLR0913
-    client: FotMobClient,
+    client: FotMobClientLike,
     fixture: Mapping[str, Any],
     player_id: int,
     team_id: int,

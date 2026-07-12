@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from tests._factories import make_roster_player
+from tests._factories import FakeFotMobClient, make_roster_player
 from twelveyards.artifacts import Artifacts
 from twelveyards.initial_set import (
     InitialSetFetchResult,
@@ -113,10 +113,7 @@ def test_initial_set_fetch_result_with_error() -> None:
 
 
 def test_fetch_all_initial_set_empty() -> None:
-    class _FakeClient:
-        pass
-
-    results = list(fetch_all_initial_set_penalty_history(_FakeClient(), []))
+    results = list(fetch_all_initial_set_penalty_history(FakeFotMobClient(), []))
     assert results == []
 
 
@@ -132,14 +129,11 @@ def test_fetch_all_initial_set_yields_one_per_kicker(
 
     monkeypatch.setattr(player_history_module, "fetch_player_penalty_history", fake_fetch)
 
-    class _FakeClient:
-        pass
-
     kickers = [
         InitialSetKicker(player_id=1, player_name="A", team_id=100, team_name="T"),
         InitialSetKicker(player_id=2, player_name="B", team_id=200, team_name="U"),
     ]
-    results = list(fetch_all_initial_set_penalty_history(_FakeClient(), kickers))
+    results = list(fetch_all_initial_set_penalty_history(FakeFotMobClient(), kickers))
     assert len(results) == 2
     assert results[0].kicker.player_id == 1
     assert results[1].kicker.player_id == 2
@@ -165,14 +159,11 @@ def test_fetch_all_initial_set_captures_errors(
 
     monkeypatch.setattr(player_history_module, "fetch_player_penalty_history", fake_fetch)
 
-    class _FakeClient:
-        pass
-
     kickers = [
         InitialSetKicker(player_id=1, player_name="Bad", team_id=100, team_name="T"),
         InitialSetKicker(player_id=2, player_name="Good", team_id=200, team_name="U"),
     ]
-    results = list(fetch_all_initial_set_penalty_history(_FakeClient(), kickers))
+    results = list(fetch_all_initial_set_penalty_history(FakeFotMobClient(), kickers))
     assert len(results) == 2
     assert results[0].error is not None
     assert "simulated fetch failure" in results[0].error

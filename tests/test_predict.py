@@ -137,7 +137,7 @@ def test_prediction_row_is_frozen() -> None:
         p_R=0.33,
     )
     with pytest.raises(Exception):
-        row.p_L = 0.9  # type: ignore[misc]
+        setattr(row, "p_L", 0.9)
 
 
 # ---------------------------------------------------------------------------

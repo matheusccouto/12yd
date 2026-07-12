@@ -13,11 +13,19 @@ is a one-line change here.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import fields as _fields
 
 from twelveyards.player_history import PlayerMetadata, PlayerPenalty
 from twelveyards.predict import PredictionRow
 from twelveyards.rosters import RosterPlayer
+
+
+class FakeFotMobClient:
+    """Stub FotMobClient that satisfies the FotMobClientLike protocol."""
+
+    def get(self, path: str, params: Mapping[str, str] | None = None) -> object:  # noqa: ARG002
+        raise NotImplementedError("tests must monkeypatch the inner fetcher")
 
 # ---------------------------------------------------------------------------
 # Schema constants
