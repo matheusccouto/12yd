@@ -1,24 +1,4 @@
-"""Per-match reference parsed from a FotMob season-fixture entry.
-
-The scraper fans out from a (league, season) fixture list to per-match
-HTTP calls. Each per-match call needs the (match_id, seo, h2h) triple
-to form the `__next/data` URL — and the per-match orchestrators also
-need a few other fields (the round, the home/away team ids and names,
-the match date, the pre-shootout score).
-
-`MatchRef.from_fixture(fixture)` is the single source of truth for parsing
-a fixture entry. The `MatchRef` carries the union of fields every
-downstream consumer needs:
-
-- `match_id` / `seo` / `h2h` — the URL triple (every consumer).
-- `home_team_id` / `home_team_name` / `away_team_id` / `away_team_name` —
-  the national team (roster extraction).
-- `round_name` / `score_str` — the round label and pre-shootout score
-  (shootout extraction).
-- `match_date` — the ISO 8601 UTC kickoff time (both).
-
-The fields consumers don't need are simply left as their defaults.
-"""
+"""Parse FotMob season-fixture entries into MatchRef dataclasses."""
 
 from __future__ import annotations
 

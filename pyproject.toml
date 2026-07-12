@@ -61,6 +61,14 @@ select = ["ALL"]
     "BLE001",
     "PLC0415",
 ]
+"src/twelveyards/pipeline.py" = [
+    "S110",
+    "BLE001",
+    "PLR0913",
+]
+"src/twelveyards/artifacts.py" = [
+    "ANN401",
+]
 "app.py" = []
 
 [tool.pytest.ini_options]

@@ -19,7 +19,7 @@ from tests._factories import (
     make_roster_player,
 )
 from twelveyards.artifacts import Artifacts
-from twelveyards.client import FotMobClient
+from twelveyards.fotmob.client import FotMobClient
 
 # ---------------------------------------------------------------------------
 # Path accessors
@@ -105,7 +105,7 @@ def test_player_history_round_trip(tmp_path: Path) -> None:
 
 
 def test_missing_history_round_trip(tmp_path: Path) -> None:
-    from twelveyards.initial_set import MissingKicker
+    from twelveyards.scraper.initial_set import MissingKicker
 
     art = Artifacts(root=tmp_path)
     rows = [MissingKicker(player_id=1, player_name="No History", team_id=100, team_name="T")]

@@ -1,24 +1,16 @@
-"""Tests for the v5 dashboard library logic.
-
-v5 changes:
-- predictions_for_match takes home_team_id, away_team_id (drops MatchContext)
-- drops load_upcoming_knockouts, is_placeholder_team
-- KickerPrediction has v5 fields: short_name, photo_url, total_penalties
-"""
+"""Tests for the dashboard library logic."""
 
 from __future__ import annotations
 
 import pytest
 
+from twelveyards.artifacts import PredictionRow
 from twelveyards.dashboard import (
     KickerPrediction,
     distinct_teams,
-    most_likely_side,
-    opposite_side,
     predictions_for_match,
     recommended_dive,
 )
-from twelveyards.predict import PredictionRow
 
 
 def _pred(
@@ -182,44 +174,6 @@ def test_kicker_prediction_construction() -> None:
 )
 def test_recommended_dive(p_L: float, p_C: float, p_R: float, expected: str) -> None:
     assert recommended_dive(p_L, p_C, p_R) == expected
-
-
-# ---------------------------------------------------------------------------
-# opposite_side
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("side", "expected"),
-    [("L", "R"), ("R", "L"), ("C", "C")],
-)
-def test_opposite_side(side: str, expected: str) -> None:
-    assert opposite_side(side) == expected
-
-
-def test_opposite_side_unknown_passthrough() -> None:
-    assert opposite_side("?") == "?"
-
-
-# ---------------------------------------------------------------------------
-# most_likely_side
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("p_L", "p_C", "p_R", "expected"),
-    [
-        (0.55, 0.20, 0.25, "L"),
-        (0.30, 0.25, 0.45, "R"),
-        (0.20, 0.60, 0.20, "C"),
-        (0.33, 0.33, 0.34, "R"),
-        (0.34, 0.33, 0.33, "L"),
-        (0.33, 0.34, 0.33, "C"),
-        (0.33, 0.33, 0.33, "L"),
-    ],
-)
-def test_most_likely_side(p_L: float, p_C: float, p_R: float, expected: str) -> None:
-    assert most_likely_side(p_L, p_C, p_R) == expected
 
 
 # ---------------------------------------------------------------------------

@@ -1,16 +1,14 @@
-"""Live predictions for the 2026 World Cup roster.
-
-PRD-v5: TabPFN classifier on player-only features. Each roster player is
-scored once; the same prediction row serves any match. Predictions are
-match-agnostic — no opponent or match-context features.
-"""
+"""TabPFN prediction pipeline: fit on player history, score all roster players."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
+from tabpfn_client import TabPFNClassifier
+from tabpfn_client import init as _tabpfn_init
+
+from twelveyards.artifacts import Artifacts, PredictionRow
 
 from .features import (
     CATEGORICAL_INDICES,
@@ -18,41 +16,60 @@ from .features import (
     build_prediction_matrix,
     build_training_matrix,
 )
-from .tabpfn import TabPFN
-from .tabpfn import init as tabpfn_init
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from datetime import date
     from pathlib import Path
 
-    from .player_history import PlayerMetadata, PlayerPenalty
-    from .rosters import RosterPlayer
+    from twelveyards.scraper.player_history import PlayerMetadata, PlayerPenalty
+    from twelveyards.scraper.rosters import RosterPlayer
 
 
-@dataclass(frozen=True)
-class PredictionRow:
-    """One row in predictions.jsonl — a roster player's predicted side distribution."""
+def _init_tabpfn() -> None:
+    """Initialise the TabPFN client (reads TABPFN_TOKEN env var)."""
+    _tabpfn_init()
 
-    player_id: int
-    player_name: str
-    short_name: str
-    team_id: int
-    team_name: str
-    country_code: str
-    kicking_foot: str
-    photo_url: str
-    p_L: float  # noqa: N815
-    p_C: float  # noqa: N815
-    p_R: float  # noqa: N815
-    total_penalties: int = 0
+
+class _TabPFN:
+    """Wrapper over TabPFNClassifier enforcing 'fit before predict'."""
+
+    def __init__(
+        self,
+        *,
+        n_estimators: int = 8,
+        thinking_mode: bool = False,
+        random_state: int = 0,
+        categorical_features_indices: list[int] | None = None,
+    ) -> None:
+        self._n_estimators = n_estimators
+        self._thinking_mode = thinking_mode
+        self._random_state = random_state
+        self._categorical_features_indices = categorical_features_indices
+        self._classifier: TabPFNClassifier | None = None
+
+    def fit(self, X: np.ndarray, y: np.ndarray) -> None:  # noqa: N803
+        self._classifier = TabPFNClassifier(
+            n_estimators=self._n_estimators,
+            thinking_mode=self._thinking_mode,
+            random_state=self._random_state,
+            categorical_features_indices=self._categorical_features_indices,
+            ignore_pretraining_limits=True,
+        )
+        self._classifier.fit(X, y)
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:  # noqa: N803
+        if self._classifier is None:
+            msg = "TabPFN must be fit before predict_proba"
+            raise RuntimeError(msg)
+        return np.asarray(self._classifier.predict_proba(X))
 
 
 def load_player_history(path: Path) -> dict[int, list[PlayerPenalty]]:
     """Load player_history.jsonl into a dict keyed by kicker_id."""
     import json  # noqa: PLC0415
 
-    from .player_history import PlayerPenalty  # noqa: PLC0415
+    from twelveyards.scraper.player_history import PlayerPenalty  # noqa: PLC0415
 
     out: dict[int, list[PlayerPenalty]] = {}
     with path.open(encoding="utf-8") as f:
@@ -65,13 +82,6 @@ def load_player_history(path: Path) -> dict[int, list[PlayerPenalty]]:
     return out
 
 
-def load_roster(path: Path) -> list[RosterPlayer]:
-    """Load wc2026_roster.jsonl into a list of RosterPlayer rows."""
-    from .artifacts import Artifacts  # noqa: PLC0415
-
-    return Artifacts().read_roster(path)
-
-
 def predict_and_write(
     roster: Sequence[RosterPlayer],
     player_history: dict[int, list[PlayerPenalty]],
@@ -81,8 +91,8 @@ def predict_and_write(
     target_date: date | None = None,
 ) -> list[PredictionRow]:
     """Fit TabPFN on training data, predict all roster rows, and write predictions.jsonl."""
-    tabpfn_init()
-    model = TabPFN(categorical_features_indices=CATEGORICAL_INDICES)
+    _init_tabpfn()
+    model = _TabPFN(categorical_features_indices=CATEGORICAL_INDICES)
 
     X_train, y_train = build_training_matrix(player_history, metadata_by_id)  # noqa: N806
     if len(X_train) > 0:
@@ -123,8 +133,6 @@ def predict_and_write(
                 total_penalties=total,
             ),
         )
-
-    from .artifacts import Artifacts  # noqa: PLC0415
 
     Artifacts().write_predictions(rows, path=output_path)
     return rows

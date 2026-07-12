@@ -1,9 +1,4 @@
-"""Streamlit dashboard entry point — v5 two-team dropdowns.
-
-PRD-v5: Two independent team dropdowns, no live FotMob fixture fetch.
-Reads predictions.jsonl and player_history.jsonl from the working tree.
-Cards rendered with st.container(border=True) + st.bar_chart.
-"""
+"""12yd — Penalty Shootout Side Prediction. Streamlit dashboard entry point."""
 
 from __future__ import annotations
 

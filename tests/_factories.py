@@ -1,24 +1,12 @@
-"""Centralised test data factories for the v5 twelveyards test suite.
-
-v5 drops TrainingRow, ShootoutKick, and the old modules (model.py,
-evaluate.py, shootouts.py, rsssf.py, validate.py). Surviving builders:
-
-- make_history_row — a PlayerPenalty (one row of player_history.jsonl)
-- make_metadata — a PlayerMetadata (per-player data for features)
-- make_roster_player — a RosterPlayer (one WC squad entry)
-
-Schema constants are derived from dataclasses.fields() so adding a field
-is a one-line change here.
-"""
+"""Centralised test data factories for the twelveyards test suite."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import fields as _fields
 
-from twelveyards.player_history import PlayerMetadata, PlayerPenalty
-from twelveyards.predict import PredictionRow
-from twelveyards.rosters import RosterPlayer
+from twelveyards.artifacts import PredictionRow
+from twelveyards.scraper.player_history import PlayerMetadata, PlayerPenalty
+from twelveyards.scraper.rosters import RosterPlayer
 
 
 class FakeFotMobClient:
@@ -27,15 +15,6 @@ class FakeFotMobClient:
     def get(self, path: str, params: Mapping[str, str] | None = None) -> object:
         msg = "tests must monkeypatch the inner fetcher"
         raise NotImplementedError(msg)
-
-# ---------------------------------------------------------------------------
-# Schema constants
-# ---------------------------------------------------------------------------
-
-PLAYER_PENALTY_FIELDS: frozenset[str] = frozenset(f.name for f in _fields(PlayerPenalty))
-PLAYER_METADATA_FIELDS: frozenset[str] = frozenset(f.name for f in _fields(PlayerMetadata))
-ROSTER_PLAYER_FIELDS: frozenset[str] = frozenset(f.name for f in _fields(RosterPlayer))
-PREDICTION_ROW_FIELDS: frozenset[str] = frozenset(f.name for f in _fields(PredictionRow))
 
 
 # ---------------------------------------------------------------------------

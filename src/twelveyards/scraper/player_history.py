@@ -1,25 +1,4 @@
-"""Per-kicker penalty history fetcher (FotMob fan-out).
-
-PRD: For a given Kicker (one Initial Set entry), fetch all their penalty
-kicks (shootout + in-match) over a 5-year Lookback Window floored at
-2016-01-01. The data graph is two-level: the Initial Set (per-player
-lookup) fans out to the Derived History (per-match penalty shots). No
-further fetches originate from the Derived History — a scraper that fans
-out from there is a bug, not a feature.
-
-The Initial Set assembly (Training U Prediction, dedup) and the
-per-kicker fan-out across the Initial Set live in `initial_set`. This
-module is the per-kicker FotMob fan-out only.
-
-The per-kicker lookup walks the player page's `careerHistory`: iterate
-`careerItems.senior` and `careerItems["national team"]` (skip
-`careerItems.youth`), and for each (team, season) overlap with the
-lookback window fetch the league's season fixtures, filter to the team's
-matches, and extract the player's penalty shots from each match's
-shotmap. Shootout kicks are filtered by `period == "PenaltyShootout"`;
-in-match penalties by `situation == "Penalty"`. Both are kept — the
-per-kicker history is over every penalty, not just shootout kicks.
-"""
+"""Fetch a kicker's FotMob career penalty kicks bounded by SCRAPE_FLOOR."""
 
 from __future__ import annotations
 
@@ -30,20 +9,32 @@ from datetime import UTC, date, datetime
 from email.utils import parsedate_to_datetime
 from typing import TYPE_CHECKING, Any
 
-from .config import LOOKBACK_WINDOW_YEARS, SCRAPE_FLOOR
-from .coordinates import side
-from .fotmob_parsing import (
+from twelveyards.config import LOOKBACK_WINDOW_YEARS, SCRAPE_FLOOR
+from twelveyards.fotmob.fotmob_parsing import (
     SHOTMAP_EVENT_TYPE_TO_OUTCOME,
     coerce_int,
     parse_match_date,
 )
-from .leagues import LEAGUE_BY_ID
-from .match_ref import parse_page_url
+from twelveyards.fotmob.leagues import LEAGUE_BY_ID
+from twelveyards.fotmob.match_ref import parse_page_url
+
+_LEFT_MAX: float = 0.667
+_RIGHT_MIN: float = 1.333
+
+
+def _side(x: float) -> str:
+    """Bucket a goal-mouth coordinate x in [0, 2] to "L", "C", or "R"."""
+    if x < _LEFT_MAX:
+        return "L"
+    if x > _RIGHT_MIN:
+        return "R"
+    return "C"
+
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
-    from .client import FotMobClientLike
+    from twelveyards.fotmob.client import FotMobClientLike
 
 
 @dataclass(frozen=True)
@@ -382,7 +373,7 @@ def extract_player_penalties_from_match(
                 team_id=shot_team_id,
                 is_home=is_home,
                 x=x,
-                side=side(x),
+                side=_side(x),
                 is_on_target=bool(shot.get("isOnTarget")),
                 outcome=outcome,
                 shot_type=shot_type,
