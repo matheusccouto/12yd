@@ -7,7 +7,7 @@ Cards rendered with st.container(border=True) + st.bar_chart.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import pandas as pd
 import streamlit as st
@@ -18,6 +18,9 @@ from twelveyards.dashboard import (
     distinct_teams,
     predictions_for_match,
 )
+
+if TYPE_CHECKING:
+    from twelveyards.player_history import PlayerPenalty
 
 _BadgeColor = Literal[
     "red", "orange", "yellow", "blue", "green", "violet", "gray", "grey", "primary",
@@ -81,8 +84,6 @@ def load_player_history() -> dict[int, list]:
     path = art.player_history
     if not path.exists():
         return {}
-    from twelveyards.player_history import PlayerPenalty
-
     rows = art.read_player_history()
     grouped: dict[int, list[PlayerPenalty]] = {}
     for row in rows:

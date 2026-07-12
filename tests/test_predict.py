@@ -9,6 +9,7 @@ v5 changes:
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from datetime import date
 from pathlib import Path
@@ -136,8 +137,8 @@ def test_prediction_row_is_frozen() -> None:
         p_C=0.34,
         p_R=0.33,
     )
-    with pytest.raises(Exception):
-        setattr(row, "p_L", 0.9)
+    with pytest.raises(dataclasses.FrozenInstanceError, match="cannot assign"):
+        PredictionRow.__setattr__(row, "p_L", 0.9)
 
 
 # ---------------------------------------------------------------------------

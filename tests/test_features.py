@@ -198,7 +198,7 @@ def test_build_training_matrix_respects_train_floor() -> None:
         _penalty(2, "2024-01-15T00:00:00+00:00", side="L"),
         _penalty(3, "2024-06-15T00:00:00+00:00", side="R"),
     ]
-    X, y = build_training_matrix(
+    X, _ = build_training_matrix(
         {1: kicks_before + kicks_after},
         {1: _metadata(player_id=1)},
     )

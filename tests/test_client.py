@@ -27,8 +27,9 @@ class _StubResponse:
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
+            msg = f"HTTP {self.status_code}"
             raise httpx.HTTPStatusError(
-                f"HTTP {self.status_code}",
+                msg,
                 request=httpx.Request("GET", "x"),
                 response=cast("httpx.Response", self),
             )

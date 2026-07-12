@@ -154,7 +154,8 @@ def test_fetch_all_initial_set_captures_errors(
         nonlocal call_count
         call_count += 1
         if player_id == 1:
-            raise RuntimeError("simulated fetch failure")
+            err_msg = "simulated fetch failure"
+            raise RuntimeError(err_msg)
         return []
 
     monkeypatch.setattr(player_history_module, "fetch_player_penalty_history", fake_fetch)

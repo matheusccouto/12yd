@@ -25,7 +25,8 @@ class FakeFotMobClient:
     """Stub FotMobClient that satisfies the FotMobClientLike protocol."""
 
     def get(self, path: str, params: Mapping[str, str] | None = None) -> object:
-        raise NotImplementedError("tests must monkeypatch the inner fetcher")
+        msg = "tests must monkeypatch the inner fetcher"
+        raise NotImplementedError(msg)
 
 # ---------------------------------------------------------------------------
 # Schema constants

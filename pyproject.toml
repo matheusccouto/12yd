@@ -43,11 +43,6 @@ select = ["ALL"]
     "PLR0913",
     "S108",
     "E501",
-    "B017",
-    "B010",
-    "PT011",
-    "EM101",
-    "EM102",
     "F841",
     "FBT001",
     "TC001",
@@ -56,9 +51,7 @@ select = ["ALL"]
     "PLW1510",
     "S603",
     "S607",
-    "TRY003",
     "PYI034",
-    "RUF059",
 ]
 "scripts/**/*.py" = [
     "T201",
@@ -68,10 +61,7 @@ select = ["ALL"]
     "BLE001",
     "PLC0415",
 ]
-"app.py" = [
-    "PLC0415",
-    "TC001",
-]
+"app.py" = []
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
