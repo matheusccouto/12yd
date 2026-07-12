@@ -1,22 +1,4 @@
-"""Low-level FotMob shape coercions.
-
-The scraper pulls payloads from `https://www.fotmob.com/_next/data/{buildId}/...`
-and has to coerce a handful of fields the API serves inconsistently. These
-helpers are the single source of truth for that coercion: every other module
-imports from here, so a FotMob shape quirk is fixed in one place.
-
-The three concerns are independent:
-
-- `coerce_int(value)` — many FotMob ids arrive as strings on some endpoints
-  and ints on others; we accept any of {None, "", 0, "5", 5.0, "abc"} and
-  return a clean int (0 for missing/unparseable).
-- `parse_match_date(value)` — `matchTimeUTC` is RFC 2822 on the match-detail
-  page and ISO 8601 on the season-fixture list. We normalise to ISO 8601 UTC.
-- `SHOTMAP_EVENT_TYPE_TO_OUTCOME` — the shotmap's `eventType` strings are
-  mapped to our canonical "Goal" / "Saved" / "Missed" outcome labels. `Post`
-  is FotMob's tag for shots that hit the post without going in (a miss in
-  our domain — the keeper did not concede).
-"""
+"""FotMob payload shape coercions: int, date, shotmap event type."""
 
 from __future__ import annotations
 

@@ -17,7 +17,7 @@ from datetime import date
 import numpy as np
 
 from tests._factories import make_history_row, make_metadata, make_roster_player
-from twelveyards.features import (
+from twelveyards.model.features import (
     CATEGORICAL_INDICES,
     CLASSES,
     PRIOR_PROB,

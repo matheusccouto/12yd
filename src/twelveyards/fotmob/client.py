@@ -1,11 +1,4 @@
-"""HTTP client for FotMob with gzip, ETag revalidation, and persistent disk cache.
-
-PRD-v5: BuildId-stripped cache keys so cached responses survive FotMob
-deployment rotations. A shared httpx.Client (lazy-init, per-instance) reuses
-one connection pool across all calls instead of creating a new TLS session
-per request. Persistent disk cache bypasses the 1h CloudFront TTL
-(docs/fotmob.md).
-"""
+"""HTTP client for FotMob with gzip, ETag revalidation, and persistent disk cache."""
 
 from __future__ import annotations
 
@@ -18,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 import httpx
 
-from .config import HTTP_TIMEOUT_SECONDS, USER_AGENT
+from twelveyards.config import HTTP_TIMEOUT_SECONDS, USER_AGENT
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

@@ -9,8 +9,8 @@ from typing import Any, cast
 
 import httpx
 
-from twelveyards import client as client_module
-from twelveyards.client import FotMobClient
+from twelveyards.fotmob import client as client_module
+from twelveyards.fotmob.client import FotMobClient
 
 
 class _StubResponse:

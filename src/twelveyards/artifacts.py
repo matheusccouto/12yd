@@ -1,26 +1,37 @@
-"""Single seam for the on-disk artifact layout.
-
-PRD-v5: Artifacts live under `data/`. Surviving artifacts: wc2026_roster.jsonl,
-player_history.jsonl, predictions.jsonl, and missing_history.jsonl. Dropped
-artifacts: shootout_kicks, training_table, model pickles, metrics, cv, diagnostics,
-discrepancies, tournament_success_rate.
-"""
+"""On-disk artifact layout and typed JSONL I/O."""
 
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .client import FotMobClient
-from .initial_set import MissingKicker
-from .player_history import PlayerPenalty
-from .predict import PredictionRow
-from .rosters import RosterPlayer
+from .fotmob.client import FotMobClient
+from .scraper.initial_set import MissingKicker
+from .scraper.player_history import PlayerPenalty
+from .scraper.rosters import RosterPlayer
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+
+@dataclass(frozen=True)
+class PredictionRow:
+    """One row in predictions.jsonl — a roster player's predicted side distribution."""
+
+    player_id: int
+    player_name: str
+    short_name: str
+    team_id: int
+    team_name: str
+    country_code: str
+    kicking_foot: str
+    photo_url: str
+    p_L: float  # noqa: N815
+    p_C: float  # noqa: N815
+    p_R: float  # noqa: N815
+    total_penalties: int = 0
 
 
 def _write_jsonl(
@@ -39,7 +50,7 @@ def _write_jsonl(
     return count
 
 
-def _serialize_row(row: Any, *, nan_to_null: bool = False) -> str:  # noqa: ANN401
+def _serialize_row(row: Any, *, nan_to_null: bool = False) -> str:
     payload = asdict(row)
     return json.dumps(payload, ensure_ascii=False, allow_nan=(not nan_to_null))
 
@@ -143,8 +154,6 @@ class Artifacts:
         """Return a FotMobClient configured to use this instance's cache_dir."""
         return FotMobClient(cache_dir=self.cache_dir)
 
-    # ---------------------------------------------------- streaming serialise
-
-    def serialize_row(self, row: Any, *, nan_to_null: bool = False) -> str:  # noqa: ANN401
+    def serialize_row(self, row: Any, *, nan_to_null: bool = False) -> str:
         """Serialize a dataclass row as a JSON string for streaming writes."""
         return _serialize_row(row, nan_to_null=nan_to_null)

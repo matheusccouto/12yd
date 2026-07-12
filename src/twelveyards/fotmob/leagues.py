@@ -1,33 +1,4 @@
-"""FotMob leagueId + SEO slug pairs for in-scope tournaments and player history.
-
-PRD: The leagueId is the FotMob integer ID, e.g. World Cup = 77, Euro = 50,
-Copa América = 44, Gold Cup = 298, Asian Cup = 290, AFCON = 289.
-
-The player-history fetcher also needs slugs for leagues a player may have
-played in *outside* the in-scope tournaments — e.g. LaLiga, Ligue 1,
-Champions League, MLS, Copa del Rey. We keep a separate `EXTENDED_LEAGUES`
-table for those, merged into `LEAGUE_BY_ID` for slug lookups. The shootout
-scraper iterates `LEAGUES` (international) and `CLUB_LEAGUES` (Phase 3
-club shootouts); the 19-tournament `EXTENDED_LEAGUES` table stays
-player-history-only.
-
-The `kind` field discriminates the three disjoint tuples:
-
-- `"international"` — the 6 national-team cup competitions (World Cup,
-  Euro, Copa América, Gold Cup, Asian Cup, AFCON).
-- `"club"` — the 7 club shootout competitions added in Phase 3 (Copa
-  Libertadores, Champions League, FA Cup, Coupe de France, DFB-Pokal,
-  Coppa Italia, Copa del Rey). See `docs/adr/0004-phase-3-data-source.md`.
-- `"domestic_only"` — the 12 leagues the player-history fetcher
-  resolves slugs for (LaLiga, Ligue 1, Premier League, Bundesliga,
-  Serie A, MLS, Europa League, Friendlies, UEFA Euro Qualifiers,
-  CONMEBOL WC Qualifiers, CONCACAF Champions Cup, Leagues Cup).
-  These are never in the shootout scope.
-
-`LEAGUE_BY_ID` is the union of all three — it is the source of truth
-for slug lookups. The `kind` field is the dispatch key for the shootout
-scraper: `kind in {"international", "club"}` puts the league in scope.
-"""
+"""FotMob league IDs, slugs, and kinds the scraper targets."""
 
 from __future__ import annotations
 
@@ -115,3 +86,6 @@ LEAGUE_BY_ID: dict[int, League] = {
 # explicit at the call site and the test surface.
 INTERNATIONAL_LEAGUE_IDS: frozenset[int] = frozenset(league.league_id for league in LEAGUES)
 CLUB_LEAGUE_IDS: frozenset[int] = frozenset(league.league_id for league in CLUB_LEAGUES)
+
+WC_2026_LEAGUE: League = LEAGUE_BY_ID[77]
+WC_2026_SEASON: int = 2026

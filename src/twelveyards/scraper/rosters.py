@@ -1,43 +1,19 @@
-"""Tournament roster fetcher.
-
-Slice #3 (Issue #18): fetch the 2026 World Cup squad list and write it as
-JSONL. The slice uses the WC 2026 league fixtures (FotMob leagueId 77,
-season 2026) to discover the 104 matches, then fetches each match's
-lineup to extract the registered players, deduplicating across matches
-to produce the unique squad list (~700-1000 players across 48 teams).
-
-The slice is independent of the shootout pipeline — it reuses the HTTP
-client and JSONL writer but produces a different artifact. It feeds the
-Prediction Initial Set in slice #5 (Issue #21).
-
-The data source for a player's `(player_id, player_name, country_code,
-primary_position_id)` is `pageProps.content.lineup.{homeTeam,awayTeam}.
-{starters,subs}` — each entry is one registered player. The national
-team id and name come from the match fixture's `home`/`away`, not from
-the player's `primaryTeamId`/`primaryTeamName` (the latter is the
-player's club, which is not what we want for the WC roster).
-
-Stale-URL matches (where FotMob's (seo, h2h) hash now points to a
-different matchId) are skipped silently — the same behaviour as the
-shootout and player-history pipelines. Knockout-round matches with
-placeholder teams (e.g. "Winner QF 1") have empty lineups and are
-skipped at extraction time.
-"""
+"""Fetch WC 2026 squad from FotMob season fixtures and lineups."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from .fotmob_parsing import coerce_int
-from .match_ref import MatchRef
-from .tournaments import WC_2026_LEAGUE, WC_2026_SEASON
+from twelveyards.fotmob.fotmob_parsing import coerce_int
+from twelveyards.fotmob.leagues import WC_2026_LEAGUE, WC_2026_SEASON
+from twelveyards.fotmob.match_ref import MatchRef
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Mapping
 
-    from .client import FotMobClient
-    from .leagues import League
+    from twelveyards.fotmob.client import FotMobClient
+    from twelveyards.fotmob.leagues import League
 
 
 @dataclass(frozen=True)

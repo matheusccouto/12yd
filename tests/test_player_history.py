@@ -34,8 +34,8 @@ from typing import Any
 import pytest
 
 from twelveyards.artifacts import Artifacts
-from twelveyards.client import FotMobClient
-from twelveyards.player_history import (
+from twelveyards.fotmob.client import FotMobClient
+from twelveyards.scraper.player_history import (
     PlayerMetadata,
     PlayerPenalty,
     TeamSeasonLookup,
@@ -132,7 +132,7 @@ def _stub_client(
         raise AssertionError(msg)
 
     # Pin the BuildId to avoid hitting the homepage.
-    from twelveyards import client as client_module
+    from twelveyards.fotmob import client as client_module
 
     monkeypatch.setattr(client_module, "_discover_build_id", lambda c: "stub-build")
     monkeypatch.setattr(client_module.FotMobClient, "get", fake_get)
@@ -218,7 +218,7 @@ def test_extract_player_metadata_reads_preferred_foot() -> None:
     - entry missing entirely → "" (defensive)
     - other entries (height, shirt, etc.) ignored
     """
-    from twelveyards.player_history import _preferred_foot
+    from twelveyards.scraper.player_history import _preferred_foot
 
     # Standard "left" via the cache's value.key shape.
     assert (
@@ -877,7 +877,7 @@ def test_orchestrator_dedupes_team_season_lookups(
         msg = f"unknown path: {path}"
         raise AssertionError(msg)
 
-    from twelveyards import client as client_module
+    from twelveyards.fotmob import client as client_module
 
     monkeypatch.setattr(client_module, "_discover_build_id", lambda c: "stub-build")
     monkeypatch.setattr(client_module.FotMobClient, "get", fake_get)

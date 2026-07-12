@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from twelveyards.match_ref import MatchRef, parse_page_url
+from twelveyards.fotmob.match_ref import MatchRef, parse_page_url
 
 # --- parse_page_url ---------------------------------------------------------
 

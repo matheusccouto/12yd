@@ -1,31 +1,24 @@
-"""Initial Set assembly and per-kicker orchestration.
-
-PRD-v5: The Initial Set is the Prediction Initial Set only — read from
-wc2026_roster.jsonl. The Training Initial Set (shootout kicks) is dropped;
-all roster players are scored. The per-kicker fetcher from player_history
-is fanned out across the roster.
-"""
+"""Initial Set assembly and per-kicker penalty history fetch."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .config import LOOKBACK_WINDOW_YEARS, SCRAPE_FLOOR
+from twelveyards.config import LOOKBACK_WINDOW_YEARS, SCRAPE_FLOOR
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
     from datetime import date
 
-    from .client import FotMobClientLike
-    from .player_history import PlayerPenalty
-    from .rosters import RosterPlayer
+    from .fotmob.client import FotMobClientLike
+    from .scraper.player_history import PlayerPenalty
+    from .scraper.rosters import RosterPlayer
 
 __all__ = [
     "InitialSetFetchResult",
     "InitialSetKicker",
     "MissingKicker",
-    "fetch_all_initial_set_penalty_history",
     "fetch_all_initial_set_penalty_history_parallel",
     "iter_initial_set_kickers",
 ]
@@ -73,25 +66,6 @@ def iter_initial_set_kickers(
         )
 
 
-def fetch_all_initial_set_penalty_history(
-    client: FotMobClientLike,
-    initial_set: Iterable[InitialSetKicker],
-    target_date: date | None = None,
-    lookback_years: int = LOOKBACK_WINDOW_YEARS,
-    history_floor: date = SCRAPE_FLOOR,
-) -> Iterator[InitialSetFetchResult]:
-    """Yield InitialSetFetchResult for each kicker, single-threaded."""
-    for kicker in initial_set:
-        try:
-            rows = list(
-                _fetch_one(kicker, client, target_date, lookback_years, history_floor),
-            )
-        except Exception as e:  # noqa: BLE001
-            yield InitialSetFetchResult(kicker=kicker, rows=[], error=repr(e))
-            continue
-        yield InitialSetFetchResult(kicker=kicker, rows=rows, error=None)
-
-
 def _fetch_one(
     kicker: InitialSetKicker,
     client: FotMobClientLike,
@@ -99,7 +73,7 @@ def _fetch_one(
     lookback_years: int,
     history_floor: date,
 ) -> Iterator[PlayerPenalty]:
-    from .player_history import fetch_player_penalty_history  # noqa: PLC0415
+    from .scraper.player_history import fetch_player_penalty_history  # noqa: PLC0415
 
     yield from fetch_player_penalty_history(
         client,

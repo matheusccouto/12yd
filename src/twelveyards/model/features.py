@@ -1,17 +1,4 @@
-"""Feature builder for penalty shootout prediction.
-
-PRD-v5: Player-only, match-agnostic features. Seven columns:
-- A1: (p_L, p_C, p_R) — side distribution over the 5-year rolling window
-- A2: last_side — side of the most recent kick in the window
-- A3: preferred_foot — declared foot from FotMob metadata
-- A4: career_penalty_count — count of kicks in the window
-- C1: position — from FotMob metadata
-
-The training table is built from player_history.jsonl: each player's kicks are
-sorted chronologically, and each kick becomes a training row whose features
-are derived from prior kicks within the 5-year window and whose label is the
-kick's side. TabPFN handles categoricals natively.
-"""
+"""Feature builder: 7-column match-agnostic feature matrix from player penalty history."""
 
 from __future__ import annotations
 
@@ -20,12 +7,12 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .config import LOOKBACK_WINDOW_YEARS, TRAIN_FLOOR
+from twelveyards.config import LOOKBACK_WINDOW_YEARS, TRAIN_FLOOR
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from .player_history import PlayerMetadata, PlayerPenalty
+    from twelveyards.scraper.player_history import PlayerMetadata, PlayerPenalty
 
 PRIOR_PROB: tuple[float, float, float] = (1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0)
 CLASSES: tuple[str, ...] = ("L", "C", "R")
