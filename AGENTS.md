@@ -1,7 +1,12 @@
 ## System environment and global preferences:
+
 - GitHub CLI (gh) is installed and authenticated as matheusccouto
 - Preferred programming language: Python (use uv for package management, ruff for linting/formatting, and ty for static typing)
 
+## References:
+
+- [TabPFN Docs](https://docs.priorlabs.ai/llms.txt)
+- [uv Docs](https://docs.astral.sh/uv/llms.txt)
 
 ## Agent skills
 
