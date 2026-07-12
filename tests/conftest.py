@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import gzip
 import json
-from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SAMPLE_MATCH_PATH = REPO_ROOT / "docs" / "samples" / "match_3370572.json.gz"
@@ -17,7 +19,7 @@ SAMPLE_MATCH_PATH = REPO_ROOT / "docs" / "samples" / "match_3370572.json.gz"
 @pytest.fixture(scope="session")
 def sample_2022_final() -> Mapping[str, Any]:
     """
-    The full FotMob match JSON for the 2022 FIFA World Cup Final.
+    Return the full FotMob match JSON for the 2022 FIFA World Cup Final.
 
     Sourced from `docs/samples/match_3370572.json.gz` (cached by the scraper).
     Tests use this fixture so they do not hit the FotMob API.

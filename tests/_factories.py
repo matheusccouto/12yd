@@ -11,7 +11,7 @@ from twelveyards.scraper.rosters import RosterPlayer
 # ---------------------------------------------------------------------------
 
 
-def make_history_row(
+def make_history_row(  # noqa: PLR0913
     match_id: int = 1,
     match_date: str = "2024-06-01T00:00:00+00:00",
     *,
@@ -91,7 +91,7 @@ def make_roster_player(
 # ---------------------------------------------------------------------------
 
 
-def make_prediction_row(
+def make_prediction_row(  # noqa: PLR0913
     player_id: int = 1,
     *,
     player_name: str = "Alpha",
@@ -101,9 +101,9 @@ def make_prediction_row(
     country_code: str = "ARG",
     kicking_foot: str = "right",
     photo_url: str = "https://images.fotmob.com/image_resources/playerimages/1.png",
-    p_L: float = 0.5,
-    p_C: float = 0.25,
-    p_R: float = 0.25,
+    p_l: float = 0.5,
+    p_c: float = 0.25,
+    p_r: float = 0.25,
     total_penalties: int = 5,
 ) -> PredictionRow:
     return PredictionRow(
@@ -115,8 +115,8 @@ def make_prediction_row(
         country_code=country_code,
         kicking_foot=kicking_foot,
         photo_url=photo_url,
-        p_L=p_L,
-        p_C=p_C,
-        p_R=p_R,
+        p_L=p_l,
+        p_C=p_c,
+        p_R=p_r,
         total_penalties=total_penalties,
     )

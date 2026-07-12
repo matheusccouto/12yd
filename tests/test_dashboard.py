@@ -13,15 +13,15 @@ from twelveyards.dashboard import (
 )
 
 
-def _pred(
+def _pred(  # noqa: PLR0913
     *,
     player_id: int = 1,
     player_name: str = "A",
     team_id: int = 100,
     team_name: str = "Team A",
-    p_L: float = 0.5,
-    p_C: float = 0.2,
-    p_R: float = 0.3,
+    p_l: float = 0.5,
+    p_c: float = 0.2,
+    p_r: float = 0.3,
     total_penalties: int = 0,
     short_name: str = "A",
 ) -> PredictionRow:
@@ -34,9 +34,9 @@ def _pred(
         country_code="",
         kicking_foot="right",
         photo_url=f"https://images.fotmob.com/image_resources/playerimages/{player_id}.png",
-        p_L=p_L,
-        p_C=p_C,
-        p_R=p_R,
+        p_L=p_l,
+        p_C=p_c,
+        p_R=p_r,
         total_penalties=total_penalties,
     )
 
@@ -46,7 +46,7 @@ def _pred(
 # ---------------------------------------------------------------------------
 
 
-def test_predictions_for_match_splits_home_away() -> None:
+def test_predictions_for_match_splits_home_away() -> None:  # noqa: D103
     home_id = 100
     away_id = 200
     predictions = [
@@ -60,13 +60,13 @@ def test_predictions_for_match_splits_home_away() -> None:
     assert [k.player_id for k in away] == [3]
 
 
-def test_predictions_for_match_sets_recommended_dive() -> None:
-    predictions = [_pred(player_id=1, team_id=100, p_L=0.1, p_C=0.6, p_R=0.3)]
+def test_predictions_for_match_sets_recommended_dive() -> None:  # noqa: D103
+    predictions = [_pred(player_id=1, team_id=100, p_l=0.1, p_c=0.6, p_r=0.3)]
     home, _away = predictions_for_match(predictions, 100, 200)
     assert home[0].recommended_dive == "L"
 
 
-def test_predictions_for_match_sorts_by_total_penalties_desc() -> None:
+def test_predictions_for_match_sorts_by_total_penalties_desc() -> None:  # noqa: D103
     predictions = [
         _pred(player_id=1, player_name="Zara", team_id=100, total_penalties=2),
         _pred(player_id=2, player_name="Aaron", team_id=100, total_penalties=8),
@@ -76,7 +76,7 @@ def test_predictions_for_match_sorts_by_total_penalties_desc() -> None:
     assert [k.player_name for k in home] == ["Aaron", "Mike", "Zara"]
 
 
-def test_predictions_for_match_name_tiebreaker() -> None:
+def test_predictions_for_match_name_tiebreaker() -> None:  # noqa: D103
     predictions = [
         _pred(player_id=1, player_name="Zara", team_id=100, total_penalties=3),
         _pred(player_id=2, player_name="Aaron", team_id=100, total_penalties=3),
@@ -85,7 +85,7 @@ def test_predictions_for_match_name_tiebreaker() -> None:
     assert [k.player_name for k in home] == ["Aaron", "Zara"]
 
 
-def test_predictions_for_match_falls_back_to_name_sort_with_zero_penalties() -> None:
+def test_predictions_for_match_falls_back_to_name_sort_with_zero_penalties() -> None:  # noqa: D103
     predictions = [
         _pred(player_id=1, player_name="Zara", team_id=100),
         _pred(player_id=2, player_name="Aaron", team_id=100),
@@ -95,20 +95,20 @@ def test_predictions_for_match_falls_back_to_name_sort_with_zero_penalties() -> 
     assert [k.player_name for k in home] == ["Aaron", "Mike", "Zara"]
 
 
-def test_predictions_for_match_returns_empty_when_no_matching_teams() -> None:
+def test_predictions_for_match_returns_empty_when_no_matching_teams() -> None:  # noqa: D103
     predictions = [_pred(player_id=1, team_id=999)]
     home, away = predictions_for_match(predictions, 100, 200)
     assert home == []
     assert away == []
 
 
-def test_predictions_for_match_empty_predictions() -> None:
+def test_predictions_for_match_empty_predictions() -> None:  # noqa: D103
     home, away = predictions_for_match([], 100, 200)
     assert home == []
     assert away == []
 
 
-def test_predictions_for_match_kicker_prediction_has_v5_fields() -> None:
+def test_predictions_for_match_kicker_prediction_has_v5_fields() -> None:  # noqa: D103
     predictions = [
         _pred(
             player_id=42,
@@ -120,10 +120,10 @@ def test_predictions_for_match_kicker_prediction_has_v5_fields() -> None:
     ]
     home, _away = predictions_for_match(predictions, 100, 200)
     k = home[0]
-    assert k.player_id == 42
+    assert k.player_id == 42  # noqa: PLR2004
     assert k.player_name == "Lionel Messi"
     assert k.short_name == "Messi"
-    assert k.total_penalties == 10
+    assert k.total_penalties == 10  # noqa: PLR2004
     assert "images.fotmob.com" in k.photo_url
     assert k.recommended_dive in ("L", "C", "R")
 
@@ -133,7 +133,7 @@ def test_predictions_for_match_kicker_prediction_has_v5_fields() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_kicker_prediction_construction() -> None:
+def test_kicker_prediction_construction() -> None:  # noqa: D103
     k = KickerPrediction(
         player_id=1,
         player_name="A",
@@ -149,7 +149,7 @@ def test_kicker_prediction_construction() -> None:
         recommended_dive="C",
     )
     assert k.recommended_dive == "C"
-    assert k.total_penalties == 5
+    assert k.total_penalties == 5  # noqa: PLR2004
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +158,7 @@ def test_kicker_prediction_construction() -> None:
 
 
 @pytest.mark.parametrize(
-    ("p_L", "p_C", "p_R", "expected"),
+    ("p_l", "p_c", "p_r", "expected"),
     [
         (0.1, 0.5, 0.4, "L"),
         (0.4, 0.1, 0.5, "C"),
@@ -172,8 +172,10 @@ def test_kicker_prediction_construction() -> None:
         (0.0, 0.0, 1.0, "L"),
     ],
 )
-def test_recommended_dive(p_L: float, p_C: float, p_R: float, expected: str) -> None:
-    assert recommended_dive(p_L, p_C, p_R) == expected
+def test_recommended_dive(  # noqa: D103
+    p_l: float, p_c: float, p_r: float, expected: str,
+) -> None:
+    assert recommended_dive(p_l, p_c, p_r) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -181,11 +183,11 @@ def test_recommended_dive(p_L: float, p_C: float, p_R: float, expected: str) -> 
 # ---------------------------------------------------------------------------
 
 
-def test_distinct_teams_empty() -> None:
+def test_distinct_teams_empty() -> None:  # noqa: D103
     assert distinct_teams([]) == []
 
 
-def test_distinct_teams_deduplicates() -> None:
+def test_distinct_teams_deduplicates() -> None:  # noqa: D103
     predictions = [
         _pred(player_id=1, team_id=100, team_name="Argentina"),
         _pred(player_id=2, team_id=100, team_name="Argentina"),
@@ -195,7 +197,7 @@ def test_distinct_teams_deduplicates() -> None:
     assert teams == [(100, "Argentina"), (200, "Brazil")]
 
 
-def test_distinct_teams_sorted_by_name() -> None:
+def test_distinct_teams_sorted_by_name() -> None:  # noqa: D103
     predictions = [
         _pred(player_id=1, team_id=100, team_name="Canada"),
         _pred(player_id=2, team_id=200, team_name="Brazil"),
@@ -205,6 +207,6 @@ def test_distinct_teams_sorted_by_name() -> None:
     assert [t[1] for t in teams] == ["Argentina", "Brazil", "Canada"]
 
 
-def test_distinct_teams_single_team() -> None:
+def test_distinct_teams_single_team() -> None:  # noqa: D103
     predictions = [_pred(player_id=1, team_id=100, team_name="France")]
     assert distinct_teams(predictions) == [(100, "France")]

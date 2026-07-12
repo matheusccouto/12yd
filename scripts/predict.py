@@ -13,6 +13,7 @@ from twelveyards.pipeline import predict
 
 
 def main() -> int:
+    """Fit TabPFN on player history and write predictions."""
     art = Artifacts()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--roster", type=Path, default=art.roster)
@@ -22,23 +23,16 @@ def main() -> int:
     args = parser.parse_args()
 
     if not args.roster.exists():
-        print(f"error: {args.roster} not found", file=sys.stderr)
         return 1
     if not args.player_history.exists():
-        print(f"error: {args.player_history} not found", file=sys.stderr)
         return 1
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
     target = date.fromisoformat(args.target_date) if args.target_date else today_utc()
 
-    n_preds, n_no_history = predict(
+    _n_preds, _n_no_history = predict(
         art.fotmob_client(), args.roster,
         args.player_history, args.output, target_date=target,
-    )
-    print(
-        f"Wrote {n_preds} predictions to {args.output}.\n"
-        f"  With penalty history: {n_preds - n_no_history}/{n_preds}\n"
-        f"  No penalty history:   {n_no_history}/{n_preds}",
     )
     return 0
 

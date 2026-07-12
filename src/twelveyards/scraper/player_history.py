@@ -370,7 +370,11 @@ def extract_player_penalties_from_match(
         shot_team_id = coerce_int(shot.get("teamId"))
         if not shot_team_id:
             shot_team_id = team_id
-        is_home = (shot_team_id == home_team_id) if (shot_team_id and home_team_id) else False
+        is_home = (
+            (shot_team_id == home_team_id)
+            if (shot_team_id and home_team_id)
+            else False
+        )
         x = float(shot["onGoalShot"]["x"])
         outcome = SHOTMAP_EVENT_TYPE_TO_OUTCOME.get(
             shot.get("eventType", ""), str(shot.get("eventType", "")),
@@ -415,7 +419,11 @@ def compute_lookback_window(
     until the target is earlier than 2021-01-01).
     """
     end = target_date
-    naive_start = date(target_date.year - lookback_years, target_date.month, target_date.day)
+    naive_start = date(
+        target_date.year - lookback_years,
+        target_date.month,
+        target_date.day,
+    )
     start = max(naive_start, history_floor)
     return start, end
 
@@ -459,7 +467,8 @@ def fetch_player_penalty_history(  # noqa: PLR0913
     seen_lookups: set[tuple[int, int, int, int]] = set()  # dedupe duplicates
 
     for lookup in lookups:
-        season_year = season_name_to_year(str(lookup.tournament_stat.get("seasonName", "")))
+        season_name = str(lookup.tournament_stat.get("seasonName", ""))
+        season_year = season_name_to_year(season_name)
         if not (window_start_year <= season_year <= window_end_year):
             continue
         dedupe_key = (
@@ -521,7 +530,9 @@ def _process_match_fixture(  # noqa: PLR0913
     except ValueError:
         return
     match = client.get(f"matches/{seo}/{h2h}")
-    page_match_id = coerce_int((match.get("pageProps") or {}).get("general", {}).get("matchId"))
+    page_props = match.get("pageProps") or {}
+    general = page_props.get("general") or {}
+    page_match_id = coerce_int(general.get("matchId"))
     if page_match_id and page_match_id != match_id:
         return  # stale (seo, h2h) hash — skip silently
     yield from extract_player_penalties_from_match(

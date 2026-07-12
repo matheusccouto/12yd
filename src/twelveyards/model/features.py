@@ -1,4 +1,4 @@
-"""Feature builder: 7-column match-agnostic feature matrix from player penalty history."""
+"""Feature builder: 7-column match-agnostic feature matrix from penalty history."""
 
 from __future__ import annotations
 
@@ -125,7 +125,9 @@ def build_training_matrix(
             if kick_date < TRAIN_FLOOR:
                 continue
 
-            features = compute_features(sorted_kicks, metadata, kick_date, lookback_years)
+            features = compute_features(
+                sorted_kicks, metadata, kick_date, lookback_years,
+            )
             rows.append(features)
             labels.append(CLASSES.index(kick.side))
 

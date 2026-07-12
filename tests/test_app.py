@@ -5,5 +5,5 @@ from __future__ import annotations
 import app
 
 
-def test_app_module_imports() -> None:
+def test_app_module_imports() -> None:  # noqa: D103
     assert app.main is not None

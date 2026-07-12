@@ -12,6 +12,7 @@ from twelveyards.pipeline import fetch_and_write_roster
 
 
 def main() -> int:
+    """Fetch WC 2026 roster from FotMob and write to JSONL."""
     art = Artifacts()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -22,8 +23,7 @@ def main() -> int:
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     client = FotMobClient()
-    n = fetch_and_write_roster(client, args.output)
-    print(f"Wrote {n} unique players to {args.output}")
+    fetch_and_write_roster(client, args.output)
     return 0
 
 

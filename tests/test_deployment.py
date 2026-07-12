@@ -29,7 +29,9 @@ REQUIREMENTS_PATH = REPO_ROOT / "requirements.txt"
 UV_LOCK_PATH = REPO_ROOT / "uv.lock"
 
 DROPPED_DEPS = {"plotly", "lightgbm", "huggingface-hub", "scikit-learn", "sklearn"}
-EXPECTED_RUNTIME_DEPS = {"httpx", "numpy", "pandas", "packaging", "streamlit", "tabpfn-client"}
+EXPECTED_RUNTIME_DEPS = {
+    "httpx", "numpy", "pandas", "packaging", "streamlit", "tabpfn-client",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -38,16 +40,16 @@ EXPECTED_RUNTIME_DEPS = {"httpx", "numpy", "pandas", "packaging", "streamlit", "
 
 
 @pytest.mark.parametrize("package", ["httpx", "numpy", "pandas"])
-def test_runtime_dep_is_importable(package: str) -> None:
+def test_runtime_dep_is_importable(package: str) -> None:  # noqa: D103
     import_module(package)
 
 
-def test_streamlit_is_importable() -> None:
+def test_streamlit_is_importable() -> None:  # noqa: D103
     streamlit = import_module("streamlit")
     assert streamlit.__version__
 
 
-def test_tabpfn_client_is_importable() -> None:
+def test_tabpfn_client_is_importable() -> None:  # noqa: D103
     tabpfn = import_module("tabpfn_client")
     assert tabpfn.__name__ == "tabpfn_client"
 
@@ -57,7 +59,7 @@ def test_tabpfn_client_is_importable() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_requirements_txt_does_not_exist() -> None:
+def test_requirements_txt_does_not_exist() -> None:  # noqa: D103
     assert not REQUIREMENTS_PATH.exists(), (
         "requirements.txt must not exist — ADR-0002 designates pyproject.toml as "
         "the sole dependency manifest. requirements.txt would shadow uv.lock on "
@@ -67,16 +69,16 @@ def test_requirements_txt_does_not_exist() -> None:
     )
 
 
-def test_uv_lock_exists() -> None:
+def test_uv_lock_exists() -> None:  # noqa: D103
     assert UV_LOCK_PATH.exists(), (
         "uv.lock is required — Streamlit Community Cloud reads it (priority #1) "
         "and runs `uv sync --frozen` to install the local twelveyards package."
     )
 
 
-def test_uv_lock_is_tracked_in_git() -> None:
-    result = subprocess.run(
-        ["git", "ls-files", "uv.lock"],
+def test_uv_lock_is_tracked_in_git() -> None:  # noqa: D103
+    result = subprocess.run(  # noqa: PLW1510
+        ["git", "ls-files", "uv.lock"],  # noqa: S607
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -102,7 +104,7 @@ def _parse_pyproject_dependencies() -> dict[str, str]:
     return parsed
 
 
-def test_pyproject_contains_runtime_deps() -> None:
+def test_pyproject_contains_runtime_deps() -> None:  # noqa: D103
     deps = _parse_pyproject_dependencies()
     missing = EXPECTED_RUNTIME_DEPS - set(deps)
     assert not missing, (
@@ -113,7 +115,7 @@ def test_pyproject_contains_runtime_deps() -> None:
     )
 
 
-def test_pyproject_no_app_or_pipeline_groups() -> None:
+def test_pyproject_no_app_or_pipeline_groups() -> None:  # noqa: D103
     data = tomllib.loads(PYPROJECT_PATH.read_text())
     groups = data.get("dependency-groups", {})
     leaked = {g for g in ("app", "pipeline") if g in groups}
@@ -124,13 +126,13 @@ def test_pyproject_no_app_or_pipeline_groups() -> None:
     )
 
 
-def test_pyproject_no_dropped_deps() -> None:
+def test_pyproject_no_dropped_deps() -> None:  # noqa: D103
     deps = _parse_pyproject_dependencies()
     leaked = DROPPED_DEPS & set(deps)
     assert not leaked, f"v5 dropped deps {sorted(leaked)} must not reappear"
 
 
-def test_pyproject_no_pinned_versions() -> None:
+def test_pyproject_no_pinned_versions() -> None:  # noqa: D103
     deps = _parse_pyproject_dependencies()
     for name, spec in deps.items():
         assert "==" not in spec, (
@@ -147,8 +149,8 @@ def test_uv_lock_is_in_sync() -> None:
     lock would silently skip newly-added runtime deps → ModuleNotFoundError
     at app boot (the exact bug class this test guards against).
     """
-    result = subprocess.run(
-        ["uv", "lock", "--check"],
+    result = subprocess.run(  # noqa: PLW1510
+        ["uv", "lock", "--check"],  # noqa: S607
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -184,18 +186,18 @@ def test_app_imports_resolve_under_frozen_sync(tmp_path: Path) -> None:
             ".ruff_cache",
         ),
     )
-    subprocess.run(
+    subprocess.run(  # noqa: S603
         [sys.executable, "-m", "venv", str(snapshot / ".venv")],
         check=True,
     )
     subprocess.run(
-        ["uv", "sync", "--frozen"],
+        ["uv", "sync", "--frozen"],  # noqa: S607
         cwd=snapshot,
         check=True,
         capture_output=True,
         text=True,
     )
-    check = subprocess.run(
+    check = subprocess.run(  # noqa: S603, PLW1510
         [
             str(snapshot / ".venv" / "bin" / "python"),
             "-c",

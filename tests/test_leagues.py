@@ -1,6 +1,5 @@
 """
-Tests for the 6 in-scope international + 7 in-scope club tournaments
-constant table.
+Tests for the 12-yard league constant table (6 international, 7 club).
 
 Phase 3 (Issue #51): the scope extended from 6 international tournaments
 to 13 (6 international + 7 club). The `League` dataclass gained a
@@ -25,10 +24,10 @@ from twelveyards.fotmob.leagues import (
 
 def test_leagues_count() -> None:
     """Phase 3 (Issue #51): the 6 in-scope international tournaments."""
-    assert len(LEAGUES) == 6
+    assert len(LEAGUES) == 6  # noqa: PLR2004
 
 
-def test_leagues_have_required_fields() -> None:
+def test_leagues_have_required_fields() -> None:  # noqa: D103
     for league in LEAGUES:
         assert isinstance(league, League)
         assert league.league_id > 0
@@ -39,7 +38,7 @@ def test_leagues_have_required_fields() -> None:
         )
 
 
-def test_leagues_are_unique() -> None:
+def test_leagues_are_unique() -> None:  # noqa: D103
     ids = [league.league_id for league in LEAGUES]
     slugs = [league.slug for league in LEAGUES]
     assert len(set(ids)) == len(ids)
@@ -48,7 +47,9 @@ def test_leagues_are_unique() -> None:
 
 def test_league_ids_match_prd() -> None:
     """
-    PRD: World Cup = 77, Euro = 50, Copa América = 44,
+    PRD-mandated FotMob league IDs.
+
+    World Cup = 77, Euro = 50, Copa América = 44,
     Gold Cup = 298, Asian Cup = 290, AFCON = 289.
     """
     assert LEAGUE_BY_ID[77].slug == "world-cup"
@@ -64,10 +65,10 @@ def test_league_ids_match_prd() -> None:
 
 def test_club_leagues_count() -> None:
     """Phase 3 (Issue #51): the 7 in-scope club tournaments."""
-    assert len(CLUB_LEAGUES) == 7
+    assert len(CLUB_LEAGUES) == 7  # noqa: PLR2004
 
 
-def test_club_leagues_have_required_fields() -> None:
+def test_club_leagues_have_required_fields() -> None:  # noqa: D103
     for league in CLUB_LEAGUES:
         assert isinstance(league, League)
         assert league.league_id > 0
@@ -78,7 +79,7 @@ def test_club_leagues_have_required_fields() -> None:
         )
 
 
-def test_club_leagues_are_unique() -> None:
+def test_club_leagues_are_unique() -> None:  # noqa: D103
     ids = [league.league_id for league in CLUB_LEAGUES]
     slugs = [league.slug for league in CLUB_LEAGUES]
     assert len(set(ids)) == len(ids)
@@ -87,6 +88,8 @@ def test_club_leagues_are_unique() -> None:
 
 def test_club_league_ids_match_prd() -> None:
     """
+    FotMob IDs for the 7 in-scope club leagues.
+
     Phase 3 (Issue #51) + ADR
     `docs/adr/0004-phase-3-data-source.md`: Copa Libertadores = 41,
     Champions League = 42, FA Cup = 132, Coupe de France = 133,
@@ -108,10 +111,14 @@ def test_club_league_ids_constant() -> None:
 
 def test_international_league_ids_constant() -> None:
     """
+    INTERNATIONAL_LEAGUE_IDS matches the 6 LEAGUES tuple.
+
     `INTERNATIONAL_LEAGUE_IDS` is the 6-id set of in-scope
     international leagues (the existing `LEAGUES` IDs).
     """
-    assert frozenset({league.league_id for league in LEAGUES}) == INTERNATIONAL_LEAGUE_IDS
+    assert frozenset(
+        {league.league_id for league in LEAGUES},
+    ) == INTERNATIONAL_LEAGUE_IDS
 
 
 # --- `kind` field on every League (Issue #51) -----------------------------
@@ -119,6 +126,8 @@ def test_international_league_ids_constant() -> None:
 
 def test_every_league_has_a_kind() -> None:
     """
+    Every League has a valid `kind` string.
+
     The `kind` field on `League` is one of `"international"`,
     `"club"`, or `"domestic_only"`. A future kind (e.g. `"youth"`)
     needs a deliberate update here so the discrimination is
@@ -126,12 +135,15 @@ def test_every_league_has_a_kind() -> None:
     """
     for league in LEAGUE_BY_ID.values():
         assert league.kind in ("international", "club", "domestic_only"), (
-            f"league {league.league_id} ({league.name}) has unknown kind={league.kind!r}"
+            f"league {league.league_id} ({league.name}) "
+            f"has unknown kind={league.kind!r}"
         )
 
 
 def test_every_league_kind_is_a_literal_value() -> None:
     """
+    The `kind` field is always a `LeagueKind` literal value.
+
     Type-system-level check: the `kind` field is a `LeagueKind`
     literal. A drift (e.g. someone sets `kind="International"` with
     a capital I) is caught here at runtime.
@@ -145,6 +157,8 @@ def test_every_league_kind_is_a_literal_value() -> None:
 
 def test_extended_leagues_are_domestic_only() -> None:
     """
+    All 12 EXTENDED_LEAGUES have kind="domestic_only".
+
     The 12 `EXTENDED_LEAGUES` (LaLiga, Ligue 1, Premier League,
     etc.) are all `kind="domestic_only"`. A regression that marks
     one of them as `international` or `club` is caught here — that
@@ -152,7 +166,7 @@ def test_extended_leagues_are_domestic_only() -> None:
     `test_scope_excludes_domestic_only_extended_leagues` in
     `test_tournaments.py`.
     """
-    assert len(EXTENDED_LEAGUES) == 12
+    assert len(EXTENDED_LEAGUES) == 12  # noqa: PLR2004
     for league in EXTENDED_LEAGUES:
         assert league.kind == "domestic_only", (
             f"extended league {league.league_id} ({league.name}) has "
@@ -162,6 +176,8 @@ def test_extended_leagues_are_domestic_only() -> None:
 
 def test_in_scope_and_extended_leagues_are_disjoint() -> None:
     """
+    In-scope and extended league ID sets are disjoint.
+
     The in-scope leagues (`LEAGUES` + `CLUB_LEAGUES`) are
     disjoint from `EXTENDED_LEAGUES`. The 7 club leagues that
     used to live in `EXTENDED_LEAGUES` (Copa Libertadores,

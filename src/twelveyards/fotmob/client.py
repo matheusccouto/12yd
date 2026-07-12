@@ -38,7 +38,10 @@ class FotMobClient:
         return self._build_id
 
     def _discover_build_id(self) -> str:
-        response = self._http.get("https://www.fotmob.com/", headers={"User-Agent": USER_AGENT})
+        response = self._http.get(
+            "https://www.fotmob.com/",
+            headers={"User-Agent": USER_AGENT},
+        )
         match = re.search(
             pattern=r'<script id="__NEXT_DATA__"[^>]*>(.+?)</script>',
             string=response.text,

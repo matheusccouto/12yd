@@ -90,7 +90,7 @@ def predict_and_write(
     *,
     target_date: date | None = None,
 ) -> list[PredictionRow]:
-    """Fit TabPFN on training data, predict all roster rows, and write predictions.jsonl."""
+    """Fit TabPFN on training data, predict all roster rows, write predictions.jsonl."""
     _init_tabpfn()
     model = _TabPFN(categorical_features_indices=CATEGORICAL_INDICES)
 
@@ -127,9 +127,21 @@ def predict_and_write(
                     "https://images.fotmob.com/image_resources/"
                     f"playerimages/{kicker.player_id}.png"
                 ),
-                p_L=float(probs[i, CLASSES.index("L")]) if len(X_test) > 0 else 1.0 / 3.0,
-                p_C=float(probs[i, CLASSES.index("C")]) if len(X_test) > 0 else 1.0 / 3.0,
-                p_R=float(probs[i, CLASSES.index("R")]) if len(X_test) > 0 else 1.0 / 3.0,
+                p_L=(
+                    float(probs[i, CLASSES.index("L")])
+                    if len(X_test) > 0
+                    else 1.0 / 3.0
+                ),
+                p_C=(
+                    float(probs[i, CLASSES.index("C")])
+                    if len(X_test) > 0
+                    else 1.0 / 3.0
+                ),
+                p_R=(
+                    float(probs[i, CLASSES.index("R")])
+                    if len(X_test) > 0
+                    else 1.0 / 3.0
+                ),
                 total_penalties=total,
             ),
         )

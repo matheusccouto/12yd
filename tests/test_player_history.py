@@ -27,10 +27,9 @@ from __future__ import annotations
 
 import gzip
 import json
-from collections.abc import Mapping
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -50,6 +49,9 @@ from twelveyards.scraper.player_history import (
     season_name_to_year,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SAMPLE_MATCH_PATH = REPO_ROOT / "docs" / "samples" / "match_3370572.json.gz"
 SAMPLE_PLAYER_PATH = REPO_ROOT / "docs" / "samples" / "player_30981_messi.json.gz"
@@ -62,7 +64,7 @@ SAMPLE_PLAYER_PATH = REPO_ROOT / "docs" / "samples" / "player_30981_messi.json.g
 
 @pytest.fixture(scope="module")
 def sample_2022_final() -> Mapping[str, object]:
-    """The 2022 WC Final (Argentina vs France) match JSON, off the disk cache."""
+    """Load the 2022 WC Final match JSON from the disk cache."""
     if not SAMPLE_MATCH_PATH.exists():
         pytest.skip(f"Sample match not present at {SAMPLE_MATCH_PATH}")
     return json.loads(gzip.decompress(SAMPLE_MATCH_PATH.read_bytes()))
@@ -71,7 +73,7 @@ def sample_2022_final() -> Mapping[str, object]:
 @pytest.fixture(scope="module")
 def sample_messi_player() -> Mapping[str, object]:
     """
-    The Messi player page JSON, off the disk cache.
+    Load the Messi player page JSON from the disk cache.
 
     The sample was fetched on 2026-06-22 from the live FotMob API and
     saved to `docs/samples/player_30981_messi.json.gz`. It is used
@@ -107,7 +109,9 @@ def _stub_client(
     urls_seen: list[str] = []
     match_iter = iter(matches or [])
 
-    def fake_get(self: FotMobClient, path: str, params: dict | None = None) -> Any:
+    def fake_get(
+        _self: FotMobClient, path: str, params: dict | None = None,
+    ) -> Any:  # noqa: ANN401
         urls_seen.append(f"{path}?{params or {}}")
         if path.startswith("players/"):
             if player_page is None:
@@ -120,7 +124,10 @@ def _stub_client(
             season_year = int((params or {}).get("season", "0"))
             fixtures = (league_fixtures or {}).get((league_id, season_year))
             if fixtures is None:
-                msg = f"stub: no league_fixtures for league={league_id} season={season_year}"
+                msg = (
+                    f"stub: no league_fixtures for league={league_id}"
+                    f" season={season_year}"
+                )
                 raise AssertionError(msg)
             return {"pageProps": {"fixtures": {"allMatches": fixtures}}}
         if path.startswith("matches/"):
@@ -133,9 +140,13 @@ def _stub_client(
         raise AssertionError(msg)
 
     # Pin the BuildId to avoid hitting the homepage.
-    from twelveyards.fotmob import client as client_module
+    from twelveyards.fotmob import client as client_module  # noqa: PLC0415
 
-    monkeypatch.setattr(client_module.FotMobClient, "_discover_build_id", lambda self: "stub-build")
+    monkeypatch.setattr(
+        client_module.FotMobClient,
+        "_discover_build_id",
+        lambda _self: "stub-build",
+    )
     monkeypatch.setattr(client_module.FotMobClient, "get", fake_get)
     return urls_seen
 
@@ -156,17 +167,19 @@ def _stub_client(
         ("2009 UAE", 2009),
     ],
 )
-def test_season_name_to_year(season_name: str, expected_year: int) -> None:
+def test_season_name_to_year(season_name: str, expected_year: int) -> None:  # noqa: D103
     assert season_name_to_year(season_name) == expected_year
 
 
-def test_season_name_to_year_raises_on_garbage() -> None:
+def test_season_name_to_year_raises_on_garbage() -> None:  # noqa: D103
     with pytest.raises(ValueError, match="Cannot extract year"):
         season_name_to_year("not a season")
 
 
 def test_compute_lookback_window_with_floor() -> None:
     """
+    Compute lookback window when floor does not activate.
+
     For a 2022-12-18 target with 5y lookback and 2016-01-01 floor, the
     floor doesn't kick in (5y back is 2017-12-18, which is after 2016-01-01).
     """
@@ -177,6 +190,8 @@ def test_compute_lookback_window_with_floor() -> None:
 
 def test_compute_lookback_window_floor_kicks_in() -> None:
     """
+    Compute lookback window when floor takes effect.
+
     For a 2020-12-18 target with 5y back, naive start is 2015-12-18,
     before the 2016-01-01 floor — the floor wins.
     """
@@ -197,14 +212,18 @@ def test_compute_lookback_window_zero_lookback() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_extract_player_metadata_messi(sample_messi_player: Mapping[str, object]) -> None:
+def test_extract_player_metadata_messi(
+    sample_messi_player: Mapping[str, object],
+) -> None:
     """
+    Verify Messi fixture metadata extraction.
+
     The Messi fixture has player_id=30981, position='striker', birth 1987-06-24,
     preferred_foot='left' (v3: read from playerInformation[]).
     """
     md = extract_player_metadata(sample_messi_player)
     assert isinstance(md, PlayerMetadata)
-    assert md.player_id == 30981
+    assert md.player_id == 30981  # noqa: PLR2004
     assert md.player_name == "Lionel Messi"
     assert md.position_key == "striker"
     assert md.birth_date == "1987-06-24"
@@ -213,6 +232,8 @@ def test_extract_player_metadata_messi(sample_messi_player: Mapping[str, object]
 
 def test_extract_player_metadata_reads_preferred_foot() -> None:
     """
+    Read the declared preferred foot from playerInformation[].
+
     v3 (Issue #36): the A3 feature is the declared preferred foot,
     read from `pageProps.data.playerInformation[]` (the cached
     player-page JSON the scraper already fetches).
@@ -223,46 +244,52 @@ def test_extract_player_metadata_reads_preferred_foot() -> None:
     - entry missing entirely → "" (defensive)
     - other entries (height, shirt, etc.) ignored
     """
-    from twelveyards.scraper.player_history import _preferred_foot
+    from twelveyards.scraper.player_history import (  # noqa: PLC0415
+        _preferred_foot,
+    )
 
     # Standard "left" via the cache's value.key shape.
-    assert (
-        _preferred_foot(
-            [{"translationKey": "preferred_foot", "value": {"key": "left", "fallback": "Left"}}],
-        )
-        == "left"
-    )
+    assert _preferred_foot(
+        [{
+            "translationKey": "preferred_foot",
+            "value": {"key": "left", "fallback": "Left"},
+        }],
+    ) == "left"
     # "right" and "both" round-trip.
-    assert (
-        _preferred_foot(
-            [{"translationKey": "preferred_foot", "value": {"key": "right", "fallback": "Right"}}],
-        )
-        == "right"
-    )
-    assert (
-        _preferred_foot(
-            [{"translationKey": "preferred_foot", "value": {"key": "both", "fallback": "Both"}}],
-        )
-        == "both"
-    )
+    assert _preferred_foot(
+        [{
+            "translationKey": "preferred_foot",
+            "value": {"key": "right", "fallback": "Right"},
+        }],
+    ) == "right"
+    assert _preferred_foot(
+        [{
+            "translationKey": "preferred_foot",
+            "value": {"key": "both", "fallback": "Both"},
+        }],
+    ) == "both"
     # Unknown key → "" (defensive; the model treats it as missing).
-    assert (
-        _preferred_foot(
-            [{"translationKey": "preferred_foot", "value": {"key": "switch", "fallback": "?"}}],
-        )
-        == ""
-    )
+    assert _preferred_foot(
+        [{
+            "translationKey": "preferred_foot",
+            "value": {"key": "switch", "fallback": "?"},
+        }],
+    ) == ""
     # No preferred_foot entry → "".
-    assert (
-        _preferred_foot([{"translationKey": "height_sentencecase", "value": {"numberValue": 180}}])
-        == ""
-    )
+    assert _preferred_foot(
+        [{
+            "translationKey": "height_sentencecase",
+            "value": {"numberValue": 180},
+        }],
+    ) == ""
     # Empty list → "".
     assert _preferred_foot([]) == ""
 
 
 def test_extract_player_metadata_handles_missing_preferred_foot() -> None:
     """
+    Handle missing preferred_foot in player page data.
+
     A player page with no `playerInformation[]` (or with the
     `preferred_foot` entry missing) yields `preferred_foot=""` (not
     a crash). The other C-group fields (position, birth date) are
@@ -277,13 +304,16 @@ def test_extract_player_metadata_handles_missing_preferred_foot() -> None:
                     "positionDescription": {"primaryPosition": {"key": "midfielder"}},
                     "birthDate": {"utcTime": "1990-01-01T00:00:00.000Z"},
                     "playerInformation": [
-                        {"translationKey": "height_sentencecase", "value": {"numberValue": 180}},
+                        {
+                            "translationKey": "height_sentencecase",
+                            "value": {"numberValue": 180},
+                        },
                     ],
                 },
             },
         },
     )
-    assert md.player_id == 42
+    assert md.player_id == 42  # noqa: PLR2004
     assert md.position_key == "midfielder"
     assert md.birth_date == "1990-01-01"
     assert md.preferred_foot == ""
@@ -294,7 +324,7 @@ def test_extract_player_metadata_missing_position() -> None:
     md = extract_player_metadata(
         {"pageProps": {"data": {"id": 42, "name": "Test", "birthDate": None}}},
     )
-    assert md.player_id == 42
+    assert md.player_id == 42  # noqa: PLR2004
     assert md.player_name == "Test"
     assert md.position_key == ""
     assert md.birth_date == ""
@@ -303,7 +333,15 @@ def test_extract_player_metadata_missing_position() -> None:
 def test_extract_player_metadata_handles_malformed_birthdate() -> None:
     """A malformed birthDate falls back to empty string (not a crash)."""
     md = extract_player_metadata(
-        {"pageProps": {"data": {"id": 42, "name": "Test", "birthDate": {"utcTime": "garbage"}}}},
+        {
+            "pageProps": {
+                "data": {
+                    "id": 42,
+                    "name": "Test",
+                    "birthDate": {"utcTime": "garbage"},
+                },
+            },
+        },
     )
     assert md.birth_date == ""
 
@@ -316,9 +354,9 @@ def test_extract_player_metadata_handles_malformed_birthdate() -> None:
 def test_iter_career_season_entries_yields_senior_and_national(
     sample_messi_player: Mapping[str, object],
 ) -> None:
-    """Messi's career history has 23 senior + 22 national team season entries = 45 total."""
+    """Messi's career history has 23 senior + 22 national team season entries."""
     entries = list(iter_career_season_entries(sample_messi_player))
-    assert len(entries) == 45
+    assert len(entries) == 45  # noqa: PLR2004
     # The first few entries are the most recent senior stints (Inter Miami, PSG).
     # We don't pin exact indices because FotMob may reorder; we just check
     # that the buckets are both present.
@@ -368,14 +406,16 @@ def test_iter_career_season_entries_skips_youth_bucket() -> None:
     }
     entries = list(iter_career_season_entries(payload))
     team_ids = {int(e.get("teamId") or 0) for e in entries}
-    assert 999 not in team_ids
-    assert 100 in team_ids
+    assert 999 not in team_ids  # noqa: PLR2004
+    assert 100 in team_ids  # noqa: PLR2004
 
 
 def test_iter_team_season_lookups_yields_one_per_tournament(
     sample_messi_player: Mapping[str, object],
 ) -> None:
     """
+    Verify TournamentStats become TeamSeasonLookup objects.
+
     Each season entry has multiple tournamentStats; each becomes a TeamSeasonLookup.
     Lookups without a `leagueId` (e.g. CONMEBOL Qualifiers) are skipped — we
     can't form a FotMob URL without one.
@@ -412,11 +452,18 @@ def test_iter_team_season_lookups_skips_stats_without_league_id() -> None:
 
 
 def _fixture(
-    match_id: int, home_id: int, away_id: int, home_name: str = "Home", away_name: str = "Away",
+    match_id: int,
+    home_id: int,
+    away_id: int,
+    home_name: str = "Home",
+    away_name: str = "Away",
 ) -> dict[str, object]:
     return {
         "id": str(match_id),
-        "pageUrl": f"/matches/{home_name.lower()}-vs-{away_name.lower()}/{match_id:06x}#{match_id}",
+        "pageUrl": (
+            f"/matches/{home_name.lower()}-vs-{away_name.lower()}"
+            f"/{match_id:06x}#{match_id}"
+        ),
         "home": {"id": str(home_id), "name": home_name},
         "away": {"id": str(away_id), "name": away_name},
         "status": {
@@ -437,7 +484,11 @@ def test_filter_fixtures_by_team_keeps_home_and_away() -> None:
 
 
 def test_filter_fixtures_by_team_drops_unknown_team() -> None:
-    """Fixtures with no home/away id (e.g. friendly metadata placeholders) are dropped."""
+    """
+    Fixtures with no home/away id are dropped.
+
+    e.g. friendly metadata placeholders.
+    """
     bad = {
         "id": "5",
         "pageUrl": "/matches/x/y#5",
@@ -459,6 +510,8 @@ def test_extract_penalties_from_2022_final_returns_two_messi_kicks(
     sample_2022_final: Mapping[str, object],
 ) -> None:
     """
+    Return both Messi penalty kicks from the 2022 WC Final.
+
     The 2022 final has 2 Messi penalty shots: one in-match (23') and
     one shootout (kick 2). Both should be returned.
     """
@@ -466,32 +519,36 @@ def test_extract_penalties_from_2022_final_returns_two_messi_kicks(
         sample_2022_final,
         player_id=30981,
         team_id=6706,
-        league_id=77,  # WC
+        league_id=77,
         league_name="World Cup",
     )
-    assert len(rows) == 2
+    assert len(rows) == 2  # noqa: PLR2004
     for row in rows:
         assert isinstance(row, PlayerPenalty)
-        assert row.kicker_id == 30981
-        assert row.match_id == 3370572
-        assert 0.0 <= row.x <= 2.0
+        assert row.kicker_id == 30981  # noqa: PLR2004
+        assert row.match_id == 3370572  # noqa: PLR2004
+        assert 0.0 <= row.x <= 2.0  # noqa: PLR2004
         assert row.side in {"L", "C", "R"}
         assert row.outcome in {"Goal", "Saved", "Missed"}
         assert row.shot_type in {"RightFoot", "LeftFoot"}
         assert row.is_home is True  # Argentina (team 6706) was home
-        assert row.league_id == 77
+        assert row.league_id == 77  # noqa: PLR2004
 
 
 def test_extract_penalties_from_2022_final_includes_in_match_and_shootout(
     sample_2022_final: Mapping[str, object],
 ) -> None:
     """
+    Verify both in-match and shootout kicks are counted.
+
     The two Messi kicks span two distinct `period` values. We don't
     assert on the period here (it isn't carried in the row), but the row
     count of 2 covers both the in-match penalty (23') and the shootout kick.
     """
-    rows = extract_player_penalties_from_match(sample_2022_final, 30981, 6706, 77, "World Cup")
-    assert len(rows) == 2
+    rows = extract_player_penalties_from_match(
+        sample_2022_final, 30981, 6706, 77, "World Cup",
+    )
+    assert len(rows) == 2  # noqa: PLR2004
 
 
 def test_extract_penalties_returns_empty_for_non_kicker(
@@ -512,6 +569,8 @@ def test_extract_penalties_uses_match_league_name_when_present(
     sample_2022_final: Mapping[str, object],
 ) -> None:
     """
+    Check that match league name wins over fallback parameter.
+
     The `league_name` parameter is a fallback; the match JSON's
     `general.leagueName` wins when present.
     """
@@ -555,9 +614,9 @@ def test_write_player_history_roundtrip(tmp_path: Path) -> None:
     with out.open() as f:
         for line in f:
             row = json.loads(line)
-            assert row["kicker_id"] == 30981
+            assert row["kicker_id"] == 30981  # noqa: PLR2004
             assert row["side"] == "L"
-            assert row["x"] == 0.5
+            assert row["x"] == 0.5  # noqa: PLR2004
 
 
 # ---------------------------------------------------------------------------
@@ -578,7 +637,9 @@ def _build_minimal_player_page(player_id: int) -> dict[str, object]:
         "id": player_id,
         "name": "Stub Player",
         "birthDate": {"utcTime": "1990-01-01T00:00:00.000Z", "timezone": "UTC"},
-        "positionDescription": {"primaryPosition": {"key": "striker", "label": "Striker"}},
+        "positionDescription": {
+            "primaryPosition": {"key": "striker", "label": "Striker"},
+        },
         "careerHistory": {
             "careerItems": {
                 "senior": {
@@ -604,7 +665,7 @@ def _build_minimal_player_page(player_id: int) -> dict[str, object]:
     }
 
 
-def _build_minimal_match(
+def _build_minimal_match(  # noqa: PLR0913
     match_id: int,
     *,
     utc_time: str = "2020-06-15T19:00:00Z",
@@ -651,9 +712,12 @@ def _build_minimal_match(
 
 
 def test_orchestrator_yields_penalty_from_canned_match(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,  # noqa: ARG001
 ) -> None:
     """
+    End-to-end test: stub serves player + league + match, yields one penalty.
+
     End-to-end: the stub client serves a player page + one league
     season + one match. The orchestrator should yield that one penalty.
     """
@@ -692,7 +756,7 @@ def test_orchestrator_yields_penalty_from_canned_match(
     row = rows[0]
     assert row.kicker_id == player_id
     assert row.match_id == match_id
-    assert row.x == 0.5
+    assert row.x == 0.5  # noqa: PLR2004
     assert row.side == "L"
     assert row.outcome == "Goal"
     assert row.shot_type == "RightFoot"
@@ -700,9 +764,12 @@ def test_orchestrator_yields_penalty_from_canned_match(
 
 
 def test_orchestrator_skips_match_outside_lookback_window(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,  # noqa: ARG001
 ) -> None:
     """
+    Skip match outside the lookback window.
+
     A match dated before the lookback window is silently skipped
     (we never even fetch the match JSON).
     """
@@ -760,9 +827,12 @@ def test_orchestrator_skips_match_outside_lookback_window(
 
 
 def test_orchestrator_skips_stale_url_match(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,  # noqa: ARG001
 ) -> None:
     """
+    Skip stale URL match with non-matching matchId.
+
     A (seo, h2h) hash that points to a different matchId in the
     response is skipped silently, like in the shootout pipeline.
     """
@@ -804,9 +874,12 @@ def test_orchestrator_skips_stale_url_match(
 
 
 def test_orchestrator_dedupes_team_season_lookups(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,  # noqa: ARG001
 ) -> None:
     """
+    Dedupe identical team/league/season lookups to one fixture fetch.
+
     Two season entries that map to the same (team, league, season)
     are deduped to a single fixture fetch.
     """
@@ -814,7 +887,11 @@ def test_orchestrator_dedupes_team_season_lookups(
     fetch_count = {"n": 0}
     match_id = 55555
 
-    def fake_get(self: FotMobClient, path: str, params: dict | None = None) -> Any:
+    def fake_get(
+        _self: FotMobClient,
+        path: str = "",
+        params: dict | None = None,  # noqa: ARG001
+    ) -> Any:  # noqa: ANN401
         if path.startswith("players/"):
             return {
                 "pageProps": {
@@ -893,9 +970,13 @@ def test_orchestrator_dedupes_team_season_lookups(
         msg = f"unknown path: {path}"
         raise AssertionError(msg)
 
-    from twelveyards.fotmob import client as client_module
+    from twelveyards.fotmob import client as client_module  # noqa: PLC0415
 
-    monkeypatch.setattr(client_module.FotMobClient, "_discover_build_id", lambda self: "stub-build")
+    monkeypatch.setattr(
+        client_module.FotMobClient,
+        "_discover_build_id",
+        lambda _self: "stub-build",
+    )
     monkeypatch.setattr(client_module.FotMobClient, "get", fake_get)
     client = FotMobClient()
     list(

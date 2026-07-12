@@ -38,7 +38,7 @@ def fetch_and_write_roster(
     return Artifacts().write_roster(rows, path=output_path)
 
 
-def fetch_and_write_initial_set(
+def fetch_and_write_initial_set(  # noqa: PLR0913
     client: FotMobClient,
     roster_path: Path,
     output_path: Path,
@@ -128,8 +128,8 @@ def predict(
             metadata = extract_player_metadata(payload)
             if metadata is not None:
                 metadata_by_id[kicker_id] = metadata
-        except Exception:
-            pass
+        except Exception:  # noqa: S110, BLE001
+            pass  # skip players whose metadata fetch fails
 
     rows = predict_and_write(
         roster, player_history, metadata_by_id,

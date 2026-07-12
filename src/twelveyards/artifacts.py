@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from .fotmob.client import FotMobClient
 from .scraper.initial_set import MissingKicker
@@ -36,7 +36,7 @@ class PredictionRow:
 
 def _write_jsonl(
     path: Path,
-    rows: Iterable[Any],
+    rows: Iterable[object],
     *,
     nan_to_null: bool = False,
 ) -> int:
@@ -50,7 +50,7 @@ def _write_jsonl(
     return count
 
 
-def _serialize_row(row: Any, *, nan_to_null: bool = False) -> str:
+def _serialize_row(row: object, *, nan_to_null: bool = False) -> str:
     payload = asdict(row)
     return json.dumps(payload, ensure_ascii=False, allow_nan=(not nan_to_null))
 
@@ -152,6 +152,6 @@ class Artifacts:
         """Return a FotMobClient instance."""
         return FotMobClient()
 
-    def serialize_row(self, row: Any, *, nan_to_null: bool = False) -> str:
+    def serialize_row(self, row: object, *, nan_to_null: bool = False) -> str:
         """Serialize a dataclass row as a JSON string for streaming writes."""
         return _serialize_row(row, nan_to_null=nan_to_null)

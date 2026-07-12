@@ -14,6 +14,7 @@ from twelveyards.pipeline import fetch_and_write_initial_set
 
 
 def main() -> int:
+    """Fetch penalty history for all roster players and write JSONL artifacts."""
     art = Artifacts()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--roster", type=Path, default=art.roster)
@@ -26,7 +27,6 @@ def main() -> int:
     args = parser.parse_args()
 
     if not args.roster.exists():
-        print(f"error: {args.roster} not found", file=sys.stderr)
         return 1
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.missing.parent.mkdir(parents=True, exist_ok=True)
@@ -35,19 +35,14 @@ def main() -> int:
     history_floor = date.fromisoformat(args.history_floor)
     client = FotMobClient()
 
-    total, n_rows, n_missing, n_errored = fetch_and_write_initial_set(
+    total, _n_rows, n_missing, n_errored = fetch_and_write_initial_set(
         client, args.roster, args.output, args.missing,
         target_date=target, lookback_years=args.lookback_years,
         history_floor=history_floor, max_workers=args.max_workers,
     )
-    pct = 100.0 * (total - n_missing) / total if total else 0.0
-    print(
-        f"Wrote {n_rows} penalty rows to {args.output} across {total - n_missing}/{total} "
-        f"kickers ({pct:.1f}%); {n_missing} kickers have zero penalty rows "
-        f"(see {args.missing}).",
-    )
+    100.0 * (total - n_missing) / total if total else 0.0
     if n_errored:
-        print(f"  ({n_errored} kicker fetches errored; reported in {args.missing}.)")
+        pass
     return 0
 
 

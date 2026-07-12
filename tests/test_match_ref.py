@@ -19,8 +19,14 @@ from twelveyards.fotmob.match_ref import MatchRef, parse_page_url
 @pytest.mark.parametrize(
     ("page_url", "expected"),
     [
-        ("/matches/japan-vs-croatia/2cq9vk#3370555", (3370555, "japan-vs-croatia", "2cq9vk")),
-        ("/matches/argentina-vs-france/1hox8a#3370572", (3370572, "argentina-vs-france", "1hox8a")),
+        (
+            "/matches/japan-vs-croatia/2cq9vk#3370555",
+            (3370555, "japan-vs-croatia", "2cq9vk"),
+        ),
+        (
+            "/matches/argentina-vs-france/1hox8a#3370572",
+            (3370572, "argentina-vs-france", "1hox8a"),
+        ),
         (
             "/matches/argentina-vs-netherlands/1hklvd#3370566",
             (3370566, "argentina-vs-netherlands", "1hklvd"),
@@ -31,21 +37,23 @@ from twelveyards.fotmob.match_ref import MatchRef, parse_page_url
         ),
     ],
 )
-def test_parse_page_url_extracts_id_seo_h2h(page_url: str, expected: tuple[int, str, str]) -> None:
+def test_parse_page_url_extracts_id_seo_h2h(  # noqa: D103
+    page_url: str, expected: tuple[int, str, str],
+) -> None:
     assert parse_page_url(page_url) == expected
 
 
-def test_parse_page_url_no_anchor_raises() -> None:
+def test_parse_page_url_no_anchor_raises() -> None:  # noqa: D103
     with pytest.raises(ValueError, match="anchor"):
         parse_page_url("/matches/argentina-vs-france/1hox8a")
 
 
-def test_parse_page_url_bad_path_raises() -> None:
+def test_parse_page_url_bad_path_raises() -> None:  # noqa: D103
     with pytest.raises(ValueError, match="did not match"):
         parse_page_url("/something/else/1hox8a#3370572")
 
 
-def test_parse_page_url_no_anchor_in_path_raises() -> None:
+def test_parse_page_url_no_anchor_in_path_raises() -> None:  # noqa: D103
     with pytest.raises(ValueError, match="anchor"):
         parse_page_url("just-a-string")
 
@@ -70,12 +78,12 @@ def test_from_fixture_populates_shootout_fields() -> None:
     }
     ref = MatchRef.from_fixture(fixture)
     assert ref is not None
-    assert ref.match_id == 3370572
+    assert ref.match_id == 3370572  # noqa: PLR2004
     assert ref.seo == "argentina-vs-france"
     assert ref.h2h == "1hox8a"
-    assert ref.home_team_id == 6706
+    assert ref.home_team_id == 6706  # noqa: PLR2004
     assert ref.home_team_name == "Argentina"
-    assert ref.away_team_id == 9825
+    assert ref.away_team_id == 9825  # noqa: PLR2004
     assert ref.away_team_name == "France"
     assert ref.round_name == "Final"
     assert ref.match_date == "2022-12-18T15:00:00Z"
@@ -139,8 +147,8 @@ def test_from_fixture_coerces_string_team_ids() -> None:
     }
     ref = MatchRef.from_fixture(fixture)
     assert ref is not None
-    assert ref.home_team_id == 12345
-    assert ref.away_team_id == 67890
+    assert ref.home_team_id == 12345  # noqa: PLR2004
+    assert ref.away_team_id == 67890  # noqa: PLR2004
 
 
 def test_from_fixture_coerces_unparseable_team_ids_to_zero() -> None:
@@ -153,4 +161,4 @@ def test_from_fixture_coerces_unparseable_team_ids_to_zero() -> None:
     ref = MatchRef.from_fixture(fixture)
     assert ref is not None
     assert ref.home_team_id == 0
-    assert ref.away_team_id == 200
+    assert ref.away_team_id == 200  # noqa: PLR2004

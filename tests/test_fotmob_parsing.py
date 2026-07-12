@@ -48,7 +48,7 @@ def test_coerce_int_unparseable_returns_zero(value: object) -> None:
 
 
 @pytest.mark.parametrize("value", [True, False])
-def test_coerce_int_bool_returns_zero(value: bool) -> None:
+def test_coerce_int_bool_returns_zero(value: bool) -> None:  # noqa: FBT001
     """
     Bools are not accepted as ints — returning 0 is the safe default.
 
@@ -64,7 +64,10 @@ def test_coerce_int_bool_returns_zero(value: bool) -> None:
 
 def test_parse_match_date_rfc_2822() -> None:
     """Match-detail pages return RFC 2822 (e.g. 'Sun, Dec 18, 2022, 15:00 UTC')."""
-    assert parse_match_date("Sun, Dec 18, 2022, 15:00 UTC") == "2022-12-18T15:00:00+00:00"
+    assert (
+        parse_match_date("Sun, Dec 18, 2022, 15:00 UTC")
+        == "2022-12-18T15:00:00+00:00"
+    )
 
 
 def test_parse_match_date_iso_8601() -> None:

@@ -91,7 +91,9 @@ def _iter_roster_players(
     fixtures = fetch_season_fixtures(client, league, season)
     for ref in iter_roster_match_refs(fixtures):
         data = client.get(f"matches/{ref.seo}/{ref.h2h}")
-        page_match_id = coerce_int((data.get("pageProps") or {}).get("general", {}).get("matchId"))
+        page_props = data.get("pageProps") or {}
+        general = page_props.get("general") or {}
+        page_match_id = coerce_int(general.get("matchId"))
         if page_match_id and page_match_id != ref.match_id:
             # Stale (seo, h2h) hash — skip silently.
             continue
@@ -152,7 +154,8 @@ def extract_lineup_players(
         if not team_block:
             # Placeholder knockout-round match — skip.
             continue
-        for player in (*(team_block.get("starters") or []), *(team_block.get("subs") or [])):
+        players = (*(team_block.get("starters") or []), *(team_block.get("subs") or []))
+        for player in players:
             player_id = coerce_int(player.get("id"))
             if not player_id:
                 continue

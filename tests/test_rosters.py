@@ -24,9 +24,8 @@ from __future__ import annotations
 
 import gzip
 import json
-from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -41,10 +40,14 @@ from twelveyards.scraper.rosters import (
     iter_roster_match_refs,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SAMPLE_LEAGUE_PATH = REPO_ROOT / "docs" / "samples" / "league_wc_2026_slim.json"
 SAMPLE_MATCH_PATH = (
-    REPO_ROOT / "docs" / "samples" / "match_4667751_wc2026_mexico_vs_south_africa.json.gz"
+    REPO_ROOT / "docs" / "samples"
+    / "match_4667751_wc2026_mexico_vs_south_africa.json.gz"
 )
 
 
@@ -55,7 +58,7 @@ SAMPLE_MATCH_PATH = (
 
 @pytest.fixture(scope="module")
 def sample_wc_2026_league() -> Mapping[str, Any]:
-    """The slim WC 2026 league fixture list (3 matches, including a placeholder)."""
+    """Return the slim WC 2026 league fixture list."""
     if not SAMPLE_LEAGUE_PATH.exists():
         pytest.skip(f"Sample not present at {SAMPLE_LEAGUE_PATH}")
     return json.loads(SAMPLE_LEAGUE_PATH.read_text())
@@ -63,7 +66,7 @@ def sample_wc_2026_league() -> Mapping[str, Any]:
 
 @pytest.fixture(scope="module")
 def sample_wc_2026_match() -> Mapping[str, Any]:
-    """The trimmed WC 2026 Mexico vs South Africa match JSON (lineup only)."""
+    """Return the trimmed WC 2026 Mexico vs South Africa match JSON (lineup only)."""
     if not SAMPLE_MATCH_PATH.exists():
         pytest.skip(f"Sample not present at {SAMPLE_MATCH_PATH}")
     return json.loads(gzip.decompress(SAMPLE_MATCH_PATH.read_bytes()))
@@ -79,7 +82,9 @@ def _stub_client(
     urls_seen: list[str] = []
     match_iter = iter(matches)
 
-    def fake_get(self: FotMobClient, path: str, params: dict | None = None) -> Any:
+    def fake_get(
+        _self: FotMobClient, path: str, params: dict | None = None,
+    ) -> Any:  # noqa: ANN401
         urls_seen.append(f"{path}?{params or {}}")
         if path.startswith("leagues/"):
             return league_fixtures
@@ -92,9 +97,11 @@ def _stub_client(
         msg = f"stub: unknown path {path!r}"
         raise AssertionError(msg)
 
-    from twelveyards.fotmob import client as client_module
+    from twelveyards.fotmob import client as client_module  # noqa: PLC0415
 
-    monkeypatch.setattr(client_module.FotMobClient, "_discover_build_id", lambda self: "stub-build")
+    monkeypatch.setattr(
+        client_module.FotMobClient, "_discover_build_id", lambda _self: "stub-build",
+    )
     monkeypatch.setattr(client_module.FotMobClient, "get", fake_get)
     return urls_seen
 
@@ -106,9 +113,9 @@ def _stub_client(
 
 def test_wc_2026_league_constant() -> None:
     """WC 2026 = FotMob leagueId 77, slug 'world-cup'."""
-    assert WC_2026_LEAGUE.league_id == 77
+    assert WC_2026_LEAGUE.league_id == 77  # noqa: PLR2004
     assert WC_2026_LEAGUE.slug == "world-cup"
-    assert WC_2026_SEASON == 2026
+    assert WC_2026_SEASON == 2026  # noqa: PLR2004
     # The constant is the same League object that lives in LEAGUE_BY_ID.
     assert LEAGUE_BY_ID[77] is WC_2026_LEAGUE
 
@@ -124,7 +131,7 @@ def test_iter_roster_match_refs_yields_one_per_match(
     """The slim fixture has 3 matches — 2 real group-stage + 1 knockout placeholder."""
     fixtures = sample_wc_2026_league["pageProps"]["fixtures"]["allMatches"]
     refs = list(iter_roster_match_refs(fixtures))
-    assert len(refs) == 3
+    assert len(refs) == 3  # noqa: PLR2004
     for ref in refs:
         assert isinstance(ref, MatchRef)
         assert ref.match_id > 0
@@ -140,7 +147,8 @@ def test_iter_roster_match_refs_skips_placeholder_match(
     sample_wc_2026_league: Mapping[str, Any],
 ) -> None:
     """
-    The 3rd match in the slim fixture is a knockout placeholder match;
+    The 3rd match in the slim fixture is a knockout placeholder match.
+
     it is still included in the refs (it carries a real (seo, h2h)),
     but `extract_lineup_players` on its lineup payload will yield zero
     rows because the home/away team blocks are empty.
@@ -182,7 +190,11 @@ def test_iter_roster_match_refs_skips_fixtures_without_team_ids() -> None:
 def test_iter_roster_match_refs_skips_malformed_page_url() -> None:
     """A fixture with an unparseable `pageUrl` is skipped, not crashed."""
     fixtures = [
-        {"pageUrl": "garbage", "home": {"id": "1", "name": "A"}, "away": {"id": "2", "name": "B"}},
+        {
+            "pageUrl": "garbage",
+            "home": {"id": "1", "name": "A"},
+            "away": {"id": "2", "name": "B"},
+        },
     ]
     refs = list(iter_roster_match_refs(fixtures))
     assert refs == []
@@ -208,11 +220,11 @@ def test_extract_lineup_players_mexico_vs_south_africa(
         away_team_name="South Africa",
     )
     rows = list(extract_lineup_players(lineup, ref))
-    assert len(rows) == 52  # 26 per team * 2 teams
+    assert len(rows) == 52  # noqa: PLR2004  # 26 per team * 2 teams
     # Spot-check the first Mexico player.
     first = rows[0]
     assert isinstance(first, RosterPlayer)
-    assert first.team_id == 6710
+    assert first.team_id == 6710  # noqa: PLR2004
     assert first.team_name == "Mexico"
     assert first.player_id > 0
     assert first.player_name
@@ -220,14 +232,15 @@ def test_extract_lineup_players_mexico_vs_south_africa(
     # Spot-check the first South Africa player (after 26 Mexico rows).
     # FotMob uses "RSA" for South Africa (not the standard ISO ZAF).
     first_away = rows[26]
-    assert first_away.team_id == 6316
+    assert first_away.team_id == 6316  # noqa: PLR2004
     assert first_away.team_name == "South Africa"
     assert first_away.country_code == "RSA"
 
 
 def test_extract_lineup_players_empty_lineup() -> None:
     """
-    A placeholder knockout match has an empty `homeTeam`/`awayTeam` block;
+    A placeholder knockout match has an empty `homeTeam`/`awayTeam` block.
+
     the iterator yields zero rows.
     """
     lineup = {"homeTeam": {}, "awayTeam": {}}
@@ -266,14 +279,15 @@ def test_extract_lineup_players_missing_country_code() -> None:
     )
     rows = list(extract_lineup_players(lineup, ref))
     assert len(rows) == 1
-    assert rows[0].player_id == 42
+    assert rows[0].player_id == 42  # noqa: PLR2004
     assert rows[0].player_name == "Test Player"
     assert rows[0].country_code == ""
 
 
 def test_extract_lineup_players_skips_zero_id() -> None:
     """
-    A player with no `id` (or id=0) is silently skipped — we can't dedupe it
+    A player with no `id` (or id=0) is silently skipped.
+
     downstream without an id, so dropping it is the right move.
     """
     lineup = {
@@ -324,7 +338,7 @@ def test_write_and_read_jsonl_roundtrip(tmp_path: Path) -> None:
     ]
     art = Artifacts(root=tmp_path)
     n = art.write_roster(rows, path=path)
-    assert n == 2
+    assert n == 2  # noqa: PLR2004
     out = art.read_roster(path=path)
     assert out == rows
 
@@ -336,7 +350,7 @@ def test_write_and_read_jsonl_roundtrip(tmp_path: Path) -> None:
 
 def test_fetch_wc_2026_roster_dedupes_across_matches(
     monkeypatch: pytest.MonkeyPatch,
-    sample_wc_2026_league: Mapping[str, Any],
+    sample_wc_2026_league: Mapping[str, Any],  # noqa: ARG001
     sample_wc_2026_match: Mapping[str, Any],
 ) -> None:
     """
@@ -377,9 +391,9 @@ def test_fetch_wc_2026_roster_dedupes_across_matches(
     client = FotMobClient()
     rows = list(fetch_wc_2026_roster(client, WC_2026_LEAGUE, WC_2026_SEASON))
     # 52 rows per match, deduped to 52 unique players.
-    assert len(rows) == 52
+    assert len(rows) == 52  # noqa: PLR2004
     # Sanity: the URLs were hit (1 league + 2 match calls).
-    assert sum(1 for u in urls_seen if u.startswith("matches/")) == 2
+    assert sum(1 for u in urls_seen if u.startswith("matches/")) == 2  # noqa: PLR2004
     assert sum(1 for u in urls_seen if u.startswith("leagues/")) == 1
 
 
@@ -389,14 +403,20 @@ def test_fetch_wc_2026_roster_skips_stale_h2h(
     sample_wc_2026_match: Mapping[str, Any],
 ) -> None:
     """
-    If the per-match response's matchId differs from the ref's matchId
-    (stale (seo, h2h) hash), the match is skipped silently.
+    The match is skipped when its response matchId is stale.
+
+    The mismatch is detected via a stale (seo, h2h) hash.
     """
     # Build a match payload whose general.matchId is different from any ref.
     tampered = {
         "pageProps": {
-            "general": {**sample_wc_2026_match["pageProps"]["general"], "matchId": 99999999},
-            "content": {"lineup": sample_wc_2026_match["pageProps"]["content"]["lineup"]},
+            "general": {
+                **sample_wc_2026_match["pageProps"]["general"],
+                "matchId": 99999999,
+            },
+            "content": {
+                "lineup": sample_wc_2026_match["pageProps"]["content"]["lineup"],
+            },
         },
     }
     # The league has 3 refs; we return the tampered payload for all 3.
@@ -410,4 +430,4 @@ def test_fetch_wc_2026_roster_skips_stale_h2h(
     rows = list(fetch_wc_2026_roster(client, WC_2026_LEAGUE, WC_2026_SEASON))
     assert len(rows) == 0
     # Sanity: the stub was called once per ref (3 match calls + 1 league call).
-    assert sum(1 for u in urls_seen if u.startswith("matches/")) == 3
+    assert sum(1 for u in urls_seen if u.startswith("matches/")) == 3  # noqa: PLR2004
