@@ -39,15 +39,8 @@ jobs:
       - name: Install Python dependencies
         run: uv sync --group dev
 
-      - name: Install hf CLI
-        run: curl -LsSf https://hf.co/cli/install.sh | bash -s
-
-      - name: Add hf to PATH
-        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
       - name: Run ralph
         run: bash ralph.sh
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}

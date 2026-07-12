@@ -51,6 +51,26 @@ The file exists locally at `.github/workflows/scrape-and-predict.yml` but cannot
 
 ## Iteration 3 — Add foot pill to kicker cards
 
+## 2026-07-12 — Scrape-and-predict workflow + HF removal + data artifacts (PRD #4, #5, #18-21)
+
+**Task**: Create the missing scrape-and-predict.yml workflow, remove remaining HF CLI from ralph.yml, and generate initial data artifacts.
+
+**PRD items**: #4 (GitHub storage, drop HF), #5 (scrape-and-predict.yml), #18-21 (workflow details), data artifacts generation
+
+**Key decisions**:
+- scrape-and-predict.yml: single job, daily cron 06:00 UTC + workflow_dispatch, split actions/cache/restore + save with run_id keys and fotmob-cache- prefix restore-keys, uv sync --no-dev (all deps in [project] since PEP 735 groups omitted for Streamlit Cloud compat), TABPFN_TOKEN from secrets, commit artifacts with github-actions[bot] identity, cache save uses if: always()
+- ralph.yml: removed hf CLI install steps (3 lines) and HF_TOKEN env var — HuggingFace is fully dropped (PRD #4)
+- Generated wc2026_roster.jsonl (1248 players from FotMob), player_history.jsonl (129 penalty rows, partial scrape before timeout), predictions.jsonl (1248 rows: 77 with penalty history from TabPFN, 1171 with uniform prior). Full population will happen on the first Actions pipeline run with warm cache.
+- TabPFN fit+predict confirmed working end-to-end: 129 training rows → 1248 test rows in ~6s fit + ~3s predict. Confirms the model pipeline (train matrix from player_history → TabPFN → predictions.jsonl) is operational.
+
+**Files changed**: `.github/workflows/scrape-and-predict.yml` (new), `.github/workflows/ralph.yml` (modified), `data/wc2026_roster.jsonl` (new), `data/player_history.jsonl` (new, partial), `data/predictions.jsonl` (new), `progress.txt` (modified)
+
+**Blockers**: None. All feedback loops pass (ruff clean, ty clean, 261 tests pass). The remaining blocker from Iteration 7 (GH_TOKEN lacks workflows permission for pushing workflow files) still applies for the push step — this commit needs a token with workflows:write scope.
+
+**Status**: Ready to commit and push. First pipeline run will backfill full player_history.jsonl (cold cache, ~15-20 mins) and overwrite predictions.jsonl with fully populated predictions.
+
+## 2026-07-11 — PRD-v5 completion assessment
+
 **PRD reference:** Item 24 (card layout: name + foot pill + penalty count + bar chart)
 
 **Completed:** Enhanced `render_card()` in app.py to display a color-coded foot pill.
