@@ -94,10 +94,40 @@ def _badge_color(team_name: str) -> _BadgeColor:
     return _TEAM_COLORS.get(team_name, _NEUTRAL_COLOR)
 
 
+def _foot_label(kicking_foot: str) -> str:
+    """Return a short label for the foot pill."""
+    foot = kicking_foot.strip().lower()
+    if foot == "right":
+        return "R"
+    if foot == "left":
+        return "L"
+    if foot == "both":
+        return "L/R"
+    return ""
+
+def _foot_color(kicking_foot: str) -> _BadgeColor:
+    foot = kicking_foot.strip().lower()
+    if foot == "right":
+        return "blue"
+    if foot == "left":
+        return "orange"
+    if foot == "both":
+        return "green"
+    return "gray"
+
+
 def render_card(kicker: KickerPrediction) -> None:
     """Render one kicker's predictions as a Streamlit card with a bar chart."""
     with st.container(border=True):
-        st.markdown(f"**{kicker.player_name}** · {kicker.total_penalties} pen")
+        foot = _foot_label(kicker.kicking_foot)
+        if foot:
+            st.markdown(
+                f"**{kicker.player_name}** "
+                f":{_foot_color(kicker.kicking_foot)}[{foot}] "
+                f"· {kicker.total_penalties} pen",
+            )
+        else:
+            st.markdown(f"**{kicker.player_name}** · {kicker.total_penalties} pen")
         df = pd.DataFrame(
             {"probability": [kicker.p_L * 100, kicker.p_C * 100, kicker.p_R * 100]},
             index=pd.Index(["Left", "Center", "Right"]),
