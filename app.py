@@ -2,20 +2,18 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 import pandas as pd
 import streamlit as st
 
 from twelveyards.artifacts import Artifacts
-from twelveyards.dashboard import (
-    KickerPrediction,
-    distinct_teams,
-    predictions_for_match,
-)
 
 if TYPE_CHECKING:
-    from twelveyards.player_history import PlayerPenalty
+    from collections.abc import Iterable
+
+    from twelveyards.artifacts import PredictionRow
 
 _BadgeColor = Literal[
     "red", "orange", "yellow", "blue", "green", "violet", "gray", "grey", "primary",
@@ -55,8 +53,25 @@ _TEAM_COLORS: dict[str, _BadgeColor] = {
 _NEUTRAL_COLOR: _BadgeColor = "gray"
 
 
-@st.cache_data(show_spinner="Loading predictions…")
-def load_predictions() -> list:
+@dataclass(frozen=True)
+class KickerPrediction:
+    """One kicker's predicted side distribution, prepared for card rendering."""
+
+    player_id: int
+    player_name: str
+    short_name: str
+    team_id: int
+    team_name: str
+    kicking_foot: str
+    photo_url: str
+    total_penalties: int
+    p_L: float  # noqa: N815
+    p_C: float  # noqa: N815
+    p_R: float  # noqa: N815
+    recommended_dive: str
+
+
+def load_predictions() -> list[PredictionRow]:
     """Load predictions.jsonl from the working tree and return deserialized rows."""
     art = Artifacts()
     path = art.predictions
@@ -65,32 +80,65 @@ def load_predictions() -> list:
     return art.read_predictions()
 
 
-@st.cache_data
-def get_distinct_teams() -> list[tuple[int, str]]:
-    """Extract distinct (team_id, team_name) pairs from predictions."""
-    predictions = load_predictions()
-    return distinct_teams(predictions)
+def predictions_for_match(
+    predictions: Iterable[PredictionRow],
+    home_team_id: int,
+    away_team_id: int,
+) -> tuple[list[KickerPrediction], list[KickerPrediction]]:
+    """Filter predictions into (home, away) KickerPrediction lists."""
+    home_rows: list[KickerPrediction] = []
+    away_rows: list[KickerPrediction] = []
+    for r in predictions:
+        pred = KickerPrediction(
+            player_id=r.player_id,
+            player_name=r.player_name,
+            short_name=r.short_name,
+            team_id=r.team_id,
+            team_name=r.team_name,
+            kicking_foot=r.kicking_foot,
+            photo_url=r.photo_url,
+            total_penalties=r.total_penalties,
+            p_L=r.p_L,
+            p_C=r.p_C,
+            p_R=r.p_R,
+            recommended_dive=recommended_dive(r.p_L, r.p_C, r.p_R),
+        )
+        if r.team_id == home_team_id:
+            home_rows.append(pred)
+        elif r.team_id == away_team_id:
+            away_rows.append(pred)
+    home_rows.sort(key=lambda k: (-k.total_penalties, k.player_name))
+    away_rows.sort(key=lambda k: (-k.total_penalties, k.player_name))
+    return home_rows, away_rows
 
 
-@st.cache_data(show_spinner="Loading player history…")
-def load_player_history() -> dict[int, list]:
-    """Load player_history.jsonl and group penalties by kicker_id."""
-    art = Artifacts()
-    path = art.player_history
-    if not path.exists():
-        return {}
-    rows = art.read_player_history()
-    grouped: dict[int, list[PlayerPenalty]] = {}
-    for row in rows:
-        grouped.setdefault(row.kicker_id, []).append(row)
-    return grouped
+def recommended_dive(p_l: float, p_c: float, p_r: float) -> str:
+    """Return the side the kicker is least likely to aim for."""
+    minimum = min(p_l, p_c, p_r)
+    for side, value in (("L", p_l), ("C", p_c), ("R", p_r)):
+        if value == minimum:
+            return side
+    return "L"
 
 
-def _badge_color(team_name: str) -> _BadgeColor:
+def distinct_teams(predictions: Iterable[PredictionRow]) -> list[tuple[int, str]]:
+    """Return sorted distinct (team_id, team_name) pairs from predictions."""
+    seen: set[int] = set()
+    teams: list[tuple[int, str]] = []
+    for r in predictions:
+        if r.team_id not in seen:
+            seen.add(r.team_id)
+            teams.append((r.team_id, r.team_name))
+    teams.sort(key=lambda t: t[1])
+    return teams
+
+
+def badge_color(team_name: str) -> _BadgeColor:
+    """Return the color associated with a team for badge rendering."""
     return _TEAM_COLORS.get(team_name, _NEUTRAL_COLOR)
 
 
-def _foot_label(kicking_foot: str) -> str:
+def foot_label(kicking_foot: str) -> str:
     """Return a short label for the foot pill."""
     foot = kicking_foot.strip().lower()
     if foot == "right":
@@ -101,7 +149,9 @@ def _foot_label(kicking_foot: str) -> str:
         return "L/R"
     return ""
 
-def _foot_color(kicking_foot: str) -> _BadgeColor:
+
+def foot_color(kicking_foot: str) -> _BadgeColor:
+    """Return the theme color associated with a kicking foot."""
     foot = kicking_foot.strip().lower()
     if foot == "right":
         return "blue"
@@ -112,14 +162,26 @@ def _foot_color(kicking_foot: str) -> _BadgeColor:
     return "gray"
 
 
+@st.cache_data(show_spinner="Loading predictions…")
+def _cached_load_predictions() -> list[PredictionRow]:
+    """Cache and load predictions using library logic."""
+    return load_predictions()
+
+
+@st.cache_data
+def _cached_distinct_teams() -> list[tuple[int, str]]:
+    """Cache and extract distinct (team_id, team_name) pairs."""
+    return distinct_teams(_cached_load_predictions())
+
+
 def render_card(kicker: KickerPrediction) -> None:
     """Render one kicker's predictions as a Streamlit card with a bar chart."""
     with st.container(border=True):
-        foot = _foot_label(kicker.kicking_foot)
-        if foot:
+        label = foot_label(kicker.kicking_foot)
+        if label:
             st.markdown(
                 f"**{kicker.player_name}** "
-                f":{_foot_color(kicker.kicking_foot)}[{foot}] "
+                f":{foot_color(kicker.kicking_foot)}[{label}] "
                 f"· {kicker.total_penalties} pen",
             )
         else:
@@ -137,8 +199,7 @@ def render_team_block(
     heading: str,
 ) -> None:
     """Render all kicker cards for one team with a heading badge."""
-    color = _badge_color(heading)
-    st.badge(heading.upper(), color=color)
+    st.badge(heading.upper(), color=badge_color(heading))
     for k in kickers:
         render_card(k)
 
@@ -153,7 +214,7 @@ def main() -> None:
     st.sidebar.title("12yd")
     st.sidebar.caption("Penalty shootout side prediction.")
 
-    teams = get_distinct_teams()
+    teams = _cached_distinct_teams()
     if not teams:
         st.sidebar.warning("No predictions found. Run the pipeline first.")
         return
@@ -167,7 +228,7 @@ def main() -> None:
     team_a_id = team_options[team_a_name]
     team_b_id = team_options[team_b_name]
 
-    predictions = load_predictions()
+    predictions = _cached_load_predictions()
     home_kickers, away_kickers = predictions_for_match(
         predictions, team_a_id, team_b_id,
     )

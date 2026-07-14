@@ -1416,6 +1416,7 @@ dependencies = [
     { name = "numpy" },
     { name = "packaging" },
     { name = "pandas" },
+    { name = "pydantic" },
     { name = "streamlit" },
     { name = "tabpfn-client" },
 ]
@@ -1433,6 +1434,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.0" },
     { name = "packaging", specifier = ">=24.0" },
     { name = "pandas", specifier = ">=2.0" },
+    { name = "pydantic", specifier = ">=2.13.4" },
     { name = "streamlit", specifier = ">=1.30" },
     { name = "tabpfn-client", specifier = ">=0.3" },
 ]

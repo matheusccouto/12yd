@@ -7,13 +7,60 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .fotmob.client import FotMobClient
-from .scraper.initial_set import MissingKicker
-from .scraper.player_history import PlayerPenalty
-from .scraper.rosters import RosterPlayer
+from .fotmob.client import FotMob
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+
+@dataclass(frozen=True)
+class PlayerPenalty:
+    """One penalty kick (shootout or in-match) by a Kicker in a given match."""
+
+    kicker_id: int
+    match_id: int
+    match_date: str  # ISO 8601 (UTC)
+    league_id: int
+    league_name: str
+    team_id: int
+    is_home: bool
+    x: float  # [0, 2]
+    side: str  # "L" | "C" | "R"
+    is_on_target: bool
+    outcome: str  # "Goal" | "Saved" | "Missed"
+    shot_type: str  # "RightFoot" | "LeftFoot"
+
+
+@dataclass(frozen=True)
+class PlayerMetadata:
+    """Player metadata stored from FotMob profile pages."""
+
+    player_id: int
+    player_name: str
+    position_key: str  # e.g. "striker"
+    birth_date: str  # ISO 8601 date (UTC)
+    preferred_foot: str = ""  # "left" | "right" | "both" | ""
+
+
+@dataclass(frozen=True)
+class RosterPlayer:
+    """One player registered in a tournament squad."""
+
+    player_id: int
+    player_name: str
+    team_id: int
+    team_name: str
+    country_code: str  # ISO 3166-1 alpha-3, "" if missing
+
+
+@dataclass(frozen=True)
+class MissingKicker:
+    """A kicker for whom no penalty history was found."""
+
+    player_id: int
+    player_name: str
+    team_id: int
+    team_name: str
 
 
 @dataclass(frozen=True)
@@ -51,7 +98,8 @@ def _write_jsonl(
 
 
 def _serialize_row(row: object, *, nan_to_null: bool = False) -> str:
-    payload = asdict(row)
+    import typing  # noqa: PLC0415
+    payload = asdict(typing.cast("typing.Any", row))
     return json.dumps(payload, ensure_ascii=False, allow_nan=(not nan_to_null))
 
 
@@ -148,9 +196,9 @@ class Artifacts:
 
     # ----------------------------------------------------------- cache factory
 
-    def fotmob_client(self) -> FotMobClient:
-        """Return a FotMobClient instance."""
-        return FotMobClient()
+    def fotmob_client(self) -> FotMob:
+        """Return a FotMob instance."""
+        return FotMob()
 
     def serialize_row(self, row: object, *, nan_to_null: bool = False) -> str:
         """Serialize a dataclass row as a JSON string for streaming writes."""

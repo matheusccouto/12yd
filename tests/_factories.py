@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from twelveyards.artifacts import PredictionRow
-from twelveyards.scraper.player_history import PlayerMetadata, PlayerPenalty
-from twelveyards.scraper.rosters import RosterPlayer
+from twelveyards.artifacts import (
+    PlayerMetadata,
+    PlayerPenalty,
+    PredictionRow,
+    RosterPlayer,
+)
 
 # ---------------------------------------------------------------------------
 # PlayerPenalty (one row of player_history.jsonl)

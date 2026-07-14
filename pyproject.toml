@@ -11,6 +11,7 @@ dependencies = [
     "packaging>=24.0",
     "streamlit>=1.30",
     "tabpfn-client>=0.3",
+    "pydantic>=2.13.4",
 ]
 
 [dependency-groups]
@@ -20,12 +21,16 @@ dev = ["pytest>=8.0", "ruff>=0.6", "ty>=0.0.1a5"]
 requires = ["uv_build>=0.11.21,<0.12"]
 build-backend = "uv_build"
 
+[tool.ruff]
+exclude = ["test.ipynb"]
+
 [tool.ruff.lint]
 select = ["ALL"]
-ignore = ["D203", "D212"]
+ignore = ["D203", "D212", "PLR2004", "D213", "ANN401", "TC003"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["S101"]
+"tests/**/*.py" = ["S101", "PLR2004", "D100", "D101", "D102", "D103", "D107", "ARG002", "E501", "SLF001"]
+"test.py" = ["ALL"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,139 +1,245 @@
-"""End-to-end pipeline coordinator — the single seam between scripts and the library."""
+"""Shootout kicks dataset pipeline and CLI."""
 
 from __future__ import annotations
 
-import time
+import argparse
+import contextlib
+import json
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .artifacts import Artifacts
-from .config import LOOKBACK_WINDOW_YEARS, SCRAPE_FLOOR, today_utc
-from .fotmob.leagues import WC_2026_LEAGUE, WC_2026_SEASON, League
-from .model.predict import load_player_history, predict_and_write
-from .scraper.initial_set import (
-    MissingKicker,
-    fetch_all_initial_set_penalty_history_parallel,
-    iter_initial_set_kickers,
-)
-from .scraper.player_history import (
-    PlayerMetadata,
-    extract_player_metadata,
-    fetch_player_data,
-)
-from .scraper.rosters import fetch_wc_2026_roster
+import pandas as pd
+
+from .fotmob.client import FotMob
+from .fotmob.leagues import LEAGUE_BY_ID, LEAGUES
+from .fotmob.models import League, PenaltyKick
 
 if TYPE_CHECKING:
-    from datetime import date
-    from pathlib import Path
-
-    from .fotmob.client import FotMobClient
+    from collections.abc import Iterator
 
 
-def fetch_and_write_roster(
-    client: FotMobClient, output_path: Path,
-    league: League = WC_2026_LEAGUE,
-    season: int = WC_2026_SEASON,
-) -> int:
-    """Fetch WC 2026 roster and write to JSONL. Returns count of unique players."""
-    rows = fetch_wc_2026_roster(client, league, season)
-    return Artifacts().write_roster(rows, path=output_path)
+@dataclass(frozen=True)
+class DatasetSpec:
+    """Configuration specification for the shootout kicks dataset ingest."""
+
+    leagues: tuple[League, ...]
+    date_range: tuple[datetime, datetime]
+    lookback_years: int = 4
 
 
-def fetch_and_write_initial_set(  # noqa: PLR0913
-    client: FotMobClient,
-    roster_path: Path,
-    output_path: Path,
-    missing_path: Path,
-    target_date: date | None = None,
-    lookback_years: int = LOOKBACK_WINDOW_YEARS,
-    history_floor: date = SCRAPE_FLOOR,
-    max_workers: int = 12,
-    *,
-    progress_every: int = 25,
-) -> tuple[int, int, int, int]:
+def load_seen_match_ids(filepath: Path) -> set[str]:
     """
-    Fan out penalty-history fetches across the roster, stream results, write missing.
+    Scan existing JSONL lines to build seen_match_ids.
 
-    Returns (n_kickers, n_rows_written, n_missing, n_errored).
+    Tolerates a malformed final line by truncating the file to the last good line.
     """
-    art = Artifacts()
-    roster = art.read_roster(path=roster_path)
-    initial_set = list(iter_initial_set_kickers(roster))
-    if target_date is None:
-        target_date = today_utc()
+    if not filepath.exists():
+        return set()
 
-    n_rows_written = 0
-    total = len(initial_set)
-    results: list = []
-    t0 = time.monotonic()
-    with output_path.open("w", encoding="utf-8") as out_f:
-        for i, result in enumerate(
-            fetch_all_initial_set_penalty_history_parallel(
-                client, initial_set,
-                target_date=target_date,
-                lookback_years=lookback_years,
-                history_floor=history_floor,
-                max_workers=max_workers,
-            ),
-            start=1,
-        ):
-            results.append(result)
-            for row in result.rows:
-                out_f.write(art.serialize_row(row))
-                out_f.write("\n")
-                n_rows_written += 1
-            out_f.flush()
-            if i % progress_every == 0 or i == total:
-                time.monotonic() - t0
-                n_missing = sum(1 for r in results if not r.rows)
-                sum(1 for r in results if r.error)
+    seen = set()
+    valid_lines: list[bytes] = []
+    corrupted = False
 
-    missing = [
-        MissingKicker(
-            player_id=r.kicker.player_id,
-            player_name=r.kicker.player_name,
-            team_id=r.kicker.team_id,
-            team_name=r.kicker.team_name,
-        )
-        for r in results
-        if not r.rows
-    ]
-    art.write_missing_history(missing, path=missing_path)
-    n_missing = len(missing)
-    n_errored = sum(1 for r in results if r.error)
-    return total, n_rows_written, n_missing, n_errored
+    with filepath.open("rb") as f:
+        lines = f.readlines()
 
-
-def predict(
-    client: FotMobClient,
-    roster_path: Path,
-    player_history_path: Path,
-    output_path: Path,
-    target_date: date | None = None,
-) -> tuple[int, int]:
-    """
-    Fetch per-kicker metadata, fit TabPFN, predict, write predictions.jsonl.
-
-    Returns (n_predictions, n_no_history).
-    """
-    art = Artifacts()
-    roster = art.read_roster(path=roster_path)
-    player_history = load_player_history(player_history_path)
-    if target_date is None:
-        target_date = today_utc()
-
-    metadata_by_id: dict[int, PlayerMetadata] = {}
-    for kicker_id in {*player_history.keys(), *(p.player_id for p in roster)}:
+    for line in lines:
+        line_str = line.decode("utf-8").strip()
+        if not line_str:
+            continue
         try:
-            payload = fetch_player_data(client, kicker_id)
-            metadata = extract_player_metadata(payload)
-            if metadata is not None:
-                metadata_by_id[kicker_id] = metadata
-        except Exception:  # noqa: S110, BLE001
-            pass  # skip players whose metadata fetch fails
+            row = json.loads(line_str)
+            if "match_id" in row:
+                seen.add(str(row["match_id"]))
+            valid_lines.append(line)
+        except json.JSONDecodeError:
+            corrupted = True
+            break
 
-    rows = predict_and_write(
-        roster, player_history, metadata_by_id,
-        output_path=output_path, target_date=target_date,
+    if corrupted:
+        with filepath.open("wb") as f:
+            for line_bytes in valid_lines:
+                f.write(line_bytes)
+
+    return seen
+
+
+def iter_shootout_kicks(  # noqa: C901, PLR0912
+    client: FotMob,
+    spec: DatasetSpec,
+    seen_match_ids: set[str] | None = None,
+) -> Iterator[PenaltyKick]:
+    """Yield shootout kicks matching the DatasetSpec filter rules."""
+    if seen_match_ids is None:
+        seen_match_ids = load_seen_match_ids(Path("data/shootout_kicks.jsonl"))
+
+    start_dt, end_dt = spec.date_range
+
+    for league in spec.leagues:
+        seasons = client.get_league_seasons(league.league_id)
+        for season in seasons:
+            fixtures = client.get_league_matches(
+                league.league_id, season.season_name,
+            )
+
+            for ref in fixtures:
+                ref_date = ref.match_date
+                # Align timezones
+                if start_dt.tzinfo:
+                    s_dt = start_dt.astimezone(ref_date.tzinfo)
+                else:
+                    s_dt = start_dt.replace(tzinfo=ref_date.tzinfo)
+
+                if end_dt.tzinfo:
+                    e_dt = end_dt.astimezone(ref_date.tzinfo)
+                else:
+                    e_dt = end_dt.replace(tzinfo=ref_date.tzinfo)
+
+                if ref_date < s_dt or ref_date > e_dt:
+                    continue
+                if not ref.is_shootout:
+                    continue
+                if ref.match_id in seen_match_ids:
+                    continue
+
+                # get_match is the loud point: it fetches full details.
+                # If it fails, fail loud.
+                match = client.get_match(ref.match_id)
+
+                for shot in match.shotmap:
+                    if shot.situation != "Penalty" or shot.period != "PenaltyShootout":
+                        continue
+
+                    player_id = shot.player_id
+                    team_id = match.player_teams.get(player_id, shot.team_id)
+                    is_home = (team_id == match.home_team_id)
+                    position = match.player_positions.get(player_id, "")
+
+                    yield PenaltyKick(
+                        match_id=ref.match_id,
+                        league_id=league.league_id,
+                        season=season.season_name,
+                        match_date=ref.match_date,
+                        player_id=player_id,
+                        team_id=team_id,
+                        is_home=is_home,
+                        x=shot.x,
+                        y=shot.y,
+                        outcome=shot.outcome,
+                        shot_type=shot.shot_type,
+                        player_position=position,
+                    )
+
+
+def build_shootout_dataset(
+    client: FotMob,
+    spec: DatasetSpec,
+    filepath: Path = Path("data/shootout_kicks.jsonl"),
+) -> pd.DataFrame:
+    """Build the shootout kicks dataset.
+
+    Appends new kicks to JSONL and returns a DataFrame.
+    """
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    seen_match_ids = load_seen_match_ids(filepath)
+
+    with filepath.open("a", encoding="utf-8") as f:
+        for kick in iter_shootout_kicks(
+            client,
+            spec,
+            seen_match_ids=seen_match_ids,
+        ):
+            f.write(kick.model_dump_json() + "\n")
+            f.flush()
+            seen_match_ids.add(kick.match_id)
+
+    records = []
+    if filepath.exists():
+        with filepath.open("r", encoding="utf-8") as f:
+            for line in f:
+                line_str = line.strip()
+                if line_str:
+                    with contextlib.suppress(json.JSONDecodeError):
+                        records.append(json.loads(line_str))
+
+    return pd.DataFrame(records)
+
+
+def main() -> None:
+    """CLI entry point for building the shootout kicks dataset."""
+    parser = argparse.ArgumentParser(
+        description="Build shootout kicks dataset from FotMob.",
     )
-    n_no_history = sum(1 for r in rows if r.total_penalties == 0)
-    return len(rows), n_no_history
+    parser.add_argument(
+        "--leagues",
+        type=str,
+        help=(
+            "Comma-separated list of league IDs to query. "
+            "Default is all international leagues."
+        ),
+    )
+    parser.add_argument(
+        "--start-date",
+        type=str,
+        default="2016-01-01T00:00:00Z",
+        help="ISO 8601 start date of the range (UTC).",
+    )
+    parser.add_argument(
+        "--end-date",
+        type=str,
+        default="2030-12-31T23:59:59Z",
+        help="ISO 8601 end date of the range (UTC).",
+    )
+    parser.add_argument(
+        "--lookback-years",
+        type=int,
+        default=4,
+        help="Number of lookback years.",
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        default="data/shootout_kicks.jsonl",
+        help="Path to write the shootout_kicks.jsonl dataset.",
+    )
+
+    args = parser.parse_args()
+
+    # Parse leagues
+    if args.leagues:
+        league_ids = [int(lid.strip()) for lid in args.leagues.split(",")]
+        leagues = tuple(
+            LEAGUE_BY_ID[lid]
+            if lid in LEAGUE_BY_ID
+            else League.model_validate(
+                {
+                    "id": lid,
+                    "slug": "unknown",
+                    "name": f"League {lid}",
+                    "kind": "unknown",
+                },
+            )
+            for lid in league_ids
+        )
+    else:
+        leagues = LEAGUES
+
+    # Parse dates
+    start_dt = datetime.fromisoformat(args.start_date)
+    end_dt = datetime.fromisoformat(args.end_date)
+
+    spec = DatasetSpec(
+        leagues=leagues,
+        date_range=(start_dt, end_dt),
+        lookback_years=args.lookback_years,
+    )
+
+    client = FotMob()
+    build_shootout_dataset(client, spec, filepath=Path(args.output))
+    print(f"Shootout kicks dataset successfully built at {args.output}")  # noqa: T201
+
+
+if __name__ == "__main__":
+    main()

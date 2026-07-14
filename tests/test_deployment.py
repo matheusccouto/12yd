@@ -40,16 +40,16 @@ EXPECTED_RUNTIME_DEPS = {
 
 
 @pytest.mark.parametrize("package", ["httpx", "numpy", "pandas"])
-def test_runtime_dep_is_importable(package: str) -> None:  # noqa: D103
+def test_runtime_dep_is_importable(package: str) -> None:
     import_module(package)
 
 
-def test_streamlit_is_importable() -> None:  # noqa: D103
+def test_streamlit_is_importable() -> None:
     streamlit = import_module("streamlit")
     assert streamlit.__version__
 
 
-def test_tabpfn_client_is_importable() -> None:  # noqa: D103
+def test_tabpfn_client_is_importable() -> None:
     tabpfn = import_module("tabpfn_client")
     assert tabpfn.__name__ == "tabpfn_client"
 
@@ -59,7 +59,7 @@ def test_tabpfn_client_is_importable() -> None:  # noqa: D103
 # ---------------------------------------------------------------------------
 
 
-def test_requirements_txt_does_not_exist() -> None:  # noqa: D103
+def test_requirements_txt_does_not_exist() -> None:
     assert not REQUIREMENTS_PATH.exists(), (
         "requirements.txt must not exist — ADR-0002 designates pyproject.toml as "
         "the sole dependency manifest. requirements.txt would shadow uv.lock on "
@@ -69,14 +69,14 @@ def test_requirements_txt_does_not_exist() -> None:  # noqa: D103
     )
 
 
-def test_uv_lock_exists() -> None:  # noqa: D103
+def test_uv_lock_exists() -> None:
     assert UV_LOCK_PATH.exists(), (
         "uv.lock is required — Streamlit Community Cloud reads it (priority #1) "
         "and runs `uv sync --frozen` to install the local twelveyards package."
     )
 
 
-def test_uv_lock_is_tracked_in_git() -> None:  # noqa: D103
+def test_uv_lock_is_tracked_in_git() -> None:
     result = subprocess.run(  # noqa: PLW1510
         ["git", "ls-files", "uv.lock"],  # noqa: S607
         cwd=REPO_ROOT,
@@ -104,7 +104,7 @@ def _parse_pyproject_dependencies() -> dict[str, str]:
     return parsed
 
 
-def test_pyproject_contains_runtime_deps() -> None:  # noqa: D103
+def test_pyproject_contains_runtime_deps() -> None:
     deps = _parse_pyproject_dependencies()
     missing = EXPECTED_RUNTIME_DEPS - set(deps)
     assert not missing, (
@@ -115,7 +115,7 @@ def test_pyproject_contains_runtime_deps() -> None:  # noqa: D103
     )
 
 
-def test_pyproject_no_app_or_pipeline_groups() -> None:  # noqa: D103
+def test_pyproject_no_app_or_pipeline_groups() -> None:
     data = tomllib.loads(PYPROJECT_PATH.read_text())
     groups = data.get("dependency-groups", {})
     leaked = {g for g in ("app", "pipeline") if g in groups}
@@ -126,13 +126,13 @@ def test_pyproject_no_app_or_pipeline_groups() -> None:  # noqa: D103
     )
 
 
-def test_pyproject_no_dropped_deps() -> None:  # noqa: D103
+def test_pyproject_no_dropped_deps() -> None:
     deps = _parse_pyproject_dependencies()
     leaked = DROPPED_DEPS & set(deps)
     assert not leaked, f"v5 dropped deps {sorted(leaked)} must not reappear"
 
 
-def test_pyproject_no_pinned_versions() -> None:  # noqa: D103
+def test_pyproject_no_pinned_versions() -> None:
     deps = _parse_pyproject_dependencies()
     for name, spec in deps.items():
         assert "==" not in spec, (
@@ -203,7 +203,7 @@ def test_app_imports_resolve_under_frozen_sync(tmp_path: Path) -> None:
             "-c",
             "import pandas, streamlit; "
             "from twelveyards.artifacts import Artifacts; "
-            "from twelveyards.dashboard import "
+            "from app import "
             "KickerPrediction, distinct_teams, predictions_for_match; "
             "print('OK')",
         ],

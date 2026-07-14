@@ -20,14 +20,14 @@ from tests._factories import (
     make_roster_player,
 )
 from twelveyards.artifacts import Artifacts
-from twelveyards.fotmob.client import FotMobClient
+from twelveyards.fotmob.client import FotMob
 
 # ---------------------------------------------------------------------------
 # Path accessors
 # ---------------------------------------------------------------------------
 
 
-def test_default_paths_point_at_canonical_filenames() -> None:  # noqa: D103
+def test_default_paths_point_at_canonical_filenames() -> None:
     art = Artifacts()
     assert art.root == Path("data")
     assert art.player_history == Path("data/player_history.jsonl")
@@ -36,7 +36,7 @@ def test_default_paths_point_at_canonical_filenames() -> None:  # noqa: D103
     assert art.predictions == Path("data/predictions.jsonl")
 
 
-def test_custom_root_redirects_every_artifact() -> None:  # noqa: D103
+def test_custom_root_redirects_every_artifact() -> None:
     art = Artifacts(root=Path("/tmp/foo"))  # noqa: S108
     assert art.player_history == Path("/tmp/foo/player_history.jsonl")  # noqa: S108
     assert art.missing_history == Path("/tmp/foo/missing_history.jsonl")  # noqa: S108
@@ -49,10 +49,10 @@ def test_custom_root_redirects_every_artifact() -> None:  # noqa: D103
 # ---------------------------------------------------------------------------
 
 
-def test_fotmob_client_factory() -> None:  # noqa: D103
+def test_fotmob_client_factory() -> None:
     art = Artifacts()
     client = art.fotmob_client()
-    assert isinstance(client, FotMobClient)
+    assert isinstance(client, FotMob)
 
 
 # ---------------------------------------------------------------------------
@@ -60,27 +60,27 @@ def test_fotmob_client_factory() -> None:  # noqa: D103
 # ---------------------------------------------------------------------------
 
 
-def test_v5_has_no_shootout_kicks() -> None:  # noqa: D103
+def test_v5_has_no_shootout_kicks() -> None:
     art = Artifacts()
     assert not hasattr(art, "shootout_kicks")
 
 
-def test_v5_has_no_training_table() -> None:  # noqa: D103
+def test_v5_has_no_training_table() -> None:
     art = Artifacts()
     assert not hasattr(art, "training_table")
 
 
-def test_v5_has_no_lightgbm_model() -> None:  # noqa: D103
+def test_v5_has_no_lightgbm_model() -> None:
     art = Artifacts()
     assert not hasattr(art, "lightgbm_model")
 
 
-def test_v5_has_no_baseline_model() -> None:  # noqa: D103
+def test_v5_has_no_baseline_model() -> None:
     art = Artifacts()
     assert not hasattr(art, "baseline_model")
 
 
-def test_v5_has_no_metrics() -> None:  # noqa: D103
+def test_v5_has_no_metrics() -> None:
     art = Artifacts()
     assert not hasattr(art, "metrics")
 
@@ -90,7 +90,7 @@ def test_v5_has_no_metrics() -> None:  # noqa: D103
 # ---------------------------------------------------------------------------
 
 
-def test_player_history_round_trip(tmp_path: Path) -> None:  # noqa: D103
+def test_player_history_round_trip(tmp_path: Path) -> None:
     art = Artifacts(root=tmp_path)
     rows = [make_history_row(match_id=99, match_date="2022-01-01T00:00:00+00:00")]
     n = art.write_player_history(rows, path=art.player_history)
@@ -98,8 +98,8 @@ def test_player_history_round_trip(tmp_path: Path) -> None:  # noqa: D103
     assert art.read_player_history() == rows
 
 
-def test_missing_history_round_trip(tmp_path: Path) -> None:  # noqa: D103
-    from twelveyards.scraper.initial_set import (  # noqa: PLC0415
+def test_missing_history_round_trip(tmp_path: Path) -> None:
+    from twelveyards.artifacts import (  # noqa: PLC0415
         MissingKicker,
     )
 
@@ -114,7 +114,7 @@ def test_missing_history_round_trip(tmp_path: Path) -> None:  # noqa: D103
     assert art.read_missing_history() == rows
 
 
-def test_roster_round_trip(tmp_path: Path) -> None:  # noqa: D103
+def test_roster_round_trip(tmp_path: Path) -> None:
     art = Artifacts(root=tmp_path)
     rows = [make_roster_player()]
     n = art.write_roster(rows, path=art.roster)
@@ -122,7 +122,7 @@ def test_roster_round_trip(tmp_path: Path) -> None:  # noqa: D103
     assert art.read_roster() == rows
 
 
-def test_predictions_round_trip(tmp_path: Path) -> None:  # noqa: D103
+def test_predictions_round_trip(tmp_path: Path) -> None:
     art = Artifacts(root=tmp_path)
     rows = [make_prediction_row()]
     n = art.write_predictions(rows, path=art.predictions)
@@ -130,7 +130,7 @@ def test_predictions_round_trip(tmp_path: Path) -> None:  # noqa: D103
     assert art.read_predictions() == rows
 
 
-def test_predictions_round_trip_with_v5_fields(tmp_path: Path) -> None:  # noqa: D103
+def test_predictions_round_trip_with_v5_fields(tmp_path: Path) -> None:
     art = Artifacts(root=tmp_path)
     rows = [
         make_prediction_row(
@@ -145,7 +145,7 @@ def test_predictions_round_trip_with_v5_fields(tmp_path: Path) -> None:  # noqa:
     assert n == 1
     back = art.read_predictions()
     assert back[0].short_name == "Messi"
-    assert back[0].total_penalties == 12  # noqa: PLR2004
+    assert back[0].total_penalties == 12
     assert "fotmob" in back[0].photo_url
 
 
@@ -154,7 +154,7 @@ def test_predictions_round_trip_with_v5_fields(tmp_path: Path) -> None:  # noqa:
 # ---------------------------------------------------------------------------
 
 
-def test_read_missing_jsonl_raises(tmp_path: Path) -> None:  # noqa: D103
+def test_read_missing_jsonl_raises(tmp_path: Path) -> None:
     art = Artifacts(root=tmp_path)
     with pytest.raises(FileNotFoundError):
         art.read_player_history()
@@ -166,7 +166,7 @@ def test_read_missing_jsonl_raises(tmp_path: Path) -> None:  # noqa: D103
         art.read_missing_history()
 
 
-def test_write_creates_parent_directories(tmp_path: Path) -> None:  # noqa: D103
+def test_write_creates_parent_directories(tmp_path: Path) -> None:
     art = Artifacts(root=tmp_path / "deep" / "nested")
     art.write_player_history([make_history_row()])
     assert art.player_history.exists()
@@ -177,7 +177,7 @@ def test_write_creates_parent_directories(tmp_path: Path) -> None:  # noqa: D103
 # ---------------------------------------------------------------------------
 
 
-def test_serialize_row_matches_write_shape(tmp_path: Path) -> None:  # noqa: D103
+def test_serialize_row_matches_write_shape(tmp_path: Path) -> None:
     import json  # noqa: PLC0415
 
     art = Artifacts(root=tmp_path)
@@ -193,7 +193,7 @@ def test_serialize_row_matches_write_shape(tmp_path: Path) -> None:  # noqa: D10
 # ---------------------------------------------------------------------------
 
 
-def test_explicit_path_round_trip(tmp_path: Path) -> None:  # noqa: D103
+def test_explicit_path_round_trip(tmp_path: Path) -> None:
     art = Artifacts(root=tmp_path)
     custom = tmp_path / "custom.jsonl"
     rows = [make_roster_player(player_id=99)]
