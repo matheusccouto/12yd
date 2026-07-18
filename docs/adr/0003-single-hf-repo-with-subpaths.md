@@ -1,9 +1,0 @@
-# Single Hugging Face repo with `model/` and `data/` subpaths
-
-The persistence layer (ADR 0001) needed to host both a model (the frozen `lightgbm.pkl`) and a dataset (the per-player `predictions.jsonl` plus the raw inputs: `shootout_kicks.jsonl`, `player_history.jsonl`, `wc2026_roster.jsonl`). Hugging Face supports two patterns: separate repos (a "model" repo for the `.pkl` and a "Dataset" repo for the JSONLs) or a single repo with subpaths. We chose the single-repo pattern: `couto/12yd` with `model/` and `data/` as top-level subdirectories, the model card at the root. The dashboard reads both subpaths from one place, so there's no cross-repo coordination; a future retrain that updates the model and the data is a single `huggingface-cli upload`; HF's UI surfaces the model card at the root and treats the `data/` directory as files (the dashboard does not load the JSONLs as a HF `Dataset`, only as bytes via `hf_hub_download`). Considered: separate repos — the convention is cleaner per HF's documentation, but the only consumer is the dashboard, and a single repo removes the cross-repo coordination cost with no functional loss.
-
-## Consequences
-
-- A reader landing on `https://huggingface.co/couto/12yd` sees a model surface (the model card at the root, the `lightgbm.pkl` under `model/`). The `data/` subdir is a side effect, not a first-class HF feature. If a future iteration wants the data to be discoverable as a HF Dataset, it can be moved to a separate `couto/12yd-data` repo at that point.
-- The model card is the root `README.md`. It is short (name, description, metrics, 5-line usage) per the PRD's "minimal" decision. Adding training-data summary, limitations, and version history is a future iteration.
-- The push command is a single `huggingface-cli upload couto/12yd . couto/12yd` from the repo root. The `.gitignore` is honoured, so the upload contains only the staged artifacts (the `model/` and `data/` subdirs).

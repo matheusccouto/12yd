@@ -4,6 +4,7 @@ import json
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from functools import cache
 from typing import Any
 
@@ -35,9 +36,15 @@ USER_AGENT: str = (
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 HTTP_TIMEOUT_SECONDS: float = 5.0
+FLOOR_DATETIME = datetime(2026, 1, 1, tzinfo=UTC)
+CEIL_DATETIME = datetime.now(tz=UTC)
 
 
 logger = logging.getLogger(__name__)
+
+
+class NoShotsDataError(Exception):
+    """Shots data field is missing or empty."""
 
 
 class FotMob:
@@ -51,11 +58,13 @@ class FotMob:
             follow_redirects=True,
             event_hooks={"response": [lambda r: r.raise_for_status()]},
         )
+
         def is_transient_error(exception: Exception) -> bool:
             if isinstance(exception, httpx.HTTPStatusError):
                 return exception.response.status_code in (429, 500, 502, 503, 504)
             return isinstance(exception, httpx.RequestError)
 
+        # Wrap the HTTP client's send method with a retry strategy for transient errors
         self._http.send = retry(
             stop=stop_after_attempt(4),
             wait=wait_exponential_jitter(initial=0.5, max=5.0, jitter=0.1),
@@ -142,15 +151,8 @@ class FotMob:
         """Get all match for a given league and season."""
         logger.info("Scraping match %s", match_id)
         data = self.get(f"match/{match_id}")["pageProps"]
-        lineup = data.get("content", {}).get("lineup", {})
-        home_team = lineup.get("homeTeam", {})
-        away_team = lineup.get("awayTeam", {})
-        match_players = (
-            home_team.get("starters", [])
-            + home_team.get("subs", [])
-            + away_team.get("starters", [])
-            + away_team.get("subs", [])
-        )
+        if not data["content"]["shotmap"]["shots"]:
+            raise NoShotsDataError
         return Match(
             id=int(data["general"]["matchId"]),
             league_id=int(data["general"]["parentLeagueId"] or 0),
@@ -168,17 +170,17 @@ class FotMob:
             ),
             start_at=data["general"]["matchTimeUTCDate"],
             status=Status(
-                started=data["header"]["status"].get("started", False),
-                finished=data["header"]["status"].get("finished", False),
+                started=data["header"]["status"]["started"],
+                finished=data["header"]["status"]["finished"],
                 cancelled=data["header"]["status"].get("cancelled", False),
                 awarded=data["header"]["status"].get("awarded", False),
                 period=Period(
-                    slug=data["header"]["status"].get("reason", {}).get("longKey", ""),
-                    name=data["header"]["status"].get("reason", {}).get("long", ""),
+                    slug=data["header"]["status"]["reason"]["longKey"],
+                    name=data["header"]["status"]["reason"]["long"],
                 ),
             ),
             score=Score(
-                label=data["header"]["status"].get("scoreStr", ""),
+                label=data["header"]["status"]["scoreStr"],
             ),
             penalties=[
                 Penalty(
@@ -193,8 +195,8 @@ class FotMob:
                     ),
                     outcome=x["eventType"],
                 )
-                for x in data.get("content", {}).get("shotmap", {}).get("shots", [])
-                if x.get("situation") == "Penalty"
+                for x in data["content"]["shotmap"]["shots"]
+                if x["situation"] == "Penalty"
             ],
             players=[
                 Player(
@@ -206,7 +208,12 @@ class FotMob:
                     ),
                     market_value=x.get("marketValue"),
                 )
-                for x in match_players
+                for x in (
+                    data["content"]["lineup"]["homeTeam"]["starters"]
+                    + data["content"]["lineup"]["homeTeam"]["subs"]
+                    + data["content"]["lineup"]["awayTeam"]["starters"]
+                    + data["content"]["lineup"]["awayTeam"]["subs"]
+                )
             ],
         )
 
@@ -221,7 +228,15 @@ class FotMob:
         """Get all match for a given league and season."""
         logger.info("Scraping matches for league %s season %s", league_id, season)
         data = self.get(f"leagues/{league_id}", params={"season": season})["pageProps"]
-        all_ids = [int(x["id"]) for x in data["fixtures"]["allMatches"]]
+        all_ids = [
+            int(match["id"])
+            for match in data["fixtures"]["allMatches"]
+            if match["status"]["started"]
+            and match["status"]["finished"]
+            and FLOOR_DATETIME
+            < datetime.fromisoformat(match["status"]["utcTime"])
+            < CEIL_DATETIME
+        ]
         if limit is not None:
             all_ids = all_ids[:limit]
 
@@ -229,9 +244,11 @@ class FotMob:
             try:
                 return self.get_match(match_id)
             except httpx.HTTPStatusError as e:
-                if e.response.status_code == 404:
+                if e.response.status_code == 404:  # noqa: PLR2004
                     return None
                 raise
+            except NoShotsDataError:
+                return None
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             return [

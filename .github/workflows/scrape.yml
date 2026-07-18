@@ -1,0 +1,34 @@
+name: scrape
+
+on:
+  schedule:
+    - cron: "0 3 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+
+      - run: uv sync --no-dev
+
+      - name: Fetch player penalty history
+        run: uv run scripts/scrape.yml
+
+      - name: Commit and push artifacts
+        run: |
+            git add data/matches.jsonl
+            git commit -m "[skip ci] refresh data artifacts"
+            git push
