@@ -1,6 +1,8 @@
 """Tests for the FotMob client."""
 
-from twelveyards.fotmob.client import FotMob
+import pytest
+
+from twelveyards.fotmob.client import FotMob, NoShotsDataError
 
 
 def test_get_league() -> None:
@@ -20,3 +22,10 @@ def test_get_match() -> None:
     assert match.home_team.name == "Argentina"
     assert match.away_team.name == "France"
     assert match.score.label == "3 - 3"
+
+
+def test_raise_no_shot_data() -> None:
+    """Test raising when there is no shot data available."""
+    client = FotMob()
+    with pytest.raises(NoShotsDataError):
+        client.get_match(3118355)
