@@ -11,7 +11,7 @@ import httpx
 from tenacity import (
     before_sleep_log,
     retry,
-    retry_if_exception_type,
+    retry_if_exception,
     stop_after_attempt,
     wait_exponential_jitter,
 )
@@ -51,10 +51,15 @@ class FotMob:
             follow_redirects=True,
             event_hooks={"response": [lambda r: r.raise_for_status()]},
         )
+        def is_transient_error(exception: Exception) -> bool:
+            if isinstance(exception, httpx.HTTPStatusError):
+                return exception.response.status_code in (429, 500, 502, 503, 504)
+            return isinstance(exception, httpx.RequestError)
+
         self._http.send = retry(
             stop=stop_after_attempt(4),
             wait=wait_exponential_jitter(initial=0.5, max=5.0, jitter=0.1),
-            retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.RequestError)),
+            retry=retry_if_exception(is_transient_error),
             before_sleep=before_sleep_log(logger, logging.WARNING),
             reraise=True,
         )(self._http.send)
@@ -133,13 +138,22 @@ class FotMob:
             ]
 
     @cache  # noqa: B019
-    def get_match(self, match_id: int) -> list[Match]:
+    def get_match(self, match_id: int) -> Match:
         """Get all match for a given league and season."""
         logger.info("Scraping match %s", match_id)
         data = self.get(f"match/{match_id}")["pageProps"]
+        lineup = data.get("content", {}).get("lineup", {})
+        home_team = lineup.get("homeTeam", {})
+        away_team = lineup.get("awayTeam", {})
+        match_players = (
+            home_team.get("starters", [])
+            + home_team.get("subs", [])
+            + away_team.get("starters", [])
+            + away_team.get("subs", [])
+        )
         return Match(
             id=int(data["general"]["matchId"]),
-            league_id=int(data["general"]["parentLeagueId"]),
+            league_id=int(data["general"]["parentLeagueId"] or 0),
             home_team=Team(
                 id=int(data["general"]["homeTeam"]["id"]),
                 name=data["general"]["homeTeam"]["name"],
@@ -154,17 +168,17 @@ class FotMob:
             ),
             start_at=data["general"]["matchTimeUTCDate"],
             status=Status(
-                started=data["header"]["status"]["started"],
-                finished=data["header"]["status"]["finished"],
-                cancelled=data["header"]["status"]["cancelled"],
-                awarded=data["header"]["status"]["awarded"],
+                started=data["header"]["status"].get("started", False),
+                finished=data["header"]["status"].get("finished", False),
+                cancelled=data["header"]["status"].get("cancelled", False),
+                awarded=data["header"]["status"].get("awarded", False),
                 period=Period(
-                    slug=data["header"]["status"]["reason"]["longKey"],
-                    name=data["header"]["status"]["reason"]["long"],
+                    slug=data["header"]["status"].get("reason", {}).get("longKey", ""),
+                    name=data["header"]["status"].get("reason", {}).get("long", ""),
                 ),
             ),
             score=Score(
-                label=data["header"]["status"]["scoreStr"],
+                label=data["header"]["status"].get("scoreStr", ""),
             ),
             penalties=[
                 Penalty(
@@ -179,8 +193,8 @@ class FotMob:
                     ),
                     outcome=x["eventType"],
                 )
-                for x in data["content"]["shotmap"]["shots"]
-                if x["situation"] == "Penalty"
+                for x in data.get("content", {}).get("shotmap", {}).get("shots", [])
+                if x.get("situation") == "Penalty"
             ],
             players=[
                 Player(
@@ -192,12 +206,7 @@ class FotMob:
                     ),
                     market_value=x.get("marketValue"),
                 )
-                for x in (
-                    data["content"]["lineup"]["homeTeam"]["starters"]
-                    + data["content"]["lineup"]["homeTeam"]["subs"]
-                    + data["content"]["lineup"]["awayTeam"]["starters"]
-                    + data["content"]["lineup"]["awayTeam"]["subs"]
-                )
+                for x in match_players
             ],
         )
 
@@ -216,9 +225,17 @@ class FotMob:
         if limit is not None:
             all_ids = all_ids[:limit]
 
+        def get_match_safely(match_id: int) -> Match | None:
+            try:
+                return self.get_match(match_id)
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 404:
+                    return None
+                raise
+
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             return [
                 result
-                for result in executor.map(self.get_match, all_ids)
+                for result in executor.map(get_match_safely, all_ids)
                 if result is not None
             ]
