@@ -36,7 +36,7 @@ USER_AGENT: str = (
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 HTTP_TIMEOUT_SECONDS: float = 5.0
-FLOOR_DATETIME = datetime(2026, 1, 1, tzinfo=UTC)
+FLOOR_DATETIME = datetime(2016, 1, 1, tzinfo=UTC)
 CEIL_DATETIME = datetime.now(tz=UTC)
 
 
