@@ -6,17 +6,74 @@ from datetime import date, timedelta
 from typing import TYPE_CHECKING
 
 import numpy as np
+from pydantic import BaseModel
 from tabpfn_client import TabPFNClassifier
 from tabpfn_client import init as _tabpfn_init
 
-from twelveyards.artifacts import Artifacts, PredictionRow
 from twelveyards.config import LOOKBACK_WINDOW_YEARS, TRAIN_FLOOR
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
-    from twelveyards.artifacts import PlayerMetadata, PlayerPenalty, RosterPlayer
+
+# ---------------------------------------------------------------------------
+# Data models
+# ---------------------------------------------------------------------------
+
+
+class PlayerPenalty(BaseModel):
+    """One penalty kick row (player_history.jsonl)."""
+
+    kicker_id: int
+    match_id: int
+    match_date: str
+    league_id: int
+    league_name: str
+    team_id: int
+    is_home: bool
+    x: float
+    side: str
+    is_on_target: bool
+    outcome: str
+    shot_type: str
+
+
+class PlayerMetadata(BaseModel):
+    """Per-player metadata."""
+
+    player_id: int
+    player_name: str
+    position_key: str
+    birth_date: str
+    preferred_foot: str
+
+
+class RosterPlayer(BaseModel):
+    """One player on the roster."""
+
+    player_id: int
+    player_name: str
+    team_id: int
+    team_name: str
+    country_code: str
+
+
+class PredictionRow(BaseModel):
+    """One row of predictions.jsonl."""
+
+    player_id: int
+    player_name: str
+    short_name: str
+    team_id: int
+    team_name: str
+    country_code: str
+    kicking_foot: str
+    photo_url: str
+    p_L: float  # noqa: N815
+    p_C: float  # noqa: N815
+    p_R: float  # noqa: N815
+    total_penalties: int
 
 PRIOR_PROB: tuple[float, float, float] = (1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0)
 CLASSES: tuple[str, ...] = ("L", "C", "R")
@@ -228,8 +285,6 @@ def load_player_history(path: Path) -> dict[int, list[PlayerPenalty]]:
     """Load player_history.jsonl into a dict keyed by kicker_id."""
     import json  # noqa: PLC0415
 
-    from twelveyards.artifacts import PlayerPenalty  # noqa: PLC0415
-
     out: dict[int, list[PlayerPenalty]] = {}
     with path.open(encoding="utf-8") as f:
         for raw in f:
@@ -305,7 +360,10 @@ def predict_and_write(
             ),
         )
 
-    Artifacts().write_predictions(rows, path=output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(row.model_dump_json() + "\n")
     return rows
 
 

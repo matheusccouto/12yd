@@ -11,7 +11,7 @@ from app import (
     predictions_for_match,
     recommended_dive,
 )
-from twelveyards.artifacts import PredictionRow
+from twelveyards.model import PredictionRow
 
 
 def _pred(  # noqa: PLR0913

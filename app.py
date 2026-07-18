@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import pandas as pd
 import streamlit as st
 
-from twelveyards.artifacts import Artifacts
-
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from twelveyards.artifacts import PredictionRow
+    from twelveyards.model import PredictionRow
+
+PREDICTIONS_PATH: Path = Path("data/predictions.jsonl")
 
 _BadgeColor = Literal[
     "red", "orange", "yellow", "blue", "green", "violet", "gray", "grey", "primary",
@@ -72,12 +74,18 @@ class KickerPrediction:
 
 
 def load_predictions() -> list[PredictionRow]:
-    """Load predictions.jsonl from the working tree and return deserialized rows."""
-    art = Artifacts()
-    path = art.predictions
+    """Load predictions.jsonl and return deserialized rows."""
+    from twelveyards.model import PredictionRow  # noqa: PLC0415
+
+    path = PREDICTIONS_PATH
     if not path.exists():
         return []
-    return art.read_predictions()
+    with path.open(encoding="utf-8") as f:
+        return [
+            PredictionRow.model_validate(json.loads(line))
+            for line in f
+            if line.strip()
+        ]
 
 
 def predictions_for_match(

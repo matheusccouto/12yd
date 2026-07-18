@@ -202,7 +202,6 @@ def test_app_imports_resolve_under_frozen_sync(tmp_path: Path) -> None:
             str(snapshot / ".venv" / "bin" / "python"),
             "-c",
             "import pandas, streamlit; "
-            "from twelveyards.artifacts import Artifacts; "
             "from app import "
             "KickerPrediction, distinct_teams, predictions_for_match; "
             "print('OK')",

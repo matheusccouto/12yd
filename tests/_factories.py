@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from twelveyards.artifacts import (
+from twelveyards.model import (
     PlayerMetadata,
     PlayerPenalty,
     PredictionRow,
