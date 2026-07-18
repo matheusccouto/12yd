@@ -13,7 +13,7 @@ from twelveyards.fotmob.models import (
     League,
     LeagueDetails,
     Match,
-    MatchRef,
+    Match,
     Season,
     get_player_position_from_lineup,
 )
@@ -99,7 +99,7 @@ def test_match_ref_model() -> None:
             "reason": {"shortKey": "penalties_short"},
         },
     }
-    ref = MatchRef.model_validate(fixture)
+    ref = Match.model_validate(fixture)
     assert ref.match_id == "3370572"
     assert ref.home_id == 6706
     assert ref.home_name == "Argentina"
@@ -179,7 +179,7 @@ def test_discover_build_id() -> None:
 
 def test_get_league() -> None:
     client = FotMob()
-    details = client.get_league(77)
+    details = client.get_league_details(77)
     assert isinstance(details, LeagueDetails)
     assert details.id == 77
     assert details.name == "World Cup"
@@ -198,7 +198,7 @@ def test_get_league_matches() -> None:
     client = FotMob()
     matches = client.get_league_matches(77, "2022 Qatar")
     assert len(matches) > 0
-    assert isinstance(matches[0], MatchRef)
+    assert isinstance(matches[0], Match)
     assert any(m.match_id == "3370572" for m in matches)
 
 

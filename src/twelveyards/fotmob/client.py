@@ -1,40 +1,39 @@
 """HTTP client for FotMob Next.js API."""
 
-from __future__ import annotations
-
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
+from functools import cache
 from typing import Any
 
 import httpx
 
-from .leagues import LEAGUES
-from .models import League, LeagueDetails, Match, MatchRef, Season
+from .models import (
+    League,
+    Match,
+    Penalty,
+    Period,
+    Player,
+    Position,
+    Round,
+    Score,
+    Shot,
+    Status,
+    Team,
+)
 
 USER_AGENT: str = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
-HTTP_TIMEOUT_SECONDS: float = 15.0
-
-
-def _extract_season_year(season: str) -> str:
-    """Extract the season query parameter identifier from a season name string."""
-    parts = season.strip().split()
-    if not parts:
-        msg = f"Empty season string: {season!r}"
-        raise ValueError(msg)
-    return parts[0]
+HTTP_TIMEOUT_SECONDS: float = 5
 
 
 class FotMob:
     """FotMob Next.js API client."""
 
     def __init__(self, timeout: float = HTTP_TIMEOUT_SECONDS) -> None:
-        """Create a FotMob client with connection pool.
-
-        Includes automatic raise-on-status hook.
-        """
+        """Create a FotMob client with connection pool."""
         self._build_id: str | None = None
         self._http = httpx.Client(
             timeout=timeout,
@@ -46,10 +45,10 @@ class FotMob:
     def build_id(self) -> str:
         """Lazily discover and return the current FotMob Next.js build ID."""
         if self._build_id is None:
-            self._build_id = self._discover_build_id()
+            self._build_id = self._get_build_id()
         return self._build_id
 
-    def _discover_build_id(self) -> str:
+    def _get_build_id(self) -> str:
         response = self._http.get(
             "https://www.fotmob.com/",
             headers={"User-Agent": USER_AGENT},
@@ -64,56 +63,130 @@ class FotMob:
             raise RuntimeError(msg)
         return str(json.loads(match.group(1))["buildId"])
 
-    def _get(self, path: str, **params: Any) -> Any:
-        """Fetch a Next.js JSON data route and return raw parsed JSON."""
-        url = f"https://www.fotmob.com/_next/data/{self.build_id}/{path}.json"
-        response = self._http.get(
-            url, params=params, headers={"User-Agent": USER_AGENT},
-        )
-        return response.json()
-
     def get(self, path: str, params: dict[str, str] | None = None) -> Any:
         """Fetch a Next.js JSON data route and return raw parsed JSON."""
-        return self._get(path, **(params or {}))
+        return self._http.get(
+            f"https://www.fotmob.com/_next/data/{self.build_id}/{path}.json",
+            params=params,
+            headers={"User-Agent": USER_AGENT},
+        ).json()
 
-
-
-    def get_leagues(self) -> list[League]:
-        """Return the list of targeted international leagues."""
-        return list(LEAGUES)
-
-    def get_league(self, league_id: int) -> LeagueDetails:
+    @cache  # noqa: B019
+    def get_league(self, league_id: int) -> League:
         """Get details for a given league."""
-        data = self._get(f"leagues/{league_id}")
-        details_data = data.get("pageProps", {}).get("details", {})
-        return LeagueDetails.model_validate(details_data)
+        data = self.get(f"leagues/{league_id}")["pageProps"]
+        return League(
+            id=int(data["details"]["id"]),
+            name=data["details"]["name"],
+            seasons=data["allAvailableSeasons"],
+            country=data["details"].get("country"),
+            gender=data["details"].get("gender"),
+        )
 
-    def get_league_seasons(self, league_id: int) -> list[Season]:
-        """Get the available seasons for a given league."""
-        data = self._get(f"leagues/{league_id}")
-        seasons_data = data.get("pageProps", {}).get("seasons", [])
-        return [Season.model_validate(s) for s in seasons_data]
+    @cache  # noqa: B019
+    def get_leagues(self, max_workers: int = 1) -> list[League]:
+        """Return the list of all leagues."""
+        data = self.get("")["pageProps"]
+        mapping = data["fallback"]["/api/translationmapping?locale=en"]
+        all_ids = list(mapping["TournamentTemplates"] | mapping["TournamentPrefixes"])
 
-    def get_league_matches(self, league_id: int, season: str) -> list[MatchRef]:
-        """Get all match references for a given league and season."""
-        year = _extract_season_year(season)
-        league_details = self.get_league(league_id)
-        slug = league_details.seopath
-        data = self._get(f"leagues/{league_id}/overview/{slug}", season=year)
+        def get_league_safely(league_id: int) -> League | None:
+            try:
+                return self.get_league(league_id)
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 404:
+                    return None
+                raise  # Re-raise other errors
 
-        page_props = data.get("pageProps", {})
-        fixtures = page_props.get("fixtures", {})
-        matches_data = fixtures.get("allMatches")
-        if matches_data is None:
-            overview = page_props.get("overview", {})
-            matches_data = overview.get("matches", {}).get("allMatches", [])
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            return [
+                result
+                for result in executor.map(get_league_safely, all_ids)
+                if result is not None
+            ]
 
-        return [MatchRef.model_validate(m) for m in matches_data]
+    @cache  # noqa: B019
+    def get_match(self, match_id: int) -> list[Match]:
+        """Get all match for a given league and season."""
+        data = self.get(f"match/{match_id}")["pageProps"]
+        return Match(
+            id=int(data["general"]["matchId"]),
+            league_id=int(data["general"]["parentLeagueId"]),
+            home_team=Team(
+                id=int(data["general"]["homeTeam"]["id"]),
+                name=data["general"]["homeTeam"]["name"],
+            ),
+            away_team=Team(
+                id=int(data["general"]["awayTeam"]["id"]),
+                name=data["general"]["awayTeam"]["name"],
+            ),
+            round=Round(
+                match=data["general"]["matchRound"],
+                league=data["general"]["leagueRoundName"],
+            ),
+            start_at=data["general"]["matchTimeUTCDate"],
+            status=Status(
+                started=data["header"]["status"]["started"],
+                finished=data["header"]["status"]["finished"],
+                cancelled=data["header"]["status"]["cancelled"],
+                awarded=data["header"]["status"]["awarded"],
+                period=Period(
+                    slug=data["header"]["status"]["reason"]["longKey"],
+                    name=data["header"]["status"]["reason"]["long"],
+                ),
+            ),
+            score=Score(
+                label=data["header"]["status"]["scoreStr"],
+            ),
+            penalties=[
+                Penalty(
+                    id=x["id"],
+                    player_id=x["playerId"],
+                    team_id=x["teamId"],
+                    period=x["period"],
+                    shot=Shot(
+                        x=x["onGoalShot"]["x"],
+                        y=x["onGoalShot"]["y"],
+                        zoom=x["onGoalShot"]["zoomRatio"],
+                    ),
+                    outcome=x["eventType"],
+                )
+                for x in data["content"]["shotmap"]["shots"]
+                if x["situation"] == "Penalty"
+            ],
+            players=[
+                Player(
+                    id=x["id"],
+                    name=x["name"],
+                    age=x.get("age"),
+                    position=Position(
+                        id=x.get("usualPlayingPositionId"),
+                    ),
+                    market_value=x.get("marketValue"),
+                )
+                for x in (
+                    data["content"]["lineup"]["homeTeam"]["starters"]
+                    + data["content"]["lineup"]["homeTeam"]["subs"]
+                    + data["content"]["lineup"]["awayTeam"]["starters"]
+                    + data["content"]["lineup"]["awayTeam"]["subs"]
+                )
+            ],
+        )
 
-    def get_match(self, match_id: str) -> Match:
-        """Get full match details including shotmap and lineups by match ID."""
-        data = self._get(f"match/{match_id}")
-        return Match.model_validate(data)
+    @cache  # noqa: B019
+    def get_matches(
+        self,
+        league_id: int,
+        season: str,
+        max_workers: int = 1,
+    ) -> list[Match]:
+        """Get all match for a given league and season."""
+        data = self.get(f"leagues/{league_id}", params={"season": season})["pageProps"]
+        all_ids = [int(x["id"]) for x in data["fixtures"]["allMatches"]]
 
-
-
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            return [
+                result
+                for result in executor.map(self.get_match, all_ids)
+                if result is not None
+            ]

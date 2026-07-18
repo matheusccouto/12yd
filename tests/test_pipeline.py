@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from twelveyards.fotmob.client import FotMob
-from twelveyards.fotmob.models import League, PenaltyKick
+from twelveyards.fotmob.models import League, Penalty
 from twelveyards.pipeline import (
     DatasetSpec,
     iter_shootout_kicks,
@@ -36,13 +36,13 @@ def test_load_seen_match_ids_truncation(tmp_path: Path) -> None:
     filepath = tmp_path / "shootouts.jsonl"
 
     # Write 2 valid lines and 1 malformed trailing line
-    k1 = PenaltyKick(
+    k1 = Penalty(
         match_id="101", league_id=77, season="2022",
         match_date=datetime(2022, 12, 18, 15, 0, tzinfo=UTC),
         player_id=1, team_id=1, is_home=True, x=0.5, y=0.5,
         outcome="Goal", shot_type="RightFoot", player_position="Forward",
     )
-    k2 = PenaltyKick(
+    k2 = Penalty(
         match_id="102", league_id=77, season="2022",
         match_date=datetime(2022, 12, 18, 15, 0, tzinfo=UTC),
         player_id=2, team_id=2, is_home=False, x=0.5, y=0.5,
