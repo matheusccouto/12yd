@@ -1,0 +1,5 @@
+LICENSE
+skills-lock.json
+uv.lock
+data/
+.agents/

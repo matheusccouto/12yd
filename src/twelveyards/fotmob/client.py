@@ -137,7 +137,11 @@ class FotMob:
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 404:
                     return None
-                raise  # Re-raise other errors
+                logger.warning("Failed league %s: %s", league_id, e)
+                return None
+            except Exception:  # noqa: BLE001
+                logger.warning("Failed league %s", league_id, exc_info=True)
+                return None
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             return [
@@ -217,17 +221,28 @@ class FotMob:
             ],
         )
 
-    @cache  # noqa: B019
     def get_matches(
         self,
         league_id: int,
         season: str,
         max_workers: int = 1,
         limit: int | None = None,
+        skip_ids: set[int] | None = None,
     ) -> list[Match]:
         """Get all match for a given league and season."""
         logger.info("Scraping matches for league %s season %s", league_id, season)
-        data = self.get(f"leagues/{league_id}", params={"season": season})["pageProps"]
+        try:
+            data = self.get(f"leagues/{league_id}", params={"season": season})[
+                "pageProps"
+            ]
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed fixtures for league %s season %s",
+                league_id,
+                season,
+                exc_info=True,
+            )
+            return []
         all_ids = [
             int(match["id"])
             for match in data["fixtures"]["allMatches"]
@@ -239,6 +254,15 @@ class FotMob:
         ]
         if limit is not None:
             all_ids = all_ids[:limit]
+        if skip_ids is not None:
+            kept_ids = [mid for mid in all_ids if mid not in skip_ids]
+            logger.info(
+                "Skipping %s already-scraped matches for league %s season %s",
+                len(all_ids) - len(kept_ids),
+                league_id,
+                season,
+            )
+            all_ids = kept_ids
 
         def get_match_safely(match_id: int) -> Match | None:
             try:
@@ -246,8 +270,12 @@ class FotMob:
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 404:  # noqa: PLR2004
                     return None
-                raise
+                logger.warning("Failed match %s: %s", match_id, e)
+                return None
             except NoShotsDataError:
+                return None
+            except Exception:  # noqa: BLE001
+                logger.warning("Failed match %s", match_id, exc_info=True)
                 return None
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
