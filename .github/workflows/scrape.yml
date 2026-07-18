@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  pipeline:
+  scrape:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -24,11 +24,9 @@ jobs:
 
       - run: uv sync --no-dev
 
-      - name: Fetch player penalty history
-        run: uv run scripts/scraper.py
+      - run: uv run scripts/scraper.py
 
-      - name: Commit and push artifacts
-        run: |
+      - run: |
             git add data/matches.jsonl
             git commit -m "[skip ci] refresh data artifacts"
             git push
