@@ -23,8 +23,8 @@ class Team(BaseModel):
 class Round(BaseModel):
     """Round."""
 
-    match: str
-    league: str
+    match: str | None = None
+    league: str | None = None
 
 
 class Score(BaseModel):

@@ -1,12 +1,20 @@
 """HTTP client for FotMob Next.js API."""
 
 import json
+import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
 from functools import cache
 from typing import Any
 
 import httpx
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential_jitter,
+)
 
 from .models import (
     League,
@@ -26,7 +34,10 @@ USER_AGENT: str = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
-HTTP_TIMEOUT_SECONDS: float = 15
+HTTP_TIMEOUT_SECONDS: float = 5.0
+
+
+logger = logging.getLogger(__name__)
 
 
 class FotMob:
@@ -40,6 +51,13 @@ class FotMob:
             follow_redirects=True,
             event_hooks={"response": [lambda r: r.raise_for_status()]},
         )
+        self._http.send = retry(
+            stop=stop_after_attempt(4),
+            wait=wait_exponential_jitter(initial=0.5, max=5.0, jitter=0.1),
+            retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.RequestError)),
+            before_sleep=before_sleep_log(logger, logging.WARNING),
+            reraise=True,
+        )(self._http.send)
 
     @property
     def build_id(self) -> str:
@@ -49,6 +67,7 @@ class FotMob:
         return self._build_id
 
     def _get_build_id(self) -> str:
+        logger.info("Discovering build ID")
         response = self._http.get(
             "https://www.fotmob.com/",
             headers={"User-Agent": USER_AGENT},
@@ -74,6 +93,7 @@ class FotMob:
     @cache  # noqa: B019
     def get_league(self, league_id: int) -> League:
         """Get details for a given league."""
+        logger.info("Scraping league %s", league_id)
         data = self.get(f"leagues/{league_id}")["pageProps"]
         return League(
             id=int(data["details"]["id"]),
@@ -84,11 +104,18 @@ class FotMob:
         )
 
     @cache  # noqa: B019
-    def get_leagues(self, max_workers: int = 1) -> list[League]:
+    def get_leagues(
+        self,
+        max_workers: int = 1,
+        limit: int | None = None,
+    ) -> list[League]:
         """Return the list of all leagues."""
+        logger.info("Scraping all leagues")
         data = self.get("")["pageProps"]
         mapping = data["fallback"]["/api/translationmapping?locale=en"]
         all_ids = list(mapping["TournamentTemplates"] | mapping["TournamentPrefixes"])
+        if limit is not None:
+            all_ids = all_ids[:limit]
 
         def get_league_safely(league_id: int) -> League | None:
             try:
@@ -108,6 +135,7 @@ class FotMob:
     @cache  # noqa: B019
     def get_match(self, match_id: int) -> list[Match]:
         """Get all match for a given league and season."""
+        logger.info("Scraping match %s", match_id)
         data = self.get(f"match/{match_id}")["pageProps"]
         return Match(
             id=int(data["general"]["matchId"]),
@@ -121,8 +149,8 @@ class FotMob:
                 name=data["general"]["awayTeam"]["name"],
             ),
             round=Round(
-                match=data["general"]["matchRound"],
-                league=data["general"]["leagueRoundName"],
+                match=data["general"].get("matchRound"),
+                league=data["general"].get("leagueRoundName"),
             ),
             start_at=data["general"]["matchTimeUTCDate"],
             status=Status(
@@ -179,10 +207,14 @@ class FotMob:
         league_id: int,
         season: str,
         max_workers: int = 1,
+        limit: int | None = None,
     ) -> list[Match]:
         """Get all match for a given league and season."""
+        logger.info("Scraping matches for league %s season %s", league_id, season)
         data = self.get(f"leagues/{league_id}", params={"season": season})["pageProps"]
         all_ids = [int(x["id"]) for x in data["fixtures"]["allMatches"]]
+        if limit is not None:
+            all_ids = all_ids[:limit]
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             return [
