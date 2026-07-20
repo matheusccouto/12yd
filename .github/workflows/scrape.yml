@@ -24,7 +24,7 @@ jobs:
 
       - run: uv sync --no-dev
 
-      - run: uv run scripts/scraper.py
+      - run: uv run scripts/scraper.py --timeout-minutes 60
 
       - run: |
             git add data/matches.jsonl
