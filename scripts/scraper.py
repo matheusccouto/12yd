@@ -43,7 +43,11 @@ def main(timeout_minutes: int) -> None:
                     max_workers=1,
                     skip_ids=skip_ids,
                 ):
+                    if datetime.now(tz=UTC) > deadline:
+                        logger.warning("Timeout after %s minutes", timeout_minutes)
+                        return
                     f.write(match.model_dump_json() + "\n")
+                    f.flush()
                     skip_ids.add(match.id)
 
 

@@ -28,5 +28,5 @@ jobs:
 
       - run: |
             git add data/matches.jsonl
-            git commit -m "[skip ci] refresh data artifacts"
+            git commit -m "[skip ci] refresh data artifacts" || true
             git push

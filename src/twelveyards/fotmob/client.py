@@ -3,7 +3,8 @@
 import json
 import logging
 import re
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from functools import cache
 from typing import Any
@@ -228,8 +229,8 @@ class FotMob:
         max_workers: int = 1,
         limit: int | None = None,
         skip_ids: set[int] | None = None,
-    ) -> list[Match]:
-        """Get all match for a given league and season."""
+    ) -> Iterator[Match]:
+        """Yield matches for a given league and season."""
         logger.info("Scraping matches for league %s season %s", league_id, season)
         try:
             data = self.get(f"leagues/{league_id}", params={"season": season})[
@@ -242,7 +243,7 @@ class FotMob:
                 season,
                 exc_info=True,
             )
-            return []
+            return
         all_ids = [
             int(match["id"])
             for match in data["fixtures"]["allMatches"]
@@ -279,8 +280,12 @@ class FotMob:
                 return None
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            return [
-                result
-                for result in executor.map(get_match_safely, all_ids)
-                if result is not None
-            ]
+            futures = {executor.submit(get_match_safely, mid): mid for mid in all_ids}
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+                except Exception:  # noqa: BLE001
+                    logger.warning("Failed match future", exc_info=True)
+                    continue
+                if result is not None:
+                    yield result
