@@ -110,7 +110,7 @@ group = df_pen.set_index("start_at").groupby(
 
 # 5-year rolling window per kicker [T - 5y, T); closed="left" excludes the
 # current kick so the side never leaks into the features.
-roll = (
+roll_5y = (
     pd.concat(
         {
             "attempts_5y": group["is_goal"].rolling("1825D", closed="left").count(),
@@ -125,6 +125,22 @@ roll = (
     .reset_index(drop=True)
 )
 
+# 1-year rolling window per kicker [T - 1y, T); same closed="left" convention.
+roll_1y = (
+    pd.concat(
+        {
+            "attempts_1y": group["is_goal"].rolling("365D", closed="left").count(),
+            "left_1y": group["shot_left"].rolling("365D", closed="left").sum(),
+            "center_1y": group["shot_center"].rolling("365D", closed="left").sum(),
+            "right_1y": group["shot_right"].rolling("365D", closed="left").sum(),
+            "goals_1y": group["is_goal"].rolling("365D", closed="left").sum(),
+        },
+        axis=1,
+    )
+    .assign(conversion_1y=lambda x: x["goals_1y"] / x["attempts_1y"])
+    .reset_index(drop=True)
+)
+
 # Side the kicker took on their immediately previous penalty (one-hot). First
 # kick of each kicker -> all-zero row (identified by absent history).
 last_side = pd.get_dummies(
@@ -133,7 +149,7 @@ last_side = pd.get_dummies(
     dtype="Int64",
 ).reset_index(drop=True)
 
-df_pen = df_pen.assign(**roll, **last_side)
+df_pen = df_pen.assign(**roll_5y, **roll_1y, **last_side)
 
 df_pen.head()
 
@@ -167,6 +183,11 @@ FEATURES = [
     "center_5y",
     "right_5y",
     "conversion_5y",
+    "attempts_1y",
+    "left_1y",
+    "center_1y",
+    "right_1y",
+    "conversion_1y",
     "last_side_left",
     "last_side_center",
     "last_side_right",
