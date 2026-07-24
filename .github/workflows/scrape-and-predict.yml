@@ -11,7 +11,6 @@ permissions:
 jobs:
   scrape-and-predict:
     runs-on: ubuntu-latest
-    timeout-minutes: 200
     steps:
       - uses: actions/checkout@v6
 
