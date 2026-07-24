@@ -7,7 +7,7 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from functools import cache
-from typing import Any
+from typing import Any, cast
 
 import httpx
 from tenacity import (
@@ -49,7 +49,7 @@ class NoShotsDataError(Exception):
 
 
 class FotMob:
-    """FotMob Next.js API client."""
+    """FotMob scraper client handling caching and concurrency."""
 
     def __init__(self, timeout: float = HTTP_TIMEOUT_SECONDS) -> None:
         """Create a FotMob client with connection pool."""
@@ -60,44 +60,40 @@ class FotMob:
             event_hooks={"response": [lambda r: r.raise_for_status()]},
         )
 
-        def is_transient_error(exception: Exception) -> bool:
+        def is_transient_error(exception: BaseException) -> bool:
             if isinstance(exception, httpx.HTTPStatusError):
                 return exception.response.status_code in (429, 500, 502, 503, 504)
             return isinstance(exception, httpx.RequestError)
 
         # Wrap the HTTP client's send method with a retry strategy for transient errors
-        self._http.send = retry(
+        retried_send: Any = retry(
             stop=stop_after_attempt(4),
             wait=wait_exponential_jitter(initial=0.5, max=5.0, jitter=0.1),
             retry=retry_if_exception(is_transient_error),
             before_sleep=before_sleep_log(logger, logging.WARNING),
             reraise=True,
         )(self._http.send)
+        self._http.send = retried_send
 
     @property
     def build_id(self) -> str:
-        """Lazily discover and return the current FotMob Next.js build ID."""
-        if self._build_id is None:
-            self._build_id = self._get_build_id()
-        return self._build_id
-
-    def _get_build_id(self) -> str:
-        logger.info("Discovering build ID")
-        response = self._http.get(
+        """Lazily fetch buildId from the homepage HTML once per client lifecycle."""
+        if self._build_id is not None:
+            return self._build_id
+        r = self._http.get(
             "https://www.fotmob.com/",
             headers={"User-Agent": USER_AGENT},
         )
         match = re.search(
-            pattern=r'<script id="__NEXT_DATA__"[^>]*>(.+?)</script>',
-            string=response.text,
-            flags=re.DOTALL,
+            r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
+            r.text,
         )
         if match is None:
             msg = "Could not find __NEXT_DATA__ script tag on FotMob homepage"
             raise RuntimeError(msg)
         return str(json.loads(match.group(1))["buildId"])
 
-    def get(self, path: str, params: dict[str, str] | None = None) -> Any:
+    def get(self, path: str, params: dict[str, str] | None = None) -> object:
         """Fetch a Next.js JSON data route and return raw parsed JSON."""
         return self._http.get(
             f"https://www.fotmob.com/_next/data/{self.build_id}/{path}.json",
@@ -109,7 +105,8 @@ class FotMob:
     def get_league(self, league_id: int) -> League:
         """Get details for a given league."""
         logger.info("Scraping league %s", league_id)
-        data = self.get(f"leagues/{league_id}")["pageProps"]
+        raw_data = self.get(f"leagues/{league_id}")
+        data = cast("dict[str, Any]", raw_data)["pageProps"]
         return League(
             id=int(data["details"]["id"]),
             name=data["details"]["name"],
@@ -126,7 +123,8 @@ class FotMob:
     ) -> list[League]:
         """Return the list of all leagues."""
         logger.info("Scraping all leagues")
-        data = self.get("")["pageProps"]
+        raw_data = self.get("")
+        data = cast("dict[str, Any]", raw_data)["pageProps"]
         mapping = data["fallback"]["/api/translationmapping?locale=en"]
         all_ids = list(mapping["TournamentTemplates"] | mapping["TournamentPrefixes"])
         if limit is not None:
@@ -136,7 +134,7 @@ class FotMob:
             try:
                 return self.get_league(league_id)
             except httpx.HTTPStatusError as e:
-                if e.response.status_code == 404:
+                if e.response.status_code == 404:  # noqa: PLR2004
                     return None
                 logger.warning("Failed league %s: %s", league_id, e)
                 return None
@@ -155,7 +153,8 @@ class FotMob:
     def get_match(self, match_id: int) -> Match:
         """Get all match for a given league and season."""
         logger.info("Scraping match %s", match_id)
-        data = self.get(f"match/{match_id}")["pageProps"]
+        raw_data = self.get(f"match/{match_id}")
+        data = cast("dict[str, Any]", raw_data)["pageProps"]
         if not data["content"]["shotmap"]["shots"]:
             raise NoShotsDataError
         return Match(
@@ -222,28 +221,14 @@ class FotMob:
             ],
         )
 
-    def get_matches(
-        self,
+    @staticmethod
+    def _filter_match_ids(
+        data: dict[str, Any],
+        limit: int | None,
+        skip_ids: set[int] | None,
         league_id: int,
         season: str,
-        max_workers: int = 1,
-        limit: int | None = None,
-        skip_ids: set[int] | None = None,
-    ) -> Iterator[Match]:
-        """Yield matches for a given league and season."""
-        logger.info("Scraping matches for league %s season %s", league_id, season)
-        try:
-            data = self.get(f"leagues/{league_id}", params={"season": season})[
-                "pageProps"
-            ]
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "Failed fixtures for league %s season %s",
-                league_id,
-                season,
-                exc_info=True,
-            )
-            return
+    ) -> list[int]:
         all_ids = [
             int(match["id"])
             for match in data["fixtures"]["allMatches"]
@@ -263,7 +248,31 @@ class FotMob:
                 league_id,
                 season,
             )
-            all_ids = kept_ids
+            return kept_ids
+        return all_ids
+
+    def get_matches(
+        self,
+        league_id: int,
+        season: str,
+        max_workers: int = 1,
+        limit: int | None = None,
+        skip_ids: set[int] | None = None,
+    ) -> Iterator[Match]:
+        """Yield matches for a given league and season."""
+        logger.info("Scraping matches for league %s season %s", league_id, season)
+        try:
+            raw_data = self.get(f"leagues/{league_id}", params={"season": season})
+            data = cast("dict[str, Any]", raw_data)["pageProps"]
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed fixtures for league %s season %s",
+                league_id,
+                season,
+                exc_info=True,
+            )
+            return
+        all_ids = self._filter_match_ids(data, limit, skip_ids, league_id, season)
 
         def get_match_safely(match_id: int) -> Match | None:
             try:

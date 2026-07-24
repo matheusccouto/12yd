@@ -1,0 +1,42 @@
+name: scrape-and-predict
+
+on:
+  schedule:
+    - cron: "0 3 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  scrape-and-predict:
+    runs-on: ubuntu-latest
+    timeout-minutes: 200
+    steps:
+      - uses: actions/checkout@v6
+
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+
+      - run: uv sync --no-dev
+
+      - run: uv run scripts/scraper.py --timeout-minutes 180
+
+      - run: |
+          git add data/matches.jsonl
+          git commit -m "[skip ci] refresh scraped matches" || true
+          git push
+
+      - run: uv run scripts/predict.py
+        env:
+          PRIOR_LABS_API_KEY: ${{ secrets.PRIOR_LABS_API_KEY }}
+
+      - run: |
+          git add data/predictions.jsonl
+          git commit -m "[skip ci] refresh predictions" || true
+          git push
