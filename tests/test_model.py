@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 from scripts.predict import FEATURES, PredictionRow, prepare_features, run_pipeline
+from twelveyards.fotmob.models import Player, Position
 
 
 def test_prepare_features_with_existing_matches() -> None:
@@ -159,3 +160,25 @@ def test_na_player_name_and_team_handling() -> None:
         else:
             assert name == "Known Player"
             assert team_id == 10
+
+
+def test_player_model_kicking_foot() -> None:
+    """Test Player model with kicking_foot field."""
+    player_default = Player(
+        id=1,
+        name="Player 1",
+        position=Position(id=1),
+        age=25,
+        market_value=1000000.0,
+    )
+    assert player_default.kicking_foot is None
+
+    player_left = Player(
+        id=2,
+        name="Player 2",
+        position=Position(id=2),
+        age=30,
+        market_value=2000000.0,
+        kicking_foot="left",
+    )
+    assert player_left.kicking_foot == "left"

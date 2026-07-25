@@ -29,3 +29,12 @@ def test_raise_no_shot_data() -> None:
     client = FotMob()
     with pytest.raises(NoShotsDataError):
         client.get_match(3118355)
+
+
+def test_get_player() -> None:
+    """Test getting a player by ID."""
+    client = FotMob()
+    player = client.get_player(30981)
+    assert player.id == 30981
+    assert player.name == "Lionel Messi"
+    assert player.kicking_foot == "left"

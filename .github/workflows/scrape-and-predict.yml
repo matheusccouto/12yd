@@ -24,11 +24,25 @@ jobs:
 
       - run: uv sync --no-dev
 
-      - run: uv run scripts/scraper.py --timeout-minutes 180
+      - run: uv run scripts/scraper.py seasons data/seasons.jsonl --timeout-minutes 15
+
+      - run: |
+          git add data/seasons.jsonl
+          git commit -m "[skip ci] refresh scraped seasons" || true
+          git push
+
+      - run: uv run scripts/scraper.py matches data/seasons.jsonl data/matches.jsonl --timeout-minutes 180
 
       - run: |
           git add data/matches.jsonl
           git commit -m "[skip ci] refresh scraped matches" || true
+          git push
+
+      - run: uv run scripts/scraper.py players data/matches.jsonl data/players.jsonl --timeout-minutes 180
+
+      - run: |
+          git add data/players.jsonl
+          git commit -m "[skip ci] refresh scraped players" || true
           git push
 
       - run: uv run scripts/predict.py

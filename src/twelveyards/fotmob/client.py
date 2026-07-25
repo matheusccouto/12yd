@@ -116,6 +116,27 @@ class FotMob:
         )
 
     @cache  # noqa: B019
+    def get_player(self, player_id: int) -> Player:
+        """Get details for a given player."""
+        logger.info("Scraping player %s", player_id)
+        raw_data = self.get(f"players/{player_id}")
+        data = cast("dict[str, Any]", raw_data)["pageProps"].get("data") or {}
+        foot = None
+        for item in data.get("playerInformation") or []:
+            if item.get("translationKey") == "preferred_foot":
+                foot = item["value"]["key"]
+        return Player(
+            id=int(data.get("id") or player_id),
+            name=data.get("name") or f"Player {player_id}",
+            position=Position(
+                id=(data.get("primaryTeam") or {}).get("positionId"),
+            ),
+            age=data.get("age"),
+            market_value=None,
+            kicking_foot=foot,
+        )
+
+    @cache  # noqa: B019
     def get_leagues(
         self,
         max_workers: int = 1,

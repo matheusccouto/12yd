@@ -80,6 +80,7 @@ class Player(BaseModel):
     position: Position
     age: int | None
     market_value: float | None
+    kicking_foot: str | None = None
 
 
 class Shot(BaseModel):

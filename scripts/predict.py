@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 ROOT_DIR = Path(__file__).parent.parent
 DATA_DIR = ROOT_DIR / "data"
 MATCHES_PATH = DATA_DIR / "matches.jsonl"
+PLAYERS_PATH = DATA_DIR / "players.jsonl"
 PREDICTIONS_PATH = DATA_DIR / "predictions.jsonl"
 
 # Training floor is 5 years after the scrape floor
@@ -255,10 +256,18 @@ def prepare_features(matches_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     df_combined = df_combined.assign(**roll_5y, **roll_1y, **last_side)
 
     # Join player attributes
-    meta_cols = [
-        "player_id",
-        "player_name",
-    ]
+    players_df = pd.read_json(PLAYERS_PATH, lines=True)
+    if not players_df.empty:
+        player_meta = player_meta.merge(
+            players_df[["id", "kicking_foot"]].rename(columns={"id": "player_id"}),
+            on="player_id",
+            how="left",
+        )
+
+    meta_cols = ["player_id", "player_name"]
+    if "kicking_foot" in player_meta.columns:
+        meta_cols.append("kicking_foot")
+
     df_combined = df_combined.merge(
         player_meta[meta_cols],
         on="player_id",
@@ -330,6 +339,9 @@ def run_pipeline(matches_path: Path, output_path: Path) -> list[PredictionRow]:
         p_right = float(probas[i, idx_r])
         tot = int(total_penalties_series.get(pid, 1))
 
+        raw_foot = row.get("kicking_foot")
+        kicking_foot = str(raw_foot) if pd.notna(raw_foot) and raw_foot else None
+
         photo_url = f"https://images.fotmob.com/image_resources/playerimages/{pid}.png"
         pred = PredictionRow(
             player_id=pid,
@@ -337,7 +349,7 @@ def run_pipeline(matches_path: Path, output_path: Path) -> list[PredictionRow]:
             short_name=name,
             team_id=team_id,
             team_name=f"Team {team_id}",
-            kicking_foot=None,
+            kicking_foot=kicking_foot,
             photo_url=photo_url,
             total_penalties=tot,
             p_left=p_left,
