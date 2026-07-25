@@ -14,7 +14,7 @@ from typing import Any
 import click
 import pandas as pd
 import tabpfn_client
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from tabpfn_client import TabPFNClassifier
 
 from twelveyards.fotmob.client import FLOOR_DATETIME
@@ -44,10 +44,6 @@ FEATURES = [
     "last_side_left",
     "last_side_center",
     "last_side_right",
-    "player_age",
-    "player_market_value",
-    "market_value_known",
-    "player_position_id",
 ]
 
 
@@ -62,11 +58,9 @@ class PredictionRow(BaseModel):
     kicking_foot: str | None = None
     photo_url: str
     total_penalties: int
-    p_l: float = Field(alias="p_L")
-    p_c: float = Field(alias="p_C")
-    p_r: float = Field(alias="p_R")
-
-    model_config = {"populate_by_name": True}
+    p_left: float
+    p_center: float
+    p_right: float
 
 
 def prepare_features(matches_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -132,12 +126,12 @@ def prepare_features(matches_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     # Normalize penalty shot outcome & target side
     df_pen = df_pen.assign(
         is_goal=df_pen["outcome"].eq("Goal").astype("Int64"),
-        shot_x_normalized=df_pen["shot_x"] * df_pen["shot_zoom"],
+        shot_x_normalized=1.0 + (df_pen["shot_x"] - 1.0) / df_pen["shot_zoom"],
     )
 
     side_bins = pd.cut(
         df_pen["shot_x_normalized"],
-        bins=[0.0, 2 / 3, 4 / 3, 2.0],
+        bins=[-float("inf"), 2 / 3, 4 / 3, float("inf")],
         labels=["left", "center", "right"],
         right=False,
     )
@@ -197,10 +191,22 @@ def prepare_features(matches_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
         pd.concat(
             {
                 "attempts_5y": group["is_goal"].rolling("1825D", closed="left").count(),
-                "left_5y": group["shot_left"].rolling("1825D", closed="left").sum(),
-                "center_5y": group["shot_center"].rolling("1825D", closed="left").sum(),
-                "right_5y": group["shot_right"].rolling("1825D", closed="left").sum(),
-                "goals_5y": group["is_goal"].rolling("1825D", closed="left").sum(),
+                "left_5y": group["shot_left"]
+                .rolling("1825D", closed="left")
+                .sum()
+                .fillna(0),
+                "center_5y": group["shot_center"]
+                .rolling("1825D", closed="left")
+                .sum()
+                .fillna(0),
+                "right_5y": group["shot_right"]
+                .rolling("1825D", closed="left")
+                .sum()
+                .fillna(0),
+                "goals_5y": group["is_goal"]
+                .rolling("1825D", closed="left")
+                .sum()
+                .fillna(0),
             },
             axis=1,
         )
@@ -215,10 +221,22 @@ def prepare_features(matches_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
         pd.concat(
             {
                 "attempts_1y": group["is_goal"].rolling("365D", closed="left").count(),
-                "left_1y": group["shot_left"].rolling("365D", closed="left").sum(),
-                "center_1y": group["shot_center"].rolling("365D", closed="left").sum(),
-                "right_1y": group["shot_right"].rolling("365D", closed="left").sum(),
-                "goals_1y": group["is_goal"].rolling("365D", closed="left").sum(),
+                "left_1y": group["shot_left"]
+                .rolling("365D", closed="left")
+                .sum()
+                .fillna(0),
+                "center_1y": group["shot_center"]
+                .rolling("365D", closed="left")
+                .sum()
+                .fillna(0),
+                "right_1y": group["shot_right"]
+                .rolling("365D", closed="left")
+                .sum()
+                .fillna(0),
+                "goals_1y": group["is_goal"]
+                .rolling("365D", closed="left")
+                .sum()
+                .fillna(0),
             },
             axis=1,
         )
@@ -240,23 +258,12 @@ def prepare_features(matches_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     meta_cols = [
         "player_id",
         "player_name",
-        "player_age",
-        "player_market_value",
-        "player_position_id",
     ]
     df_combined = df_combined.merge(
         player_meta[meta_cols],
         on="player_id",
         how="left",
     )
-
-    df_combined = df_combined.assign(
-        market_value_known=df_combined["player_market_value"].notna().astype("Int64"),
-        player_market_value=df_combined["player_market_value"].fillna(0.0),
-        player_age=df_combined["player_age"].fillna(25).astype("float64"),
-        player_position_id=df_combined["player_position_id"].fillna(0).astype("int64"),
-    )
-
     # Separate training set and prediction set
     df_train = (
         df_combined.loc[
@@ -318,9 +325,9 @@ def run_pipeline(matches_path: Path, output_path: Path) -> list[PredictionRow]:
         name = str(raw_name) if pd.notna(raw_name) and raw_name else f"Player {pid}"
         raw_team = row.get("team_id")
         team_id = int(raw_team) if pd.notna(raw_team) and raw_team else 0
-        p_l = float(probas[i, idx_l])
-        p_c = float(probas[i, idx_c])
-        p_r = float(probas[i, idx_r])
+        p_left = float(probas[i, idx_l])
+        p_center = float(probas[i, idx_c])
+        p_right = float(probas[i, idx_r])
         tot = int(total_penalties_series.get(pid, 1))
 
         photo_url = f"https://images.fotmob.com/image_resources/playerimages/{pid}.png"
@@ -333,16 +340,16 @@ def run_pipeline(matches_path: Path, output_path: Path) -> list[PredictionRow]:
             kicking_foot=None,
             photo_url=photo_url,
             total_penalties=tot,
-            p_L=p_l,
-            p_C=p_c,
-            p_R=p_r,
+            p_left=p_left,
+            p_center=p_center,
+            p_right=p_right,
         )
         results.append(pred)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as f:
         for r in results:
-            f.write(r.model_dump_json(by_alias=True) + "\n")
+            f.write(r.model_dump_json() + "\n")
 
     return results
 

@@ -72,12 +72,12 @@ class KickerPrediction:
     short_name: str
     team_id: int
     team_name: str
-    kicking_foot: str
+    kicking_foot: str | None
     photo_url: str
     total_penalties: int
-    p_L: float  # noqa: N815
-    p_C: float  # noqa: N815
-    p_R: float  # noqa: N815
+    p_left: float
+    p_center: float
+    p_right: float
     recommended_dive: str
 
 
@@ -112,10 +112,10 @@ def predictions_for_match(
             kicking_foot=r.kicking_foot,
             photo_url=r.photo_url,
             total_penalties=r.total_penalties,
-            p_L=r.p_L,
-            p_C=r.p_C,
-            p_R=r.p_R,
-            recommended_dive=recommended_dive(r.p_L, r.p_C, r.p_R),
+            p_left=r.p_left,
+            p_center=r.p_center,
+            p_right=r.p_right,
+            recommended_dive=recommended_dive(r.p_left, r.p_center, r.p_right),
         )
         if r.team_id == home_team_id:
             home_rows.append(pred)
@@ -126,10 +126,10 @@ def predictions_for_match(
     return home_rows, away_rows
 
 
-def recommended_dive(p_l: float, p_c: float, p_r: float) -> str:
+def recommended_dive(p_left: float, p_center: float, p_right: float) -> str:
     """Return the side the kicker is least likely to aim for."""
-    minimum = min(p_l, p_c, p_r)
-    for side, value in (("L", p_l), ("C", p_c), ("R", p_r)):
+    minimum = min(p_left, p_center, p_right)
+    for side, value in (("L", p_left), ("C", p_center), ("R", p_right)):
         if value == minimum:
             return side
     return "L"
@@ -152,8 +152,10 @@ def badge_color(team_name: str) -> _BadgeColor:
     return _TEAM_COLORS.get(team_name, _NEUTRAL_COLOR)
 
 
-def foot_label(kicking_foot: str) -> str:
+def foot_label(kicking_foot: str | None) -> str:
     """Return a short label for the foot pill."""
+    if not kicking_foot:
+        return ""
     foot = kicking_foot.strip().lower()
     if foot == "right":
         return "R"
@@ -164,8 +166,10 @@ def foot_label(kicking_foot: str) -> str:
     return ""
 
 
-def foot_color(kicking_foot: str) -> _BadgeColor:
+def foot_color(kicking_foot: str | None) -> _BadgeColor:
     """Return the theme color associated with a kicking foot."""
+    if not kicking_foot:
+        return "gray"
     foot = kicking_foot.strip().lower()
     if foot == "right":
         return "blue"
@@ -201,7 +205,13 @@ def render_card(kicker: KickerPrediction) -> None:
         else:
             st.markdown(f"**{kicker.player_name}** · {kicker.total_penalties} pen")
         df = pd.DataFrame(
-            {"probability": [kicker.p_L * 100, kicker.p_C * 100, kicker.p_R * 100]},
+            {
+                "probability": [
+                    kicker.p_left * 100,
+                    kicker.p_center * 100,
+                    kicker.p_right * 100,
+                ],
+            },
             index=pd.Index(["Left", "Center", "Right"]),
         )
         st.bar_chart(df, sort=False, height=180)
