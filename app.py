@@ -18,7 +18,15 @@ if TYPE_CHECKING:
 PREDICTIONS_PATH: Path = Path("data/predictions.jsonl")
 
 _BadgeColor = Literal[
-    "red", "orange", "yellow", "blue", "green", "violet", "gray", "grey", "primary",
+    "red",
+    "orange",
+    "yellow",
+    "blue",
+    "green",
+    "violet",
+    "gray",
+    "grey",
+    "primary",
 ]
 
 _TEAM_COLORS: dict[str, _BadgeColor] = {
@@ -82,9 +90,7 @@ def load_predictions() -> list[PredictionRow]:
         return []
     with path.open(encoding="utf-8") as f:
         return [
-            PredictionRow.model_validate(json.loads(line))
-            for line in f
-            if line.strip()
+            PredictionRow.model_validate(json.loads(line)) for line in f if line.strip()
         ]
 
 
@@ -238,7 +244,9 @@ def main() -> None:
 
     predictions = _cached_load_predictions()
     home_kickers, away_kickers = predictions_for_match(
-        predictions, team_a_id, team_b_id,
+        predictions,
+        team_a_id,
+        team_b_id,
     )
 
     if not home_kickers and not away_kickers:

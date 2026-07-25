@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pandas as pd
+
 from scripts.predict import PredictionRow, prepare_features
 
 
@@ -60,3 +62,27 @@ def test_prediction_row_schema() -> None:
     dump = row.model_dump_json(by_alias=True)
     assert '"p_L":0.4' in dump
     assert '"kicking_foot":null' in dump
+
+
+def test_na_player_name_and_team_handling() -> None:
+    """Ensure pd.NA in player_name or team_id does not raise TypeError."""
+    df = pd.DataFrame(
+        [
+            {"player_id": 123, "player_name": pd.NA, "team_id": pd.NA},
+            {"player_id": 456, "player_name": "Known Player", "team_id": 10},
+        ],
+    )
+
+    for _i, row in df.iterrows():
+        pid = int(row["player_id"])
+        raw_name = row.get("player_name")
+        name = str(raw_name) if pd.notna(raw_name) and raw_name else f"Player {pid}"
+        raw_team = row.get("team_id")
+        team_id = int(raw_team) if pd.notna(raw_team) and raw_team else 0
+
+        if pid == 123:
+            assert name == "Player 123"
+            assert team_id == 0
+        else:
+            assert name == "Known Player"
+            assert team_id == 10

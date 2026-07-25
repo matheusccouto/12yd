@@ -126,10 +126,7 @@ def prepare_features(matches_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
 
     # Pick representative metadata per player across matches
     player_meta = (
-        df_player.sort_values("match_id")
-        .groupby("player_id")
-        .last()
-        .reset_index()
+        df_player.sort_values("match_id").groupby("player_id").last().reset_index()
     )
 
     # Normalize penalty shot outcome & target side
@@ -261,15 +258,19 @@ def prepare_features(matches_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     )
 
     # Separate training set and prediction set
-    df_train = df_combined.loc[
-        (~df_combined["is_prediction_dummy"])
-        & (df_combined["start_at"] >= TRAIN_FLOOR)
-        & df_combined["side"].notna(),
-    ].dropna(subset=FEATURES).reset_index(drop=True)
+    df_train = (
+        df_combined.loc[
+            (~df_combined["is_prediction_dummy"])
+            & (df_combined["start_at"] >= TRAIN_FLOOR)
+            & df_combined["side"].notna(),
+        ]
+        .dropna(subset=FEATURES)
+        .reset_index(drop=True)
+    )
 
-    df_predict = df_combined.loc[
-        df_combined["is_prediction_dummy"]
-    ].reset_index(drop=True)
+    df_predict = df_combined.loc[df_combined["is_prediction_dummy"]].reset_index(
+        drop=True,
+    )
 
     return df_train, df_predict
 
@@ -313,8 +314,10 @@ def run_pipeline(matches_path: Path, output_path: Path) -> list[PredictionRow]:
 
     for i, row in df_predict.iterrows():
         pid = int(row["player_id"])
-        name = str(row.get("player_name") or f"Player {pid}")
-        team_id = int(row.get("team_id") or 0)
+        raw_name = row.get("player_name")
+        name = str(raw_name) if pd.notna(raw_name) and raw_name else f"Player {pid}"
+        raw_team = row.get("team_id")
+        team_id = int(raw_team) if pd.notna(raw_team) and raw_team else 0
         p_l = float(probas[i, idx_l])
         p_c = float(probas[i, idx_c])
         p_r = float(probas[i, idx_r])
