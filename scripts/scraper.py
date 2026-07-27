@@ -57,26 +57,67 @@ def seasons(output_path: Path, timeout_minutes: int) -> None:
                 skip_keys.add(key)
 
 
+def _parse_season_end_year(season: str | int) -> int:
+    part = str(season).split("/")[1] if "/" in str(season) else str(season)
+    return int(part.split()[0])
+
+
+def _load_existing_matches(
+    output_path: Path,
+) -> tuple[set[int], set[int]]:
+    skip_ids: set[int] = set()
+    scraped_leagues: set[int] = set()
+    if output_path.exists():
+        with output_path.open(encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                m = json.loads(line)
+                skip_ids.add(int(m["id"]))
+                if "league_id" in m:
+                    scraped_leagues.add(int(m["league_id"]))
+    return skip_ids, scraped_leagues
+
+
 @cli.command()
 @click.argument("seasons_path", type=click.Path(exists=True, path_type=Path))
 @click.argument("output_path", type=click.Path(path_type=Path))
 @click.option("--timeout-minutes", required=True, type=int, help="Max minutes.")
-def matches(seasons_path: Path, output_path: Path, timeout_minutes: int) -> None:
+@click.option(
+    "--all-seasons",
+    is_flag=True,
+    help="Force checking all historical seasons.",
+)
+def matches(
+    seasons_path: Path,
+    output_path: Path,
+    timeout_minutes: int,
+    all_seasons: bool = False,  # noqa: FBT001, FBT002
+) -> None:
     """Scrape matches for given seasons into matches.jsonl."""
     deadline = datetime.now(tz=UTC) + timedelta(minutes=timeout_minutes)
     client = FotMob()
 
-    with output_path.open(encoding="utf-8") as f:
-        skip_ids = {json.loads(line)["id"] for line in f if line.strip()}
+    skip_ids, scraped_leagues = _load_existing_matches(output_path)
 
     with seasons_path.open(encoding="utf-8") as f:
         league_seasons = [json.loads(line) for line in f if line.strip()]
+
+    current_year = datetime.now(tz=UTC).year
 
     with output_path.open("a", encoding="utf-8") as f:
         for item in league_seasons:
             if datetime.now(tz=UTC) > deadline:
                 logger.warning("Timeout after %s minutes", timeout_minutes)
                 return
+
+            if not all_seasons:
+                end_year = _parse_season_end_year(str(item["season"]))
+                if end_year < current_year:
+                    continue
+                if scraped_leagues and int(item["league_id"]) not in scraped_leagues:
+                    continue
+
             for match in client.get_matches(
                 item["league_id"],
                 item["season"],
