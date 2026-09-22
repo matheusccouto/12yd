@@ -3755,3 +3755,6 @@
 {"league_id": 8870, "league_name": "Championship", "gender": "male", "season": "2026"}
 {"league_id": 10056, "league_name": "Liga 2", "gender": "male", "season": "2026/2027"}
 {"league_id": 11017, "league_name": "QSL Cup", "gender": "male", "season": "2026/2027"}
+{"league_id": 137, "league_name": "Scottish Cup", "gender": "male", "season": "2026/2027"}
+{"league_id": 11020, "league_name": "SWF Scottish Cup", "gender": "female", "season": "2026/2027"}
+{"league_id": 11021, "league_name": "Copa Libertadores Femenina", "gender": "female", "season": "2026"}
